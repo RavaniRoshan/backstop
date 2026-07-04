@@ -27,14 +27,44 @@ def request_metadata(request: httpx.Request, config: BackstopConfig) -> RequestM
     )
 
 
-def estimate_tokens(body: Any, raw: bytes, config: BackstopConfig) -> int:
+def estimate_tokens(body: Any, raw: bytes, config: BackstopConfig, endpoint: str = "") -> int:
     if body is None:
         return max(1, int(len(raw) / config.chars_per_token))
+
+    if "/v1/messages" in endpoint and isinstance(body, Mapping):
+        return _estimate_anthropic_tokens(body, raw, config)
 
     prompt_chars = _prompt_chars(body)
     output_tokens = _configured_output_tokens(body, config)
     body_floor = int(len(raw) / config.chars_per_token)
     prompt_tokens = int(prompt_chars / config.chars_per_token)
+    return max(1, prompt_tokens + output_tokens, body_floor)
+
+
+def _estimate_anthropic_tokens(body: dict, raw: bytes, config: BackstopConfig) -> int:
+    messages = body.get("messages", [])
+    prompt_chars = 0
+    for msg in messages:
+        content = msg.get("content", "")
+        if isinstance(content, str):
+            prompt_chars += len(content)
+        elif isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    prompt_chars += len(block.get("text", ""))
+
+    system = body.get("system")
+    if isinstance(system, str):
+        prompt_chars += len(system)
+    elif isinstance(system, list):
+        for block in system:
+            if isinstance(block, dict) and block.get("type") == "text":
+                prompt_chars += len(block.get("text", ""))
+
+    output_tokens = body.get("max_tokens", config.default_max_output_tokens)
+
+    prompt_tokens = int(prompt_chars / config.chars_per_token)
+    body_floor = int(len(raw) / config.chars_per_token)
     return max(1, prompt_tokens + output_tokens, body_floor)
 
 
@@ -62,6 +92,14 @@ def response_usage_tokens(response: httpx.Response) -> int | None:
         usage.get("completion_tokens"),
         usage.get("completion_token_count"),
     )
+
+    cache_creation = usage.get("cache_creation_input_tokens")
+    cache_read = usage.get("cache_read_input_tokens")
+    if isinstance(cache_creation, int) and cache_creation > 0:
+        input_tokens = (input_tokens or 0) + cache_creation
+    if isinstance(cache_read, int) and cache_read > 0:
+        input_tokens = (input_tokens or 0) + cache_read
+
     if input_tokens is None and output_tokens is None:
         return None
     return (input_tokens or 0) + (output_tokens or 0)

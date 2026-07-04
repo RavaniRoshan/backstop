@@ -1,31 +1,67 @@
-# Backstop
+<div align="center">
+  <h1>Backstop</h1>
+  <p>
+    <strong>In-process AI SDK backpressure, budgets, retries, circuit breaking, and metrics</strong>
+  </p>
+  <p>
+    <a href="#features">Features</a> •
+    <a href="#install">Install</a> •
+    <a href="#usage">Usage</a> •
+    <a href="#cli">CLI</a> •
+    <a href="#metrics">Metrics</a> •
+    <a href="#tests">Tests</a>
+  </p>
+  <p>
+    <img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python 3.10+" />
+    <img src="https://img.shields.io/badge/license-MIT-green" alt="License MIT" />
+  </p>
+</div>
 
-Backstop wraps OpenAI Python SDK clients with in-process controls for:
+Backstop wraps OpenAI and Anthropic Python SDK clients with in-process controls for safe, predictable AI API usage — token budgeting, priority-aware admission, AIMD concurrency control, retry handling, circuit breaking, and optional Prometheus metrics.
 
-- conservative token budget enforcement
-- priority-aware admission and backpressure
-- AIMD concurrency control
-- retry handling for provider pressure and transient failures
-- circuit breaking
-- optional Prometheus metrics
-- a local mock-provider load harness
+---
 
-V1 supports `openai.OpenAI` and `openai.AsyncOpenAI` only. Integration is through the SDK-supported `http_client` option and custom `httpx` transports.
+## Features
+
+- **Token budget enforcement** — Reserve before dispatch, reconcile after response. Hard limits prevent runaway spend.
+- **Priority admission** — `critical`, `default`, `background` queuing with starvation prevention.
+- **AIMD concurrency** — Additive-increase/multiplicative-decrease adapts to provider pressure.
+- **Retry with backoff** — Configurable attempts, jitter, and status codes (429/500/502/503/504/529).
+- **Circuit breaker** — Trips on sustained failure, cooldowns automatically.
+- **HTTP transport layer** — Plugs into the SDK's native `httpx` transport — no monkey-patching.
+- **Prometheus metrics** — Optional export for dashboards and alerting.
+- **Provider support** — OpenAI (sync & async) and Anthropic (sync & async).
+
+---
 
 ## Install
 
 ```bash
+# Base install
 pip install backstop
+
+# With Prometheus metrics
 pip install "backstop[metrics]"
+
+# With Anthropic support
+pip install "backstop[anthropic]"
+
+# Everything (dev)
+pip install -e ".[test,metrics,anthropic]"
 ```
 
-From this repository:
-
+From source:
 ```bash
-pip install -e ".[test,metrics]"
+git clone https://github.com/RavaniRoshan/backstop.git
+cd backstop
+pip install -e ".[test,metrics,anthropic]"
 ```
+
+---
 
 ## Usage
+
+### OpenAI
 
 ```python
 from openai import OpenAI
@@ -44,8 +80,7 @@ response = client.chat.completions.create(
 )
 ```
 
-Async clients are supported the same way:
-
+Async:
 ```python
 from openai import AsyncOpenAI
 from backstop import Backstop
@@ -53,69 +88,133 @@ from backstop import Backstop
 client = Backstop.wrap(AsyncOpenAI(api_key="sk-..."), budget=10_000)
 ```
 
-`budget=None` means unlimited pass-through. `budget=0` blocks requests before dispatch.
+### Anthropic
+
+```python
+from anthropic import Anthropic
+from backstop import Backstop, BackstopConfig
+
+client = Backstop.wrap(
+    Anthropic(api_key="sk-ant-..."),
+    budget=50_000,
+    config=BackstopConfig(initial_concurrency=8),
+)
+
+response = client.messages.create(
+    model="claude-sonnet-4-20250514",
+    max_tokens=1024,
+    messages=[{"role": "user", "content": "Summarize this in one paragraph."}],
+    extra_headers={"X-Backstop-Priority": "critical"},
+)
+```
+
+Async:
+```python
+from anthropic import AsyncAnthropic
+from backstop import Backstop
+
+client = Backstop.wrap(AsyncAnthropic(api_key="sk-ant-..."), budget=10_000)
+```
+
+> `budget=None` — unlimited pass-through. `budget=0` — blocks before dispatch.
+
+---
 
 ## Priority
 
-Set priority per request with:
+Set per-request priority via the `X-Backstop-Priority` header:
+
+| Value | Behavior |
+|---|---|
+| `critical` | Admitted first — use for user-facing requests |
+| `default` | Normal queue position |
+| `background` | Lowest priority — yields to higher |
 
 ```python
 extra_headers={"X-Backstop-Priority": "critical"}
 ```
 
-Valid values are `critical`, `default`, and `background`. V1 prioritizes queued admission; it does not cancel active background HTTP requests.
-
-## Metrics
-
-Metrics are recorded when `prometheus-client` is installed. Backstop never starts a server implicitly:
-
-```python
-from backstop import Backstop
-
-Backstop.start_metrics_server(port=9090)
-app = Backstop.metrics_app()
-```
+---
 
 ## CLI
 
 ```bash
+# Local mock-provider load scenarios
 backstop harness --scenario burst
 backstop harness --scenario steady-state
 backstop harness --scenario error-storm
 backstop harness --scenario budget-hit
+
+# Prometheus metrics server
 backstop metrics --port 9090
+
+# Real API smoke tests (set API keys first)
+backstop real-openai --model gpt-4.1-mini
+backstop real-openai --async-client --api chat
+backstop real-anthropic
+backstop real-anthropic --async-client
 ```
 
-The harness uses a local mock OpenAI-compatible provider and does not call real OpenAI services.
+---
 
-For a real provider smoke test, install the OpenAI SDK, set your API key, and run:
+## Metrics
+
+Export Prometheus metrics by installing `backstop[metrics]`:
+
+```python
+from backstop import Backstop
+
+# Start a standalone HTTP server
+Backstop.start_metrics_server(port=9090)
+
+# Or mount the WSGI app in your existing server
+app = Backstop.metrics_app()
+```
+
+---
+
+## Tests
 
 ```bash
+# Unit tests (no API calls)
+pytest
+
+# Real OpenAI API (opt-in)
 export OPENAI_API_KEY="sk-..."
-backstop real-openai --model "${OPENAI_MODEL:-gpt-5.5}"
-backstop real-openai --async-client --model "${OPENAI_MODEL:-gpt-5.5}"
-```
-
-This sends a tiny Responses API request through a Backstop-wrapped `OpenAI` or `AsyncOpenAI` client. The model can be overridden with `--model` or `OPENAI_MODEL`.
-
-For OpenAI-compatible endpoints, set `OPENAI_BASE_URL` or pass `--base-url`:
-
-```bash
-export OPENAI_BASE_URL="https://your-compatible-provider.example/v1"
-backstop real-openai --api chat --model "$OPENAI_MODEL" --base-url "$OPENAI_BASE_URL"
-```
-
-## Real OpenAI Tests
-
-The regular test suite does not spend tokens. Real API tests are opt-in:
-
-```bash
-export OPENAI_API_KEY="sk-..."
-export OPENAI_MODEL="gpt-5.5"
-export OPENAI_BASE_URL="https://api.openai.com/v1"  # optional
 pytest -m real_openai
+
+# Real Anthropic API (opt-in)
+export ANTHROPIC_API_KEY="sk-ant-..."
+pytest -m real_anthropic
 ```
 
-## Notes
+---
 
-Token estimation is intentionally conservative. When provider `usage` is present, Backstop reconciles reservations against actual usage. When usage is absent on successful responses, the reserved estimate remains charged.
+## Architecture
+
+```mermaid
+graph LR
+    A[SDK Client<br/>OpenAI / Anthropic] --> B[Backstop.wrap]
+    B --> C[Clients.copy]
+    B --> D[BackstopTransport]
+    D --> E[Priority Gate]
+    D --> F[Budget]
+    D --> G[AIMD Controller]
+    D --> H[Circuit Breaker]
+    D --> I[Retry Logic]
+    I --> J[httpx Transport]
+```
+
+Backstop replaces the SDK's internal `httpx.Client` with a custom transport that intercepts every request. No monkey-patching, no thread hacks — just standard SDK http_client injection.
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE.txt) for details.
+
+---
+
+<p align="center">
+  <sub>Built with httpx, openai, anthropic · Backstop Contributors</sub>
+</p>

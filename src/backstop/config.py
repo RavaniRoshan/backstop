@@ -28,7 +28,7 @@ class BackstopConfig:
     retry_max_attempts: int = 3
     retry_base_delay: float = 0.05
     retry_max_delay: float = 2.0
-    retry_statuses: frozenset[int] = frozenset({429, 500, 502, 503, 504})
+    retry_statuses: frozenset[int] = frozenset({429, 500, 502, 503, 504, 529})
 
     circuit_window_seconds: float = 60.0
     circuit_failure_threshold: float = 0.20
