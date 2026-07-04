@@ -1,0 +1,119 @@
+from __future__ import annotations
+
+import json
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from typing import Any
+
+import httpx
+
+from .config import BackstopConfig, Priority
+
+
+@dataclass(frozen=True)
+class RequestMetadata:
+    priority: Priority
+    estimated_tokens: int
+    endpoint: str
+
+
+def request_metadata(request: httpx.Request, config: BackstopConfig) -> RequestMetadata:
+    body = _json_body(request)
+    endpoint = request.url.path
+    return RequestMetadata(
+        priority=Priority.from_header(request.headers.get("X-Backstop-Priority")),
+        estimated_tokens=estimate_tokens(body, request.content, config),
+        endpoint=endpoint,
+    )
+
+
+def estimate_tokens(body: Any, raw: bytes, config: BackstopConfig) -> int:
+    if body is None:
+        return max(1, int(len(raw) / config.chars_per_token))
+
+    prompt_chars = _prompt_chars(body)
+    output_tokens = _configured_output_tokens(body, config)
+    body_floor = int(len(raw) / config.chars_per_token)
+    prompt_tokens = int(prompt_chars / config.chars_per_token)
+    return max(1, prompt_tokens + output_tokens, body_floor)
+
+
+def response_usage_tokens(response: httpx.Response) -> int | None:
+    try:
+        payload = response.json()
+    except Exception:
+        return None
+    usage = payload.get("usage") if isinstance(payload, Mapping) else None
+    if not isinstance(usage, Mapping):
+        return None
+
+    for key in ("total_tokens", "total_token_count"):
+        value = usage.get(key)
+        if isinstance(value, int) and value >= 0:
+            return value
+
+    input_tokens = _int_or_zero(
+        usage.get("input_tokens"),
+        usage.get("prompt_tokens"),
+        usage.get("prompt_token_count"),
+    )
+    output_tokens = _int_or_zero(
+        usage.get("output_tokens"),
+        usage.get("completion_tokens"),
+        usage.get("completion_token_count"),
+    )
+    if input_tokens is None and output_tokens is None:
+        return None
+    return (input_tokens or 0) + (output_tokens or 0)
+
+
+def _json_body(request: httpx.Request) -> Any:
+    if not request.content:
+        return None
+    content_type = request.headers.get("content-type", "")
+    if "json" not in content_type and not request.content.strip().startswith((b"{", b"[")):
+        return None
+    try:
+        return json.loads(request.content.decode("utf-8"))
+    except Exception:
+        return None
+
+
+def _prompt_chars(value: Any) -> int:
+    if value is None:
+        return 0
+    if isinstance(value, str):
+        return len(value)
+    if isinstance(value, (int, float, bool)):
+        return len(str(value))
+    if isinstance(value, Mapping):
+        total = 0
+        for key, item in value.items():
+            if key in {"max_tokens", "max_output_tokens", "stream", "temperature", "top_p"}:
+                continue
+            if key in {"messages", "input", "prompt", "instructions", "content", "text"}:
+                total += _prompt_chars(item)
+            elif isinstance(item, (Mapping, Sequence)) and not isinstance(item, (str, bytes, bytearray)):
+                total += _prompt_chars(item)
+        return total
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return sum(_prompt_chars(item) for item in value)
+    return len(str(value))
+
+
+def _configured_output_tokens(body: Any, config: BackstopConfig) -> int:
+    if not isinstance(body, Mapping):
+        return config.default_max_output_tokens
+    for key in ("max_output_tokens", "max_tokens", "max_completion_tokens"):
+        value = body.get(key)
+        if isinstance(value, int) and value >= 0:
+            return value
+    return config.default_max_output_tokens
+
+
+def _int_or_zero(*values: Any) -> int | None:
+    for value in values:
+        if isinstance(value, int) and value >= 0:
+            return value
+    return None
+
