@@ -6,6 +6,7 @@ import time
 
 from .harness import result_to_json, run_harness
 from .metrics import start_metrics_server
+from .real_anthropic import run_real_anthropic_smoke
 from .real_openai import run_real_openai_smoke
 
 
@@ -32,6 +33,17 @@ def main(argv: list[str] | None = None) -> int:
     real.add_argument("--async-client", action="store_true", help="use AsyncOpenAI")
     real.add_argument("--json", action="store_true", help="emit JSON instead of Markdown")
 
+    real_anthropic = subparsers.add_parser(
+        "real-anthropic", help="run a tiny real Anthropic API smoke test"
+    )
+    real_anthropic.add_argument(
+        "--model", help="model to use; defaults to ANTHROPIC_MODEL or claude-sonnet-4-20250514"
+    )
+    real_anthropic.add_argument("--base-url", help="override API base URL; defaults to ANTHROPIC_BASE_URL")
+    real_anthropic.add_argument("--budget", type=int, default=1_000)
+    real_anthropic.add_argument("--async-client", action="store_true", help="use AsyncAnthropic")
+    real_anthropic.add_argument("--json", action="store_true", help="emit JSON instead of Markdown")
+
     args = parser.parse_args(argv)
 
     if args.command == "harness":
@@ -53,6 +65,16 @@ def main(argv: list[str] | None = None) -> int:
             model=args.model,
             base_url=args.base_url,
             api=args.api,
+            budget=args.budget,
+            async_client=args.async_client,
+        )
+        print(json.dumps(result.__dict__, indent=2, sort_keys=True) if args.json else result.to_markdown())
+        return 0
+
+    if args.command == "real-anthropic":
+        result = run_real_anthropic_smoke(
+            model=args.model,
+            base_url=args.base_url,
             budget=args.budget,
             async_client=args.async_client,
         )

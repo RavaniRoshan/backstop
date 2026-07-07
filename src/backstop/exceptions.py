@@ -13,3 +13,7 @@ class CircuitBreakerOpenError(BackstopError):
 class UnsupportedClientError(BackstopError):
     """Raised when Backstop.wrap receives an unsupported client type."""
 
+
+class LatencyBudgetExceededError(BackstopError):
+    """Raised when a request exceeds the configured request_timeout."""
+

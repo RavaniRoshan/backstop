@@ -1,0 +1,37 @@
+name: Provider compatibility
+description: Report a provider SDK compatibility issue
+title: "[Provider]: "
+labels: ["provider-compatibility"]
+body:
+  - type: input
+    id: provider
+    attributes:
+      label: Provider
+      placeholder: OpenAI, Anthropic
+    validations:
+      required: true
+  - type: input
+    id: sdk_version
+    attributes:
+      label: SDK version
+    validations:
+      required: true
+  - type: textarea
+    id: code
+    attributes:
+      label: Minimal code
+      render: python
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Behavior
+      description: What failed, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: privacy
+    attributes:
+      label: Privacy note
+      description: Do not include API keys, real prompts, real responses, or customer data.

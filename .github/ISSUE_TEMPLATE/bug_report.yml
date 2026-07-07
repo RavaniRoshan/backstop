@@ -1,0 +1,42 @@
+name: Bug report
+description: Report a Backstop bug
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction
+      description: Minimal code or commands that reproduce the issue.
+      render: python
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Backstop version or commit
+    validations:
+      required: true
+  - type: input
+    id: provider
+    attributes:
+      label: Provider SDK and version
+      placeholder: openai 1.x, anthropic 0.x
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Do not include API keys, real prompts, real responses, or customer data.

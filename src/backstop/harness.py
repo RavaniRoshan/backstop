@@ -3,7 +3,6 @@ from __future__ import annotations
 import concurrent.futures
 import json
 import random
-import statistics
 import threading
 import time
 from dataclasses import dataclass
@@ -138,6 +137,32 @@ def run_harness(scenario: Scenario) -> HarnessResult:
         final_concurrency=state.aimd.current_limit,
         provider_calls=provider.calls,
     )
+
+
+class _MockAnthropicProvider:
+    def __init__(self, *, error_rate: float) -> None:
+        self.error_rate = error_rate
+        self.calls = 0
+        self._lock = threading.Lock()
+
+    def handle(self, request: httpx.Request) -> httpx.Response:
+        with self._lock:
+            self.calls += 1
+        time.sleep(random.uniform(0.005, 0.025))
+        if self.error_rate and random.random() < self.error_rate:
+            return httpx.Response(529, json={"error": {"message": "synthetic overload"}})
+        return httpx.Response(
+            200,
+            json={
+                "id": "msg_mock",
+                "type": "message",
+                "role": "assistant",
+                "model": "mock",
+                "content": [{"type": "text", "text": "ok"}],
+                "stop_reason": "end_turn",
+                "usage": {"input_tokens": 8, "output_tokens": 4},
+            },
+        )
 
 
 class _MockProvider:

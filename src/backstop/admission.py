@@ -42,13 +42,18 @@ class PriorityGate:
         with self._condition:
             return sum(len(queue) for queue in self._queues.values())
 
-    def acquire(self, priority: Priority) -> float:
+    def acquire(self, priority: Priority, timeout: float | None = None) -> float:
         ticket = _Ticket(priority, next(self._counter), time.monotonic())
+        effective = timeout if timeout is not None else self._config.queue_timeout
         with self._condition:
             self._queues[priority].append(ticket)
             self._condition.notify_all()
             while not self._can_admit(ticket):
-                self._condition.wait(timeout=self._config.queue_timeout)
+                if effective is None:
+                    self._condition.wait()
+                else:
+                    if not self._condition.wait(timeout=effective):
+                        raise TimeoutError("gate acquire timed out")
             self._queues[priority].popleft()
             self._active += 1
             return time.monotonic() - ticket.enqueued_at
@@ -58,21 +63,20 @@ class PriorityGate:
             self._active = max(0, self._active - 1)
             self._condition.notify_all()
 
-    async def aacquire(self, priority: Priority) -> float:
+    async def aacquire(self, priority: Priority, timeout: float | None = None) -> float:
         ticket = _Ticket(priority, next(self._counter), time.monotonic())
+        effective = timeout if timeout is not None else self._config.queue_timeout
         async with self._async_condition:
             self._queues[priority].append(ticket)
             self._async_condition.notify_all()
             while not self._can_admit(ticket):
                 try:
-                    if self._config.queue_timeout is None:
+                    if effective is None:
                         await self._async_condition.wait()
                     else:
-                        await asyncio.wait_for(
-                            self._async_condition.wait(), self._config.queue_timeout
-                        )
+                        await asyncio.wait_for(self._async_condition.wait(), effective)
                 except asyncio.TimeoutError:
-                    continue
+                    raise TimeoutError("gate acquire timed out")
             self._queues[priority].popleft()
             self._active += 1
             return time.monotonic() - ticket.enqueued_at

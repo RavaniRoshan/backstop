@@ -1,0 +1,38 @@
+groups:
+  - name: backstop
+    rules:
+      - alert: BackstopBudgetExhausted
+        expr: backstop_budget_remaining_tokens <= 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Backstop token budget is exhausted
+          description: Requests may be blocked before provider dispatch.
+
+      - alert: BackstopCircuitOpen
+        expr: backstop_circuit_state == 2
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: Backstop circuit breaker is open
+          description: Provider pressure or errors are causing Backstop to block requests.
+
+      - alert: BackstopHighQueueWait
+        expr: histogram_quantile(0.95, sum by (le) (rate(backstop_queue_wait_seconds_bucket[5m]))) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Backstop queue wait p95 is above 1 second
+          description: Requests are waiting behind the priority admission gate.
+
+      - alert: BackstopRetrySpike
+        expr: sum(rate(backstop_retry_attempts_total[5m])) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Backstop retry rate is elevated
+          description: Provider errors, rate limits, or timeouts may be increasing.

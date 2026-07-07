@@ -1,22 +1,76 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from collections.abc import Awaitable, Callable
 
 import httpx
 
 from .budget import Reservation
+from .cache import ResponseCache
 from .circuit import CircuitState
-from .config import Priority
-from .exceptions import BudgetExceededError, CircuitBreakerOpenError
-from .extract import request_metadata, response_usage_tokens
+from .config import BackstopConfig, Priority
+from .exceptions import BudgetExceededError, CircuitBreakerOpenError, LatencyBudgetExceededError
+from .extract import _json_body, request_metadata, response_usage_tokens
+from .hooks import AfterResponseHook, BeforeRequestHook
+from .latency import _LatencyTracker, extract_backstop_headers
+from .ledger import (
+    ReservationTicket as LedgerReservation,
+    get_current_tenant,
+    get_ledger,
+)
 from .metrics import get_metrics
+from .pricing import get_downgrade_target
 from .retry import backoff_delay, is_retryable_status
 from .state import BackstopState
+from .streaming import async_setup_streaming, is_streaming, setup_streaming
 
 RetrySleep = Callable[[float], None]
 AsyncRetrySleep = Callable[[float], Awaitable[None]]
+
+
+def _deadline_from_config(config: BackstopConfig) -> float | None:
+    if config.request_timeout is None:
+        return None
+    return time.monotonic() + config.request_timeout
+
+
+def _deadline_exceeded(deadline: float | None) -> bool:
+    if deadline is None:
+        return False
+    return time.monotonic() >= deadline
+
+
+def _build_cached_response(
+    content: bytes,
+    usage: int,
+    headers: dict[str, str] | None,
+) -> httpx.Response:
+    return httpx.Response(
+        200,
+        content=content,
+        headers=headers,
+    )
+
+
+def _reconcile(
+    tenant_budget: object | None,
+    global_budget: object,
+    reservation: Reservation | LedgerReservation | None,
+    usage: int | None,
+    *,
+    success: bool,
+    downgraded: bool = False,
+) -> None:
+    if reservation is None:
+        if downgraded and tenant_budget is not None and usage is not None and success:
+            tenant_budget.commit(LedgerReservation(getattr(tenant_budget, "tenant_id", ""), 0), usage)
+        return
+    if isinstance(reservation, LedgerReservation) and tenant_budget is not None:
+        tenant_budget.commit(reservation, usage if success else 0)
+    elif isinstance(reservation, Reservation):
+        global_budget.reconcile(reservation, usage, success=success)
 
 
 class BackstopTransport(httpx.BaseTransport):
@@ -31,42 +85,149 @@ class BackstopTransport(httpx.BaseTransport):
         self._transport = transport or httpx.HTTPTransport()
         self._sleep = sleep or time.sleep
         self._metrics = get_metrics()
+        self._cache = ResponseCache(
+            max_entries=state.config.cache_max_entries,
+            ttl=state.config.cache_ttl,
+        ) if state.config.cache_enabled else None
 
     def handle_request(self, request: httpx.Request) -> httpx.Response:
+        tracker = _LatencyTracker()
         meta = request_metadata(request, self.state.config)
-        started = time.monotonic()
-        reservation: Reservation | None = None
-        wait = 0.0
+        reservation: Reservation | LedgerReservation | None = None
         admitted = False
 
+        body = _json_body(request)
+        streaming = is_streaming(body) if body is not None else False
+
+        if self._cache is not None and body is not None and not streaming:
+            cached = self._cache.get(body)
+            if cached is not None:
+                self._metrics.call("cache_hits")
+                tracker.completed_at = time.monotonic()
+                response = _build_cached_response(cached[0], cached[1], cached[2])
+                backstop_meta = tracker.build_meta(
+                    estimated_tokens=meta.estimated_tokens,
+                    actual_tokens=cached[1],
+                    circuit_state=self.state.circuit.state.value,
+                    endpoint=meta.endpoint,
+                )
+                setattr(response, "_backstop_meta", backstop_meta)
+                return response
+
+        hook_metadata = extract_backstop_headers(request)
+        tenant_id = get_current_tenant()
+        tenant_budget: object | None = None
+        if tenant_id is not None:
+            ledger = get_ledger()
+            tenant_budget = ledger.get(tenant_id) if ledger else None
+
+        downgraded = False
         try:
-            reservation = self.state.budget.reserve(meta.estimated_tokens)
+            if tenant_budget is not None:
+                reservation = tenant_budget.reserve(meta.estimated_tokens)
+            else:
+                reservation = self.state.budget.reserve(meta.estimated_tokens)
         except BudgetExceededError:
-            self._metrics.call("budget_exceeded")
-            raise
+            if (
+                tenant_budget is not None
+                and getattr(tenant_budget, "on_exceed", None) == "downgrade"
+                and body is not None
+            ):
+                if self._try_downgrade(request, body):
+                    downgraded = True
+                    meta = request_metadata(request, self.state.config)
+                    try:
+                        if tenant_budget is not None:
+                            reservation = tenant_budget.reserve(meta.estimated_tokens)
+                        else:
+                            reservation = self.state.budget.reserve(meta.estimated_tokens)
+                    except BudgetExceededError:
+                        reservation = None
+                else:
+                    self._metrics.call("budget_exceeded")
+                    if tenant_id:
+                        self._metrics.call("tenant_budget_exceeded", tenant_id)
+                    raise
+            else:
+                self._metrics.call("budget_exceeded")
+                if tenant_id:
+                    self._metrics.call("tenant_budget_exceeded", tenant_id)
+                raise
 
         try:
-            wait = self.state.gate.acquire(meta.priority)
+            if self.state.config.before_request is not None:
+                hook = BeforeRequestHook(
+                    endpoint=meta.endpoint,
+                    priority=meta.priority,
+                    estimated_tokens=meta.estimated_tokens,
+                    metadata=hook_metadata.copy(),
+                )
+                self.state.config.before_request(hook)
+                hook_metadata = hook.metadata
+
+            deadline = _deadline_from_config(self.state.config)
+            wait = self._acquire_gate(meta.priority, deadline)
             admitted = True
+            tracker.queue_entered_at = time.monotonic()
             self._observe_queue(wait, meta.priority)
             self.state.circuit.before_request()
-            response = self._send_with_retries(request, meta.endpoint)
-            response.read()
-            usage = response_usage_tokens(response)
-            success = response.status_code < 400
-            self.state.budget.reconcile(reservation, usage, success=success)
-            self._record_outcome(response.status_code, success=success)
-            self._observe_request(meta.endpoint, meta.priority, started, "success" if success else "error")
+            tracker.request_sent_at = time.monotonic()
+
+            response = self._send_with_retries(request, meta.endpoint, deadline)
+            tracker.retry_count = self._retry_count
+
+            if streaming:
+                success = response.status_code < 400
+                setup_streaming(response, self.state, reservation, success=success, tenant_budget=tenant_budget)
+                usage = None
+            else:
+                response.read()
+                tracker.first_byte_at = tracker.request_sent_at
+                usage = response_usage_tokens(response)
+                success = response.status_code < 400
+                _reconcile(tenant_budget, self.state.budget, reservation, usage, success=success, downgraded=downgraded)
+                self._record_outcome(response.status_code, success=success)
+                if self._cache is not None and body is not None and usage is not None:
+                    self._cache.set(body, response.content, usage, dict(response.headers))
+
+            tracker.completed_at = time.monotonic()
+            outcome = "success" if success else "error"
+            self._observe_request(meta.endpoint, meta.priority, tracker.created_at, outcome)
+
+            backstop_meta = tracker.build_meta(
+                estimated_tokens=meta.estimated_tokens,
+                actual_tokens=usage,
+                circuit_state=self.state.circuit.state.value,
+                endpoint=meta.endpoint,
+                metadata=hook_metadata,
+            )
+            setattr(response, "_backstop_meta", backstop_meta)
+
+            if self.state.config.after_response is not None:
+                try:
+                    after_hook = AfterResponseHook(
+                        endpoint=meta.endpoint,
+                        status_code=response.status_code,
+                        actual_tokens=usage,
+                        latency_ms=backstop_meta.total_latency_ms,
+                        success=success,
+                        metadata=hook_metadata,
+                    )
+                    self.state.config.after_response(after_hook)
+                except Exception:
+                    pass
+
             return response
         except CircuitBreakerOpenError:
-            self.state.budget.reconcile(reservation, 0, success=False)
-            self._observe_request(meta.endpoint, meta.priority, started, "circuit_open")
+            tracker.completed_at = time.monotonic()
+            _reconcile(tenant_budget, self.state.budget, reservation, 0, success=False)
+            self._observe_request(meta.endpoint, meta.priority, tracker.created_at, "circuit_open")
             raise
-        except Exception:
-            if reservation is not None:
-                self.state.budget.reconcile(reservation, 0, success=False)
+        except (LatencyBudgetExceededError, Exception):
+            tracker.completed_at = time.monotonic()
+            _reconcile(tenant_budget, self.state.budget, reservation, 0, success=False)
             self._record_outcome(599, success=False)
-            self._observe_request(meta.endpoint, meta.priority, started, "exception")
+            self._observe_request(meta.endpoint, meta.priority, tracker.created_at, "exception")
             raise
         finally:
             if admitted:
@@ -76,14 +237,50 @@ class BackstopTransport(httpx.BaseTransport):
     def close(self) -> None:
         self._transport.close()
 
-    def _send_with_retries(self, request: httpx.Request, endpoint: str) -> httpx.Response:
+    def _try_downgrade(self, request: httpx.Request, body: dict) -> bool:
+        current_model = body.get("model", "")
+        if not current_model:
+            return False
+        cheaper = get_downgrade_target(current_model)
+        if cheaper is None:
+            return False
+        body["model"] = cheaper
+        new_content = json.dumps(body).encode("utf-8")
+        object.__setattr__(request, "_content", new_content)
+        request.headers["content-length"] = str(len(new_content))
+        return True
+
+    def _acquire_gate(self, priority: Priority, deadline: float | None) -> float:
+        effective: float | None = None
+        if deadline is not None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise LatencyBudgetExceededError("request_timeout exceeded before gate acquire")
+            qt = self.state.config.queue_timeout
+            if qt is not None:
+                effective = min(remaining, qt)
+            else:
+                effective = remaining
+        wait = self.state.gate.acquire(priority, timeout=effective)
+        if deadline is not None and time.monotonic() >= deadline:
+            self.state.gate.release()
+            raise LatencyBudgetExceededError("request_timeout exceeded during gate acquire")
+        return wait
+
+    def _send_with_retries(
+        self, request: httpx.Request, endpoint: str, deadline: float | None
+    ) -> httpx.Response:
+        self._retry_count = 0
         last_response: httpx.Response | None = None
         for attempt in range(self.state.config.retry_max_attempts):
+            if _deadline_exceeded(deadline):
+                raise LatencyBudgetExceededError("request_timeout exceeded during retries")
+
             try:
                 response = self._transport.handle_request(request)
             except (httpx.TimeoutException, httpx.TransportError):
-                pressure = True
-                self._after_attempt(success=False, pressure=pressure)
+                self._retry_count += 1
+                self._after_attempt(success=False, pressure=True)
                 if attempt >= self.state.config.retry_max_attempts - 1:
                     raise
                 self._metrics.call("retry_attempts", endpoint)
@@ -94,6 +291,7 @@ class BackstopTransport(httpx.BaseTransport):
             if not pressure or attempt >= self.state.config.retry_max_attempts - 1:
                 return response
 
+            self._retry_count += 1
             response.read()
             response.close()
             last_response = response
@@ -135,7 +333,12 @@ class BackstopTransport(httpx.BaseTransport):
         )
 
     def _observe_gauges(self) -> None:
-        remaining = self.state.budget.remaining
+        tenant_id = get_current_tenant()
+        if tenant_id is not None:
+            tb = get_ledger().get(tenant_id)
+            remaining = tb.remaining if tb is not None else None
+        else:
+            remaining = self.state.budget.remaining
         if remaining is not None:
             self._metrics.call("budget_remaining", method="set", value=remaining)
         self._metrics.call("queue_depth", method="set", value=self.state.gate.depth)
@@ -161,41 +364,149 @@ class AsyncBackstopTransport(httpx.AsyncBaseTransport):
         self._transport = transport or httpx.AsyncHTTPTransport()
         self._sleep = sleep or asyncio.sleep
         self._metrics = get_metrics()
+        self._cache = ResponseCache(
+            max_entries=state.config.cache_max_entries,
+            ttl=state.config.cache_ttl,
+        ) if state.config.cache_enabled else None
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        tracker = _LatencyTracker()
         meta = request_metadata(request, self.state.config)
-        started = time.monotonic()
-        reservation: Reservation | None = None
+        reservation: Reservation | LedgerReservation | None = None
         admitted = False
 
+        body = _json_body(request)
+        streaming = is_streaming(body) if body is not None else False
+
+        if self._cache is not None and body is not None and not streaming:
+            cached = self._cache.get(body)
+            if cached is not None:
+                self._metrics.call("cache_hits")
+                tracker.completed_at = time.monotonic()
+                response = _build_cached_response(cached[0], cached[1], cached[2])
+                backstop_meta = tracker.build_meta(
+                    estimated_tokens=meta.estimated_tokens,
+                    actual_tokens=cached[1],
+                    circuit_state=self.state.circuit.state.value,
+                    endpoint=meta.endpoint,
+                )
+                setattr(response, "_backstop_meta", backstop_meta)
+                return response
+
+        hook_metadata = extract_backstop_headers(request)
+        tenant_id = get_current_tenant()
+        tenant_budget: object | None = None
+        if tenant_id is not None:
+            ledger = get_ledger()
+            tenant_budget = ledger.get(tenant_id) if ledger else None
+
+        downgraded = False
         try:
-            reservation = await self.state.budget.areserve(meta.estimated_tokens)
+            if tenant_budget is not None:
+                reservation = tenant_budget.reserve(meta.estimated_tokens)
+            else:
+                reservation = await self.state.budget.areserve(meta.estimated_tokens)
         except BudgetExceededError:
-            self._metrics.call("budget_exceeded")
-            raise
+            if (
+                tenant_budget is not None
+                and getattr(tenant_budget, "on_exceed", None) == "downgrade"
+                and body is not None
+            ):
+                if self._try_downgrade(request, body):
+                    downgraded = True
+                    meta = request_metadata(request, self.state.config)
+                    try:
+                        if tenant_budget is not None:
+                            reservation = tenant_budget.reserve(meta.estimated_tokens)
+                        else:
+                            reservation = await self.state.budget.areserve(meta.estimated_tokens)
+                    except BudgetExceededError:
+                        reservation = None
+                else:
+                    self._metrics.call("budget_exceeded")
+                    if tenant_id:
+                        self._metrics.call("tenant_budget_exceeded", tenant_id)
+                    raise
+            else:
+                self._metrics.call("budget_exceeded")
+                if tenant_id:
+                    self._metrics.call("tenant_budget_exceeded", tenant_id)
+                raise
 
         try:
-            wait = await self.state.gate.aacquire(meta.priority)
+            if self.state.config.before_request is not None:
+                hook = BeforeRequestHook(
+                    endpoint=meta.endpoint,
+                    priority=meta.priority,
+                    estimated_tokens=meta.estimated_tokens,
+                    metadata=hook_metadata.copy(),
+                )
+                self.state.config.before_request(hook)
+                hook_metadata = hook.metadata
+
+            deadline = _deadline_from_config(self.state.config)
+            wait = await self._aacquire_gate(meta.priority, deadline)
             admitted = True
+            tracker.queue_entered_at = time.monotonic()
             self._observe_queue(wait, meta.priority)
             self.state.circuit.before_request()
-            response = await self._send_with_retries(request, meta.endpoint)
-            await response.aread()
-            usage = response_usage_tokens(response)
-            success = response.status_code < 400
-            await self.state.budget.areconcile(reservation, usage, success=success)
-            self._record_outcome(response.status_code, success=success)
-            self._observe_request(meta.endpoint, meta.priority, started, "success" if success else "error")
+            tracker.request_sent_at = time.monotonic()
+
+            response = await self._asend_with_retries(request, meta.endpoint, deadline)
+            tracker.retry_count = self._retry_count
+
+            if streaming:
+                success = response.status_code < 400
+                await async_setup_streaming(response, self.state, reservation, success=success, tenant_budget=tenant_budget)
+                usage = None
+            else:
+                await response.aread()
+                tracker.first_byte_at = tracker.request_sent_at
+                usage = response_usage_tokens(response)
+                success = response.status_code < 400
+                _reconcile(tenant_budget, self.state.budget, reservation, usage, success=success, downgraded=downgraded)
+                self._record_outcome(response.status_code, success=success)
+                if self._cache is not None and body is not None and usage is not None:
+                    self._cache.set(body, response.content, usage, dict(response.headers))
+
+            tracker.completed_at = time.monotonic()
+            outcome = "success" if success else "error"
+            self._observe_request(meta.endpoint, meta.priority, tracker.created_at, outcome)
+
+            backstop_meta = tracker.build_meta(
+                estimated_tokens=meta.estimated_tokens,
+                actual_tokens=usage,
+                circuit_state=self.state.circuit.state.value,
+                endpoint=meta.endpoint,
+                metadata=hook_metadata,
+            )
+            setattr(response, "_backstop_meta", backstop_meta)
+
+            if self.state.config.after_response is not None:
+                try:
+                    after_hook = AfterResponseHook(
+                        endpoint=meta.endpoint,
+                        status_code=response.status_code,
+                        actual_tokens=usage,
+                        latency_ms=backstop_meta.total_latency_ms,
+                        success=success,
+                        metadata=hook_metadata,
+                    )
+                    self.state.config.after_response(after_hook)
+                except Exception:
+                    pass
+
             return response
         except CircuitBreakerOpenError:
-            await self.state.budget.areconcile(reservation, 0, success=False)
-            self._observe_request(meta.endpoint, meta.priority, started, "circuit_open")
+            tracker.completed_at = time.monotonic()
+            _reconcile(tenant_budget, self.state.budget, reservation, 0, success=False)
+            self._observe_request(meta.endpoint, meta.priority, tracker.created_at, "circuit_open")
             raise
-        except Exception:
-            if reservation is not None:
-                await self.state.budget.areconcile(reservation, 0, success=False)
+        except (LatencyBudgetExceededError, Exception):
+            tracker.completed_at = time.monotonic()
+            _reconcile(tenant_budget, self.state.budget, reservation, 0, success=False)
             self._record_outcome(599, success=False)
-            self._observe_request(meta.endpoint, meta.priority, started, "exception")
+            self._observe_request(meta.endpoint, meta.priority, tracker.created_at, "exception")
             raise
         finally:
             if admitted:
@@ -205,12 +516,49 @@ class AsyncBackstopTransport(httpx.AsyncBaseTransport):
     async def aclose(self) -> None:
         await self._transport.aclose()
 
-    async def _send_with_retries(self, request: httpx.Request, endpoint: str) -> httpx.Response:
+    def _try_downgrade(self, request: httpx.Request, body: dict) -> bool:
+        current_model = body.get("model", "")
+        if not current_model:
+            return False
+        cheaper = get_downgrade_target(current_model)
+        if cheaper is None:
+            return False
+        body["model"] = cheaper
+        new_content = json.dumps(body).encode("utf-8")
+        object.__setattr__(request, "_content", new_content)
+        request.headers["content-length"] = str(len(new_content))
+        return True
+
+    async def _aacquire_gate(self, priority: Priority, deadline: float | None) -> float:
+        effective: float | None = None
+        if deadline is not None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise LatencyBudgetExceededError("request_timeout exceeded before gate acquire")
+            qt = self.state.config.queue_timeout
+            if qt is not None:
+                effective = min(remaining, qt)
+            else:
+                effective = remaining
+        wait = await self.state.gate.aacquire(priority, timeout=effective)
+        if deadline is not None and time.monotonic() >= deadline:
+            await self.state.gate.arelease()
+            raise LatencyBudgetExceededError("request_timeout exceeded during gate acquire")
+        return wait
+
+    async def _asend_with_retries(
+        self, request: httpx.Request, endpoint: str, deadline: float | None
+    ) -> httpx.Response:
+        self._retry_count = 0
         last_response: httpx.Response | None = None
         for attempt in range(self.state.config.retry_max_attempts):
+            if _deadline_exceeded(deadline):
+                raise LatencyBudgetExceededError("request_timeout exceeded during retries")
+
             try:
                 response = await self._transport.handle_async_request(request)
             except (httpx.TimeoutException, httpx.TransportError):
+                self._retry_count += 1
                 self._after_attempt(success=False, pressure=True)
                 if attempt >= self.state.config.retry_max_attempts - 1:
                     raise
@@ -222,6 +570,7 @@ class AsyncBackstopTransport(httpx.AsyncBaseTransport):
             if not pressure or attempt >= self.state.config.retry_max_attempts - 1:
                 return response
 
+            self._retry_count += 1
             await response.aread()
             await response.aclose()
             last_response = response
@@ -263,7 +612,12 @@ class AsyncBackstopTransport(httpx.AsyncBaseTransport):
         )
 
     def _observe_gauges(self) -> None:
-        remaining = self.state.budget.remaining
+        tenant_id = get_current_tenant()
+        if tenant_id is not None:
+            tb = get_ledger().get(tenant_id)
+            remaining = tb.remaining if tb is not None else None
+        else:
+            remaining = self.state.budget.remaining
         if remaining is not None:
             self._metrics.call("budget_remaining", method="set", value=remaining)
         self._metrics.call("queue_depth", method="set", value=self.state.gate.depth)
@@ -275,4 +629,3 @@ class AsyncBackstopTransport(httpx.AsyncBaseTransport):
             CircuitState.OPEN: 2,
         }[self.state.circuit.state]
         self._metrics.call("circuit_state", method="set", value=circuit_value)
-

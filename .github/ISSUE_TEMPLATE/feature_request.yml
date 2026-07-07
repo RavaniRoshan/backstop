@@ -1,0 +1,37 @@
+name: Feature request
+description: Suggest an improvement to Backstop
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What LLM spend, latency, reliability, or provider-control problem does this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What should Backstop do?
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Budget enforcement
+        - Distributed state
+        - Provider compatibility
+        - Metrics or telemetry
+        - Retry or circuit breaking
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered

@@ -1,0 +1,4 @@
+name: "Hello World Refactor"
+prompt: "Refactor the main.py file to use a class-based approach."
+test_command: "pytest tests/"
+runners: 3

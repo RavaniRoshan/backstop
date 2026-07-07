@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
@@ -15,6 +15,7 @@ class RequestMetadata:
     priority: Priority
     estimated_tokens: int
     endpoint: str
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 def request_metadata(request: httpx.Request, config: BackstopConfig) -> RequestMetadata:
@@ -22,19 +23,55 @@ def request_metadata(request: httpx.Request, config: BackstopConfig) -> RequestM
     endpoint = request.url.path
     return RequestMetadata(
         priority=Priority.from_header(request.headers.get("X-Backstop-Priority")),
-        estimated_tokens=estimate_tokens(body, request.content, config),
+        estimated_tokens=estimate_tokens(body, request.content, config, endpoint),
         endpoint=endpoint,
     )
 
 
-def estimate_tokens(body: Any, raw: bytes, config: BackstopConfig) -> int:
+def estimate_tokens(body: Any, raw: bytes, config: BackstopConfig, endpoint: str = "") -> int:
     if body is None:
-        return max(1, int(len(raw) / config.chars_per_token))
+        return max(1, int(len(raw) / (config.chars_per_token or 4.0)))
+
+    if "/v1/messages" in endpoint and isinstance(body, Mapping):
+        return _estimate_anthropic_tokens(body, raw, config)
 
     prompt_chars = _prompt_chars(body)
     output_tokens = _configured_output_tokens(body, config)
-    body_floor = int(len(raw) / config.chars_per_token)
+    body_floor = int(len(raw) / (config.chars_per_token or 4.0))
+
+    model = body.get("model", "") if isinstance(body, Mapping) else ""
+    if config.token_counter is not None:
+        prompt_tokens = config.token_counter(str(body.get("messages", body)), model)
+    else:
+        prompt_tokens = int(prompt_chars / config.chars_per_token)
+
+    return max(1, prompt_tokens + output_tokens, body_floor)
+
+
+def _estimate_anthropic_tokens(body: dict, raw: bytes, config: BackstopConfig) -> int:
+    messages = body.get("messages", [])
+    prompt_chars = 0
+    for msg in messages:
+        content = msg.get("content", "")
+        if isinstance(content, str):
+            prompt_chars += len(content)
+        elif isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    prompt_chars += len(block.get("text", ""))
+
+    system = body.get("system")
+    if isinstance(system, str):
+        prompt_chars += len(system)
+    elif isinstance(system, list):
+        for block in system:
+            if isinstance(block, dict) and block.get("type") == "text":
+                prompt_chars += len(block.get("text", ""))
+
+    output_tokens = body.get("max_tokens", config.default_max_output_tokens)
+
     prompt_tokens = int(prompt_chars / config.chars_per_token)
+    body_floor = int(len(raw) / config.chars_per_token)
     return max(1, prompt_tokens + output_tokens, body_floor)
 
 
@@ -62,6 +99,14 @@ def response_usage_tokens(response: httpx.Response) -> int | None:
         usage.get("completion_tokens"),
         usage.get("completion_token_count"),
     )
+
+    cache_creation = usage.get("cache_creation_input_tokens")
+    cache_read = usage.get("cache_read_input_tokens")
+    if isinstance(cache_creation, int) and cache_creation > 0:
+        input_tokens = (input_tokens or 0) + cache_creation
+    if isinstance(cache_read, int) and cache_read > 0:
+        input_tokens = (input_tokens or 0) + cache_read
+
     if input_tokens is None and output_tokens is None:
         return None
     return (input_tokens or 0) + (output_tokens or 0)
@@ -109,6 +154,26 @@ def _configured_output_tokens(body: Any, config: BackstopConfig) -> int:
         if isinstance(value, int) and value >= 0:
             return value
     return config.default_max_output_tokens
+
+
+def count_tokens(text: str, model: str = "gpt-4o") -> int:
+    try:
+        import tiktoken
+    except ImportError:
+        return max(1, int(len(text) / 4.0))
+    encoding_map = {
+        "gpt-4o": "o200k_base",
+        "gpt-4o-mini": "o200k_base",
+        "gpt-4-turbo": "cl100k_base",
+        "gpt-4": "cl100k_base",
+        "gpt-3.5-turbo": "cl100k_base",
+    }
+    encoding_name = encoding_map.get(model, "cl100k_base")
+    try:
+        enc = tiktoken.get_encoding(encoding_name)
+        return len(enc.encode(text))
+    except Exception:
+        return max(1, int(len(text) / 4.0))
 
 
 def _int_or_zero(*values: Any) -> int | None:

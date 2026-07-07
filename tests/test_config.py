@@ -8,7 +8,6 @@ def test_config_defaults_are_valid():
     assert config.initial_concurrency == 8
     assert config.min_concurrency == 1
     assert config.max_concurrency == 64
-    assert config.priority_weights[Priority.CRITICAL] == 0.7
 
 
 def test_config_validation():

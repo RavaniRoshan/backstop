@@ -10,7 +10,9 @@ class AIMDController:
     def __init__(self, config: BackstopConfig) -> None:
         self._config = config
         self._limit = config.initial_concurrency
-        self._last_adjustment = 0.0
+        # Initialize so the first adjustment is always allowed regardless
+        # of how long this system has been running (monotonic clock).
+        self._last_adjustment = -self._config.aimd_adjustment_interval
         self._lock = threading.Lock()
 
     @property

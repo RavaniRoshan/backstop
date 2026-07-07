@@ -1,7 +1,15 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import warnings
+from collections.abc import Callable
+from dataclasses import dataclass
 from enum import Enum
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .hooks import AfterHookCallback, BeforeHookCallback
+
+TokenCounter = Callable[[str, str], int] | None
 
 
 class Priority(str, Enum):
@@ -28,7 +36,7 @@ class BackstopConfig:
     retry_max_attempts: int = 3
     retry_base_delay: float = 0.05
     retry_max_delay: float = 2.0
-    retry_statuses: frozenset[int] = frozenset({429, 500, 502, 503, 504})
+    retry_statuses: frozenset[int] = frozenset({429, 500, 502, 503, 504, 529})
 
     circuit_window_seconds: float = 60.0
     circuit_failure_threshold: float = 0.20
@@ -42,16 +50,19 @@ class BackstopConfig:
     aimd_decrease_factor: float = 0.5
     aimd_adjustment_interval: float = 5.0
 
-    priority_weights: dict[Priority, float] = field(
-        default_factory=lambda: {
-            Priority.CRITICAL: 0.7,
-            Priority.DEFAULT: 0.3,
-            Priority.BACKGROUND: 0.1,
-        }
-    )
     starvation_after_seconds: float = 1.0
 
     queue_timeout: float | None = None
+    request_timeout: float | None = None
+
+    before_request: BeforeHookCallback | None = None
+    after_response: AfterHookCallback | None = None
+
+    cache_enabled: bool = False
+    cache_max_entries: int = 256
+    cache_ttl: float = 60.0
+
+    token_counter: TokenCounter | None = None
 
     def __post_init__(self) -> None:
         if self.default_max_output_tokens < 0:
@@ -84,4 +95,21 @@ class BackstopConfig:
             raise ValueError("starvation_after_seconds must be >= 0")
         if self.queue_timeout is not None and self.queue_timeout <= 0:
             raise ValueError("queue_timeout must be > 0 when set")
+        if self.request_timeout is not None and self.request_timeout <= 0:
+            raise ValueError("request_timeout must be > 0 when set")
+        if self.cache_max_entries < 1:
+            raise ValueError("cache_max_entries must be >= 1")
+        if self.cache_ttl <= 0:
+            raise ValueError("cache_ttl must be > 0")
+
+    def __getattr__(self, name: str) -> Any:
+        if name == "priority_weights":
+            warnings.warn(
+                "priority_weights is removed in v0.2 and has no effect",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            return {}
+        msg = f"{type(self).__name__!r} has no attribute {name!r}"
+        raise AttributeError(msg)
 

@@ -65,6 +65,15 @@ class Metrics:
             "AIMD limit changes.",
             ["direction"],
         )
+        self.cache_hits = Counter(
+            "backstop_cache_hits_total",
+            "Cache hit count.",
+        )
+        self.tenant_budget_exceeded = Counter(
+            "backstop_tenant_budget_exceeded_total",
+            "Requests blocked by per-tenant budget.",
+            ["tenant_id"],
+        )
 
     def call(self, name: str, *args: Any, method: str = "inc", **kwargs: Any) -> None:
         if not getattr(self, "enabled", False):

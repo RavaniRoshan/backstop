@@ -1,0 +1,26 @@
+name: Benchmark report
+description: Share benchmark results or report benchmark issues
+title: "[Benchmark]: "
+labels: ["benchmark"]
+body:
+  - type: textarea
+    id: command
+    attributes:
+      label: Command
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Python version, CPU, provider SDK versions, and whether a local mock provider or real provider was used.
+    validations:
+      required: true
+  - type: textarea
+    id: results
+    attributes:
+      label: Results
+      render: text
+    validations:
+      required: true

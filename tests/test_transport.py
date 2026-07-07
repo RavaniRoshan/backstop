@@ -121,3 +121,58 @@ async def test_async_transport_reconciles_usage():
     assert calls == 1
     assert state.budget.remaining == 7
 
+
+def test_sync_transport_handles_anthropic_response_format():
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(
+            200,
+            json={
+                "id": "msg_mock",
+                "type": "message",
+                "usage": {"input_tokens": 8, "output_tokens": 4},
+            },
+        )
+
+    state = BackstopState.create(100, BackstopConfig(default_max_output_tokens=1))
+    client = httpx.Client(
+        transport=BackstopTransport(state, httpx.MockTransport(handler)),
+        base_url="https://mock.local",
+    )
+    response = client.post(
+        "/v1/messages",
+        json={"model": "mock", "max_tokens": 5, "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert response.status_code == 200
+    assert calls == 1
+    assert state.budget.remaining == 88
+    client.close()
+
+
+def test_sync_transport_retries_anthropic_529():
+    statuses = [529, 200]
+    sleeps: list[float] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(statuses.pop(0), json={"usage": {"input_tokens": 1, "output_tokens": 1}})
+
+    state = BackstopState.create(
+        100,
+        BackstopConfig(
+            default_max_output_tokens=1,
+            retry_statuses=frozenset({429, 500, 502, 503, 504, 529}),
+            retry_max_attempts=2,
+            aimd_adjustment_interval=0,
+        ),
+    )
+    client = httpx.Client(
+        transport=BackstopTransport(state, httpx.MockTransport(handler), sleep=sleeps.append),
+        base_url="https://mock.local",
+    )
+    assert client.post("/v1/messages", json={"model": "mock", "max_tokens": 1, "messages": []}).status_code == 200
+    assert len(sleeps) == 1
+    client.close()
+
