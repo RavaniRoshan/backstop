@@ -1,5 +1,5 @@
 <div align="center">
-  <h1>Backstop</h1>
+  <img src="docs/assets/logo.png" alt="Backstop Logo" width="600" />
   <p>
     <strong>In-process AI SDK backpressure, budgets, retries, circuit breaking, and metrics.</strong>
   </p>
