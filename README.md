@@ -324,6 +324,33 @@ Set per-request priority via the `X-Backstop-Priority` header:
 | `default` | Normal queue position |
 | `background` | Lowest priority — yields to higher |
 
+### Hooks
+
+`BackstopConfig` is a frozen dataclass, so pass `before_request` / `after_response`
+callbacks to its **constructor** — you cannot assign them to a config instance
+after the fact (that raises `FrozenInstanceError`):
+
+```python
+from openai import OpenAI
+from backstop import Backstop, BackstopConfig
+
+def on_request(hook):
+    print("->", hook.endpoint, "est", hook.estimated_tokens)
+
+def on_response(hook):
+    print("<-", hook.status_code, "used", hook.actual_tokens)
+
+client = Backstop.wrap(
+    OpenAI(api_key="sk-..."),
+    budget=50_000,
+    config=BackstopConfig(before_request=on_request, after_response=on_response),
+)
+```
+
+`hook.metadata` is a copy of the Backstop request headers; read (and mutate, in
+`before_request`) it to carry request-scoped context such as the active tenant
+from `get_current_tenant()`.
+
 ---
 
 ## CLI
@@ -377,11 +404,16 @@ Backstop overhead is measured separately from provider latency using a local moc
 
 Key scenario results (1,000 requests, mock provider):
 
+> **Illustrative, not exact.** The harness injects randomized latency and error
+> injection, so per-run counts vary (especially for Error Storm, where the
+> circuit breaker trips on a sustained failure *rate* rather than a fixed error
+> count). The figures below are representative of a typical run, not a guarantee.
+
 | Scenario | Requests | Provider Calls | Blocked | Why |
 |---|---:|---:|---:|---|
 | **Burst** | 50 | 50 | 0 | All requests within budget |
-| **Error Storm** | 50 | 28 | 30 | Circuit breaker tripped after 7 errors |
-| **Budget Hit** | 80 | 17 | 63 | Pre-flight budget blocking saved 63 API calls |
+| **Error Storm** | 50 | ~15 | ~42 | Circuit breaker tripped under sustained failures |
+| **Budget Hit** | 80 | ~18 | ~62 | Pre-flight budget blocking saved ~62 API calls |
 
 Full results: [`docs/benchmark-results-2026-07-04.md`](docs/benchmark-results-2026-07-04.md) · Methodology: [`docs/benchmarks.md`](docs/benchmarks.md)
 

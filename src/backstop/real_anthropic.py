@@ -158,7 +158,7 @@ def _extract_content_text(content: list) -> str:
 def _api_key(api_key: str | None) -> str:
     resolved = api_key or os.getenv("ANTHROPIC_API_KEY")
     if not resolved:
-        raise RuntimeError("set ANTHROPIC_API_KEY to run the real Anthropic smoke test")
+        raise RuntimeError("ANTHROPIC_API_KEY not set")
     return resolved
 
 

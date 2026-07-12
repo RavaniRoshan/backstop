@@ -9,7 +9,8 @@ from typing import Literal
 from .config import BackstopConfig
 from .wrapper import Backstop
 
-DEFAULT_REAL_MODEL = "gpt-5.5"
+
+DEFAULT_REAL_MODEL = "gpt-4.1-mini"
 SmokeAPI = Literal["responses", "chat"]
 
 
@@ -182,7 +183,7 @@ def _run_sync(
 def _api_key(api_key: str | None) -> str:
     resolved = api_key or os.getenv("OPENAI_API_KEY")
     if not resolved:
-        raise RuntimeError("set OPENAI_API_KEY to run the real OpenAI smoke test")
+        raise RuntimeError("OPENAI_API_KEY not set")
     return resolved
 
 
