@@ -42,15 +42,29 @@ def _deadline_exceeded(deadline: float | None) -> bool:
     return time.monotonic() >= deadline
 
 
+# Headers that must NOT survive replay: `response.content` is already
+# auto-decompressed by httpx, so replaying with `Content-Encoding` set would
+# make httpx try to decompress plain bytes again (and crash). `Content-Length`
+# / `Transfer-Encoding` likewise describe the wire bytes, not the decoded body.
+_REPLAY_STRIP_HEADERS = frozenset(
+    {"content-encoding", "content-length", "transfer-encoding"}
+)
+
+
 def _build_cached_response(
     content: bytes,
     usage: int,
     headers: dict[str, str] | None,
 ) -> httpx.Response:
+    clean_headers = {
+        k: v
+        for k, v in (headers or {}).items()
+        if k.lower() not in _REPLAY_STRIP_HEADERS
+    }
     return httpx.Response(
         200,
         content=content,
-        headers=headers,
+        headers=clean_headers,
     )
 
 
@@ -178,7 +192,14 @@ class BackstopTransport(httpx.BaseTransport):
 
             if streaming:
                 success = response.status_code < 400
-                setup_streaming(response, self.state, reservation, success=success, tenant_budget=tenant_budget)
+                setup_streaming(
+                    response,
+                    self.state,
+                    reservation,
+                    success=success,
+                    tenant_budget=tenant_budget,
+                    created_at=tracker.created_at,
+                )
                 usage = None
             else:
                 response.read()
@@ -223,7 +244,7 @@ class BackstopTransport(httpx.BaseTransport):
             _reconcile(tenant_budget, self.state.budget, reservation, 0, success=False)
             self._observe_request(meta.endpoint, meta.priority, tracker.created_at, "circuit_open")
             raise
-        except (LatencyBudgetExceededError, Exception):
+        except Exception:
             tracker.completed_at = time.monotonic()
             _reconcile(tenant_budget, self.state.budget, reservation, 0, success=False)
             self._record_outcome(599, success=False)
@@ -262,9 +283,6 @@ class BackstopTransport(httpx.BaseTransport):
             else:
                 effective = remaining
         wait = self.state.gate.acquire(priority, timeout=effective)
-        if deadline is not None and time.monotonic() >= deadline:
-            self.state.gate.release()
-            raise LatencyBudgetExceededError("request_timeout exceeded during gate acquire")
         return wait
 
     def _send_with_retries(
@@ -457,7 +475,14 @@ class AsyncBackstopTransport(httpx.AsyncBaseTransport):
 
             if streaming:
                 success = response.status_code < 400
-                await async_setup_streaming(response, self.state, reservation, success=success, tenant_budget=tenant_budget)
+                await async_setup_streaming(
+                    response,
+                    self.state,
+                    reservation,
+                    success=success,
+                    tenant_budget=tenant_budget,
+                    created_at=tracker.created_at,
+                )
                 usage = None
             else:
                 await response.aread()
@@ -502,7 +527,7 @@ class AsyncBackstopTransport(httpx.AsyncBaseTransport):
             _reconcile(tenant_budget, self.state.budget, reservation, 0, success=False)
             self._observe_request(meta.endpoint, meta.priority, tracker.created_at, "circuit_open")
             raise
-        except (LatencyBudgetExceededError, Exception):
+        except Exception:
             tracker.completed_at = time.monotonic()
             _reconcile(tenant_budget, self.state.budget, reservation, 0, success=False)
             self._record_outcome(599, success=False)
@@ -541,9 +566,6 @@ class AsyncBackstopTransport(httpx.AsyncBaseTransport):
             else:
                 effective = remaining
         wait = await self.state.gate.aacquire(priority, timeout=effective)
-        if deadline is not None and time.monotonic() >= deadline:
-            await self.state.gate.arelease()
-            raise LatencyBudgetExceededError("request_timeout exceeded during gate acquire")
         return wait
 
     async def _asend_with_retries(
