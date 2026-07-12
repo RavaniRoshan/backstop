@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# Requires the optional `fastapi` dependency:
+#   pip install "backstop[fastapi]"
 from fastapi import FastAPI, Header, HTTPException
 from openai import OpenAI
 
@@ -8,7 +10,7 @@ from backstop.exceptions import BudgetExceededError
 
 app = FastAPI()
 
-client = Backstop.wrap(OpenAI(), budget=None)
+client = Backstop.wrap(OpenAI(api_key="sk-your-key-here"), budget=None)
 
 budgets.register(
     {

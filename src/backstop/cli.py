@@ -26,7 +26,7 @@ def main(argv: list[str] | None = None) -> int:
     metrics.add_argument("--port", type=int, default=9090)
 
     real = subparsers.add_parser("real-openai", help="run a tiny real OpenAI API smoke test")
-    real.add_argument("--model", help="model to use; defaults to OPENAI_MODEL or gpt-5.5")
+    real.add_argument("--model", help="model to use; defaults to OPENAI_MODEL or gpt-4.1-mini")
     real.add_argument("--base-url", help="override API base URL; defaults to OPENAI_BASE_URL")
     real.add_argument("--api", choices=["responses", "chat"], default="responses")
     real.add_argument("--budget", type=int, default=1_000)
@@ -61,25 +61,33 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
     if args.command == "real-openai":
-        result = run_real_openai_smoke(
-            model=args.model,
-            base_url=args.base_url,
-            api=args.api,
-            budget=args.budget,
-            async_client=args.async_client,
-        )
-        print(json.dumps(result.__dict__, indent=2, sort_keys=True) if args.json else result.to_markdown())
-        return 0
+        try:
+            result = run_real_openai_smoke(
+                model=args.model,
+                base_url=args.base_url,
+                api=args.api,
+                budget=args.budget,
+                async_client=args.async_client,
+            )
+            print(json.dumps(result.__dict__, indent=2, sort_keys=True) if args.json else result.to_markdown())
+            return 0
+        except RuntimeError as e:
+            print(f"error: {e}")
+            return 1
 
     if args.command == "real-anthropic":
-        result = run_real_anthropic_smoke(
-            model=args.model,
-            base_url=args.base_url,
-            budget=args.budget,
-            async_client=args.async_client,
-        )
-        print(json.dumps(result.__dict__, indent=2, sort_keys=True) if args.json else result.to_markdown())
-        return 0
+        try:
+            result = run_real_anthropic_smoke(
+                model=args.model,
+                base_url=args.base_url,
+                budget=args.budget,
+                async_client=args.async_client,
+            )
+            print(json.dumps(result.__dict__, indent=2, sort_keys=True) if args.json else result.to_markdown())
+            return 0
+        except RuntimeError as e:
+            print(f"error: {e}")
+            return 1
 
     return 2
 

@@ -76,40 +76,101 @@ def _estimate_anthropic_tokens(body: dict, raw: bytes, config: BackstopConfig) -
 
 
 def response_usage_tokens(response: httpx.Response) -> int | None:
+    # Handle regular JSON responses (non-streaming)
     try:
         payload = response.json()
+        if isinstance(payload, dict):
+            usage = payload.get("usage")
+            if isinstance(usage, dict):
+                for key in ("total_tokens", "total_token_count"):
+                    value = usage.get(key)
+                    if isinstance(value, int) and value >= 0:
+                        return value
+
+                input_tokens = _int_or_zero(
+                    usage.get("input_tokens"),
+                    usage.get("prompt_tokens"),
+                    usage.get("prompt_token_count"),
+                )
+                output_tokens = _int_or_zero(
+                    usage.get("output_tokens"),
+                    usage.get("completion_tokens"),
+                    usage.get("completion_token_count"),
+                )
+
+                cache_creation = usage.get("cache_creation_input_tokens")
+                cache_read = usage.get("cache_read_input_tokens")
+                if isinstance(cache_creation, int) and cache_creation > 0:
+                    input_tokens = (input_tokens or 0) + cache_creation
+                if isinstance(cache_read, int) and cache_read > 0:
+                    input_tokens = (input_tokens or 0) + cache_read
+
+                if input_tokens is None and output_tokens is None:
+                    return None
+                return (input_tokens or 0) + (output_tokens or 0)
     except Exception:
+        pass
+
+    # Handle SSE streaming responses
+    if 'data:' in response.text:
+        return _usage_from_sse_text(response.text)
+
+    return None
+
+
+def _usage_from_sse_text(response_text: str) -> int | None:
+    """Extract total token usage from SSE text made of `data:` JSON chunks.
+
+    Parses the response from the bottom up for the last chunk carrying a
+    ``usage`` block and returns the combined total tokens (prompt +
+    completion), accounting for Anthropic prompt-cache accounting. Returns
+    None when no usage is present. This is shared by both the non-streaming
+    and streaming reconciliation paths so provider usage shapes stay in one
+    place.
+    """
+    if 'data:' not in response_text:
         return None
-    usage = payload.get("usage") if isinstance(payload, Mapping) else None
-    if not isinstance(usage, Mapping):
-        return None
 
-    for key in ("total_tokens", "total_token_count"):
-        value = usage.get(key)
-        if isinstance(value, int) and value >= 0:
-            return value
+    lines = response_text.strip().split('\n')
+    for line in reversed(lines):
+        line = line.strip()
+        if not line or line == 'data: [DONE]':
+            continue
+        if line.startswith('data: '):
+            try:
+                data = json.loads(line[6:])
+                if isinstance(data, dict) and 'usage' in data and data['usage']:
+                    usage = data['usage']
+                    for key in ("total_tokens", "total_token_count"):
+                        value = usage.get(key)
+                        if isinstance(value, int) and value >= 0:
+                            return value
 
-    input_tokens = _int_or_zero(
-        usage.get("input_tokens"),
-        usage.get("prompt_tokens"),
-        usage.get("prompt_token_count"),
-    )
-    output_tokens = _int_or_zero(
-        usage.get("output_tokens"),
-        usage.get("completion_tokens"),
-        usage.get("completion_token_count"),
-    )
+                    input_tokens = _int_or_zero(
+                        usage.get("input_tokens"),
+                        usage.get("prompt_tokens"),
+                        usage.get("prompt_token_count"),
+                    )
+                    output_tokens = _int_or_zero(
+                        usage.get("output_tokens"),
+                        usage.get("completion_tokens"),
+                        usage.get("completion_token_count"),
+                    )
 
-    cache_creation = usage.get("cache_creation_input_tokens")
-    cache_read = usage.get("cache_read_input_tokens")
-    if isinstance(cache_creation, int) and cache_creation > 0:
-        input_tokens = (input_tokens or 0) + cache_creation
-    if isinstance(cache_read, int) and cache_read > 0:
-        input_tokens = (input_tokens or 0) + cache_read
+                    cache_creation = usage.get("cache_creation_input_tokens")
+                    cache_read = usage.get("cache_read_input_tokens")
+                    if isinstance(cache_creation, int) and cache_creation > 0:
+                        input_tokens = (input_tokens or 0) + cache_creation
+                    if isinstance(cache_read, int) and cache_read > 0:
+                        input_tokens = (input_tokens or 0) + cache_read
 
-    if input_tokens is None and output_tokens is None:
-        return None
-    return (input_tokens or 0) + (output_tokens or 0)
+                    if input_tokens is None and output_tokens is None:
+                        return None
+                    return (input_tokens or 0) + (output_tokens or 0)
+            except json.JSONDecodeError:
+                pass
+
+    return None
 
 
 def _json_body(request: httpx.Request) -> Any:
