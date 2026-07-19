@@ -39,7 +39,7 @@ The Wedge tool (bundled in this repo) tests whether this transport-layer isolati
 ## Quick Start
 
 ```bash
-pip install -e ".[anthropic]"
+pip install "backstop[anthropic]"
 ```
 
 Wrap any OpenAI or Anthropic client in one line:
@@ -219,21 +219,51 @@ Key: **isolated context, not isolated infrastructure.** All runners share the sa
 
 ## Install
 
+Backstop is published on PyPI. Pick the install that matches how you'll use it.
+
 ```bash
-# Base install
-pip install backstop
-
-# With Prometheus metrics
-pip install "backstop[metrics]"
-
-# With Anthropic support
+# Most users — OpenAI + Anthropic support in one line
 pip install "backstop[anthropic]"
 
-# Everything (dev)
-pip install -e ".[test,metrics,anthropic]"
+# Metrics (Prometheus export) only
+pip install "backstop[metrics]"
+
+# Base library (OpenAI only) — add [anthropic] for Claude support
+pip install backstop
 ```
 
-From source:
+Run either CLI **without a permanent install** (great for a quick try or CI) —
+`pipx` fetches Backstop into a throwaway environment and runs it:
+
+```bash
+pipx run backstop --help      # Backstop harness / metrics server
+pipx run wedge --help         # Wedge multi-agent diff tool
+```
+
+If you don't have pip set up at all, the one-command installer detects Python
+and installs Backstop for you (secondary / convenience path):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/RavaniRoshan/backstop/main/install.sh | sh
+```
+
+Canonical install remains `pip install "backstop[anthropic]"` (see
+[docs/install.md](docs/install.md) for the full matrix).
+
+Isolated, persistent installs (recommended for the `backstop` / `wedge` commands):
+
+```bash
+pipx install backstop
+```
+
+Every path here is `pip`/`pipx` or the curl convenience installer above — no npm.
+`pip install "backstop[anthropic]"` is the canonical install; the curl one-liner is
+a secondary option for users without pip/Python knowledge.
+See [docs/install.md](docs/install.md) for the full end-user + enterprise matrix
+(internal-mirror, pinned, air-gapped, and container paths).
+
+### From source / development
+
 ```bash
 git clone https://github.com/RavaniRoshan/backstop.git
 cd backstop
