@@ -6,7 +6,6 @@ import shutil
 import subprocess
 from typing import Dict, Any, Optional
 
-from anthropic import AsyncAnthropic
 from openai import AsyncOpenAI
 from backstop.wrapper import Backstop
 from backstop.config import BackstopConfig
@@ -236,6 +235,13 @@ class WedgeRunner:
                     "ANTHROPIC_API_KEY",
                     "sk-test-key-not-set",
                 )
+                try:
+                    from anthropic import AsyncAnthropic
+                except ImportError as exc:
+                    raise ImportError(
+                        "The 'anthropic' extra is required for the anthropic provider. "
+                        "Install it with: pip install \"backstop[anthropic]\""
+                    ) from exc
                 base_client = AsyncAnthropic(api_key=api_key, **kwargs)
             elif self.provider == "openai":
                 self._DEFAULT_MODEL = model or "gpt-4.1-mini"
@@ -252,12 +258,17 @@ class WedgeRunner:
 
             self.client = Backstop.wrap(base_client, budget=20_000)
         except Exception:
-            self.client = Backstop.wrap(
-                AsyncAnthropic(api_key="sk-test", **{"base_url": base_url} if base_url else {})
-                if self.provider == "anthropic"
-                else AsyncOpenAI(api_key="sk-test", **{"base_url": base_url} if base_url else {}),
-                budget=20_000,
-            )
+            if self.provider == "anthropic":
+                from anthropic import AsyncAnthropic
+
+                base_client = AsyncAnthropic(
+                    api_key="sk-test", **({"base_url": base_url} if base_url else {})
+                )
+            else:
+                base_client = AsyncOpenAI(
+                    api_key="sk-test", **({"base_url": base_url} if base_url else {})
+                )
+            self.client = Backstop.wrap(base_client, budget=20_000)
 
     def _make_worktree(self) -> str:
         """Create an isolated working directory for the patch + test.
