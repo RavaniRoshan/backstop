@@ -1,0 +1,34 @@
+# Backstop
+
+> In-process AI SDK backpressure, budgets, retries, circuit breaking, and metrics for OpenAI and Anthropic clients. Wraps your existing SDK client at the httpx transport layer — no proxy, no call-site changes.
+
+- Documentation: /README.md
+- Install guide (end-user + enterprise): /docs/install.md
+- Architecture: /docs/architecture.md
+- Threat model: /docs/threat-model.md
+- Compatibility matrix: /docs/compatibility.md
+- Benchmarks: /docs/benchmarks.md
+- Examples: /examples/
+- Wedge (multi-agent diff tool): /examples/wedge_basic.py
+- Research: /docs/research/backstop-deep-research-2026-07-18.md
+
+## Install (verified)
+
+- `pip install "backstop[anthropic]"` — one line, OpenAI + Anthropic (canonical)
+- `pip install backstop` — OpenAI only (add `[anthropic]` for Claude)
+- `curl -fsSL https://raw.githubusercontent.com/RavaniRoshan/backstop/main/install.sh | sh` — one-command installer for users without pip/Python knowledge (secondary)
+- `pipx run backstop --help` / `pipx run wedge --help` — run without a permanent install
+- `pipx install backstop` — isolated persistent CLI (no npm)
+
+## Quick start
+
+```python
+from openai import OpenAI
+from backstop import Backstop
+
+client = Backstop.wrap(OpenAI(), budget=50_000)
+response = client.chat.completions.create(
+    model="gpt-4.1-mini",
+    messages=[{"role": "user", "content": "Hello."}],
+)
+```
