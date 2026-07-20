@@ -46,3 +46,16 @@ class AIMDController:
             self._last_adjustment = now
             return True
 
+    def apply_external_decrease(self, pressure: float = 1.0) -> bool:
+        """Proactively clamp the limit from an out-of-band signal (e.g. provider
+        quota pressure). Bypasses the adjustment-interval throttle so a quota
+        warning takes effect on the very next request."""
+        with self._lock:
+            factor = max(self._config.aimd_decrease_factor, min(1.0, pressure))
+            new_limit = max(self._config.min_concurrency, int(self._limit * factor))
+            if new_limit == self._limit:
+                return False
+            self._limit = new_limit
+            self._last_adjustment = time.monotonic()
+            return True
+

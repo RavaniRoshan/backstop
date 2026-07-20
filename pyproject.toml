@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "backstop"
-version = "0.4.0"
+version = "0.5.0"
 description = "In-process OpenAI SDK backpressure, budgets, retries, circuit breaking, and metrics."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -21,6 +21,8 @@ metrics = ["prometheus-client>=0.20"]
 anthropic = ["anthropic>=0.40"]
 tokenizers = ["tiktoken>=0.7"]
 fastapi = ["fastapi>=0.110"]
+redis = ["redis>=5"]
+otel = ["opentelemetry-api>=1.20", "opentelemetry-sdk>=1.20"]
 test = [
   "anyio>=4",
   "pytest>=8",

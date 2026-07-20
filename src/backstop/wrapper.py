@@ -23,6 +23,9 @@ class Backstop:
         if existing is not None:
             return client
 
+        resolved_config = config or BackstopConfig()
+        _warn_if_over_concurrency_ceiling(resolved_config)
+
         cls = client.__class__
         provider = _detect_provider(cls)
         if not provider:
@@ -60,6 +63,24 @@ def _detect_provider(cls: type) -> str:
     if module.startswith("anthropic") and name in _SUPPORTED_ANTHROPIC:
         return "anthropic"
     return ""
+
+
+_active_wraps = 0
+
+
+def _warn_if_over_concurrency_ceiling(config: BackstopConfig) -> None:
+    global _active_wraps
+    _active_wraps += 1
+    if config.max_wrap_sessions and _active_wraps > config.max_wrap_sessions:
+        import warnings
+
+        warnings.warn(
+            f"Backstop: {_active_wraps} active wrap() sessions exceed "
+            f"max_wrap_sessions={config.max_wrap_sessions}. Under CPython's GIL, "
+            "many concurrent in-process sessions serialize on it — consider fewer "
+            "sessions per process or a process per agent.",
+            stacklevel=2,
+        )
 
 
 def _clone_openai_client(client: Any, http_client: httpx.Client | httpx.AsyncClient) -> Any:

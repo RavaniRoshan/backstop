@@ -1,0 +1,23 @@
+{
+  "name": "@ravanish/backstop",
+  "version": "0.1.0",
+  "description": "In-process LLM guardrails for the OpenAI SDK — drop-in budget, circuit breaker, retry, and fallback, mirroring the Python backstop.wrap().",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": ["dist", "src", "README.md"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test --import tsx tests/*.test.ts"
+  },
+  "keywords": ["openai", "llm", "guardrails", "budget", "circuit-breaker", "fallback"],
+  "peerDependencies": {
+    "openai": ">=4"
+  },
+  "devDependencies": {
+    "tsx": "^4",
+    "typescript": "^5"
+  }
+}

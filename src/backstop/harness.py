@@ -17,6 +17,8 @@ from .transports import BackstopTransport
 
 Scenario = Literal["burst", "steady-state", "error-storm", "budget-hit"]
 
+DEFAULT_SEED = 0xC0FFEE
+
 
 @dataclass
 class HarnessResult:
@@ -57,11 +59,14 @@ class HarnessResult:
         )
 
 
-def run_harness(scenario: Scenario) -> HarnessResult:
+def run_harness(scenario: Scenario, seed: int = DEFAULT_SEED) -> HarnessResult:
     if scenario not in {"burst", "steady-state", "error-storm", "budget-hit"}:
         raise ValueError(f"unknown scenario: {scenario}")
 
-    provider = _MockProvider(error_rate=0.6 if scenario == "error-storm" else 0.0)
+    rng = random.Random(seed)
+    provider = _MockProvider(
+        error_rate=0.6 if scenario == "error-storm" else 0.0, rng=rng
+    )
     config = BackstopConfig(
         initial_concurrency=8,
         max_concurrency=32,
@@ -140,16 +145,26 @@ def run_harness(scenario: Scenario) -> HarnessResult:
 
 
 class _MockAnthropicProvider:
-    def __init__(self, *, error_rate: float) -> None:
+    def __init__(self, *, error_rate: float, rng: random.Random | None = None) -> None:
         self.error_rate = error_rate
+        self.rng = rng or random
         self.calls = 0
+        # Precompute deterministic error decisions so concurrent requests draw
+        # the same outcomes every run (independent of thread scheduling).
+        self._errors = self.rng
         self._lock = threading.Lock()
+        self._idx = 0
+        self._plan = [
+            self.rng.random() < error_rate for _ in range(10_000)
+        ] if error_rate else [False] * 10_000
 
     def handle(self, request: httpx.Request) -> httpx.Response:
         with self._lock:
             self.calls += 1
-        time.sleep(random.uniform(0.005, 0.025))
-        if self.error_rate and random.random() < self.error_rate:
+            idx = self._idx
+            self._idx += 1
+        time.sleep(self.rng.uniform(0.005, 0.025))
+        if self.error_rate and self._plan[idx % len(self._plan)]:
             return httpx.Response(529, json={"error": {"message": "synthetic overload"}})
         return httpx.Response(
             200,
@@ -166,16 +181,23 @@ class _MockAnthropicProvider:
 
 
 class _MockProvider:
-    def __init__(self, *, error_rate: float) -> None:
+    def __init__(self, *, error_rate: float, rng: random.Random | None = None) -> None:
         self.error_rate = error_rate
+        self.rng = rng or random
         self.calls = 0
         self._lock = threading.Lock()
+        self._idx = 0
+        self._plan = [
+            self.rng.random() < error_rate for _ in range(10_000)
+        ] if error_rate else [False] * 10_000
 
     def handle(self, request: httpx.Request) -> httpx.Response:
         with self._lock:
             self.calls += 1
-        time.sleep(random.uniform(0.005, 0.025))
-        if self.error_rate and random.random() < self.error_rate:
+            idx = self._idx
+            self._idx += 1
+        time.sleep(self.rng.uniform(0.005, 0.025))
+        if self.error_rate and self._plan[idx % len(self._plan)]:
             return httpx.Response(503, json={"error": {"message": "synthetic overload"}})
         return httpx.Response(
             200,

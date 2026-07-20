@@ -16,6 +16,9 @@
 
 - `pip install "backstop[anthropic]"` — one line, OpenAI + Anthropic (canonical)
 - `pip install backstop` — OpenAI only (add `[anthropic]` for Claude)
+- `pip install "backstop[redis]"` — shared/distributed budget across replicas
+- `pip install "backstop[otel]"` — OpenTelemetry metrics export
+- `pip install "backstop[fastapi]"` — multi-tenant FastAPI example dependency
 - `curl -fsSL https://raw.githubusercontent.com/RavaniRoshan/backstop/main/install.sh | sh` — one-command installer for users without pip/Python knowledge (secondary)
 - `pipx run backstop --help` / `pipx run wedge --help` — run without a permanent install
 - `pipx install backstop` — isolated persistent CLI (no npm)
@@ -32,3 +35,26 @@ response = client.chat.completions.create(
     messages=[{"role": "user", "content": "Hello."}],
 )
 ```
+
+## Agentic-installer quickstart
+
+If you are an agent installing Backstop into a codebase:
+
+1. Detect the SDK in use (`openai` and/or `anthropic`).
+2. `pip install "backstop[anthropic]"` (or just `backstop` for OpenAI-only).
+3. Wrap the existing client with one line — **no call-site changes**:
+   `client = Backstop.wrap(client, budget=50_000)`.
+4. Validate with `backstop doctor` and prove overhead with `backstop benchmark`.
+5. For multi-replica deployments, add `[redis]` and
+   `BackstopConfig(shared_budget=True, redis_url=...)` so one budget is
+   enforced across processes.
+
+Backstop never changes your provider calls, adds no network hop, and
+exposes a safe default budget so a single `wrap()` line protects out of the box.
+
+## CLIs
+
+- `backstop doctor` — validate install, SDKs, keys, and a wrap smoke test.
+- `backstop benchmark` — reproducible (seeded) overhead + scenario proof.
+- `backstop metrics` — Prometheus endpoint. `backstop real-openai` / `real-anthropic` — live smoke tests.
+- `wedge run task.yaml` — multi-agent convergence + per-runner budget proof.

@@ -194,7 +194,7 @@ def test_downgrade_on_exceed_rewrites_model():
 def test_downgrade_target_lookup():
     assert get_downgrade_target("gpt-4o") == "gpt-4o-mini"
     assert get_downgrade_target("gpt-4o-mini") is None
-    assert get_downgrade_target("claude-sonnet-4-20250514") == "claude-haiku-3-20240307"
+    assert get_downgrade_target("claude-sonnet-4-20250514") == "claude-haiku-4-20250514"
     assert get_downgrade_target("unknown-model") is None
 
 

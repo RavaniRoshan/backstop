@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-import asyncio
-import threading
 from dataclasses import dataclass
 
 from .exceptions import BudgetExceededError
+from .state_backends import BudgetBackend, InMemoryBudgetBackend
 
 
 @dataclass(frozen=True)
@@ -13,68 +12,68 @@ class Reservation:
 
 
 class Budget:
-    def __init__(self, total: int | None) -> None:
-        if total is not None and total < 0:
-            raise ValueError("budget must be >= 0 or None")
-        self.total = total
-        self._spent = 0
-        self._reserved = 0
-        self._lock = threading.Lock()
-        self._async_lock = asyncio.Lock()
+    """Token budget that delegates storage to a pluggable :class:`BudgetBackend`.
+
+    The default backend is in-process (``InMemoryBudgetBackend``). Pass a
+    shared backend (e.g. ``RedisBudgetBackend``) to enforce one budget across
+    processes/replicas. The public API (``reserve`` / ``reconcile`` /
+    ``remaining`` / ``spent``) is unchanged from the in-process version so
+    existing call sites keep working.
+    """
+
+    def __init__(
+        self,
+        total: int | None,
+        backend: BudgetBackend | None = None,
+    ) -> None:
+        self.backend = backend or InMemoryBudgetBackend(total)
+
+    @property
+    def total(self) -> int | None:
+        return self.backend.total
 
     @property
     def remaining(self) -> int | None:
-        if self.total is None:
-            return None
-        with self._lock:
-            return max(0, self.total - self._spent - self._reserved)
+        return self.backend.remaining
 
     @property
     def spent(self) -> int:
-        with self._lock:
-            return self._spent
+        return self.backend.spent
 
     def reserve(self, tokens: int) -> Reservation:
         tokens = max(0, tokens)
-        if self.total is None:
+        if self.backend.total is None:
             return Reservation(tokens)
-        with self._lock:
-            if self._spent + self._reserved + tokens > self.total:
-                remaining = max(0, self.total - self._spent - self._reserved)
-                raise BudgetExceededError(
-                    f"request estimate {tokens} tokens exceeds remaining budget {remaining}"
-                )
-            self._reserved += tokens
-            return Reservation(tokens)
+        if not self.backend.reserve(tokens):
+            remaining = self.remaining or 0
+            raise BudgetExceededError(
+                f"request estimate {tokens} tokens exceeds remaining budget {remaining}"
+            )
+        return Reservation(tokens)
 
     async def areserve(self, tokens: int) -> Reservation:
         tokens = max(0, tokens)
-        if self.total is None:
+        if self.backend.total is None:
             return Reservation(tokens)
-        async with self._async_lock:
-            if self._spent + self._reserved + tokens > self.total:
-                remaining = max(0, self.total - self._spent - self._reserved)
-                raise BudgetExceededError(
-                    f"request estimate {tokens} tokens exceeds remaining budget {remaining}"
-                )
-            self._reserved += tokens
-            return Reservation(tokens)
+        if not await self.backend.areserve(tokens):
+            remaining = self.remaining or 0
+            raise BudgetExceededError(
+                f"request estimate {tokens} tokens exceeds remaining budget {remaining}"
+            )
+        return Reservation(tokens)
 
-    def reconcile(self, reservation: Reservation, actual_tokens: int | None, *, success: bool) -> None:
-        if self.total is None:
-            return
-        charge = reservation.tokens if success and actual_tokens is None else max(0, actual_tokens or 0)
-        with self._lock:
-            self._reserved = max(0, self._reserved - reservation.tokens)
-            self._spent = min(self.total, self._spent + charge)
+    def reconcile(
+        self, reservation: Reservation, actual_tokens: int | None, *, success: bool
+    ) -> None:
+        charge = (
+            reservation.tokens if success and actual_tokens is None else max(0, actual_tokens or 0)
+        )
+        self.backend.commit(reservation.tokens, charge)
 
     async def areconcile(
         self, reservation: Reservation, actual_tokens: int | None, *, success: bool
     ) -> None:
-        if self.total is None:
-            return
-        charge = reservation.tokens if success and actual_tokens is None else max(0, actual_tokens or 0)
-        async with self._async_lock:
-            self._reserved = max(0, self._reserved - reservation.tokens)
-            self._spent = min(self.total, self._spent + charge)
-
+        charge = (
+            reservation.tokens if success and actual_tokens is None else max(0, actual_tokens or 0)
+        )
+        await self.backend.acommit(reservation.tokens, charge)

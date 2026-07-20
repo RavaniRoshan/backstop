@@ -3,6 +3,26 @@ from __future__ import annotations
 from typing import Any
 
 
+_OTEL: Any | None = None
+
+
+def enable_otel(meter_name: str = "backstop") -> bool:
+    """Initialize the optional OTel mirror. Returns True if it became active."""
+    global _OTEL
+    try:
+        from .otel import OtelMetrics
+
+        _OTEL = OtelMetrics(meter_name)
+    except Exception:
+        _OTEL = None
+    return bool(_OTEL and _OTEL.enabled)
+
+
+def disable_otel() -> None:
+    global _OTEL
+    _OTEL = None
+
+
 class Metrics:
     def __init__(self) -> None:
         try:
@@ -82,6 +102,8 @@ class Metrics:
         if args:
             metric = metric.labels(*args)
         getattr(metric, method)(**kwargs)
+        if _OTEL is not None and _OTEL.enabled:
+            _OTEL.call(name, *args, method=method, **kwargs)
 
 
 _METRICS = Metrics()

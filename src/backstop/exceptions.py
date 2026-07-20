@@ -17,3 +17,11 @@ class UnsupportedClientError(BackstopError):
 class LatencyBudgetExceededError(BackstopError):
     """Raised when a request exceeds the configured request_timeout."""
 
+
+class RateLimitError(BackstopError):
+    """Raised when a pluggable rate limiter rejects a request before dispatch."""
+
+
+class GuardrailViolationError(BackstopError):
+    """Raised when an agent guardrail (runaway loop / stall) blocks a request."""
+

@@ -22,6 +22,7 @@ class TenantBudget:
     on_exceed: str = "raise"
     used: int = 0
     reserved: int = 0
+    parent: "TenantBudget | None" = None
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
     @property
@@ -36,7 +37,14 @@ class TenantBudget:
                     f"request estimate {tokens} tokens exceeds remaining {self.remaining}"
                 )
             self.reserved += tokens
-            return ReservationTicket(self.tenant_id, tokens)
+        if self.parent is not None and self.parent is not self:
+            try:
+                self.parent.reserve(tokens)
+            except BudgetExceededError:
+                with self._lock:
+                    self.reserved -= tokens
+                raise
+        return ReservationTicket(self.tenant_id, tokens)
 
     def commit(self, ticket: ReservationTicket, actual: int | None) -> None:
         if ticket.tenant_id != self.tenant_id:
@@ -44,6 +52,8 @@ class TenantBudget:
         with self._lock:
             self.reserved = max(0, self.reserved - ticket.tokens)
             self.used = min(self.limit_tokens, self.used + (actual or ticket.tokens))
+        if self.parent is not None and self.parent is not self:
+            self.parent.commit(ReservationTicket(self.parent.tenant_id, ticket.tokens), actual)
 
 
 class BudgetLedger:

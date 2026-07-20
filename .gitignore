@@ -8,3 +8,7 @@ dist/
 build/
 *.egg-info/
 .kilo/
+node_modules/
+*.tsbuildinfo
+ts/backstop/dist/
+wedge_report.md

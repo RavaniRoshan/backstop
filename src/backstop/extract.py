@@ -42,6 +42,9 @@ def estimate_tokens(body: Any, raw: bytes, config: BackstopConfig, endpoint: str
     model = body.get("model", "") if isinstance(body, Mapping) else ""
     if config.token_counter is not None:
         prompt_tokens = config.token_counter(str(body.get("messages", body)), model)
+    elif config.auto_token_count:
+        # Use tiktoken when available/recognized, else falls back to heuristic.
+        prompt_tokens = count_tokens(str(body.get("messages", body)), model)
     else:
         prompt_tokens = int(prompt_chars / config.chars_per_token)
 

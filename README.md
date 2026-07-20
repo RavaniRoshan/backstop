@@ -81,17 +81,22 @@ wedge run task.yaml
 ## Features
 
 - **Token budget enforcement** — Reserve before dispatch, reconcile after response. Hard limits prevent runaway spend.
-- **Priority admission** — `critical`, `default`, `background` queuing with starvation prevention.
+- **Priority admission** — `critical`, `default`, `background` priority with starvation prevention.
 - **AIMD concurrency** — Additive-increase/multiplicative-decrease adapts to provider pressure.
 - **Retry with backoff** — Configurable attempts, jitter, and status codes (429/500/502/503/504/529).
 - **Circuit breaker** — Trips on sustained failure, cooldowns automatically.
 - **Streaming support** — Wraps streaming responses while preserving budget reconciliation.
 - **Tenant budgets** — Request-scoped tenant budget buckets via `with_budget(...)`.
-- **Response caching** — Optional in-memory cache for repeated deterministic calls.
+- **Response caching** — Optional in-memory cache; opt-in **semantic (near-duplicate)** caching short-circuits reformatted/paraphrased prompts via a pluggable embedder (`cache_enabled=True, cache_semantic=True, cache_embedder=...`).
 - **Hooks** — Lightweight before/after hooks for local logging, policy, and metadata.
 - **HTTP transport layer** — Plugs into the SDK's native `httpx` transport — no monkey-patching.
 - **Prometheus metrics** — Optional export for dashboards and alerting.
+- **OpenTelemetry export** — Vendor-neutral metrics mirroring the Prometheus series (`pip install "backstop[otel]"`, `BackstopConfig(otel_enabled=True)`).
+- **Shared (Redis) budget** — Enforce *one* token budget across processes and replicas with zero infra (`pip install "backstop[redis]"`, `BackstopConfig(shared_budget=True)`).
+- **In-process fallback chain** — On a sustained provider failure, walk an ordered `fallback_chain` of backup models/deployments *inside your process*; `fallback_chain_for_priority` gives critical traffic its own chain (`BackstopConfig(fallback_chain=[{"model": ...}, {"model": ..., "base_url": ...}])`). The legacy single `fallback_model` is still supported.
+- **CLI ergonomics** — `backstop doctor` validates your install; `backstop benchmark` produces reproducible proof.
 - **Provider support** — OpenAI (sync & async) and Anthropic (sync & async).
+- **TypeScript SDK** — `@ravanish/backstop` brings the same drop-in `wrap()` (budget + circuit breaker + retry + fallback) to Node.js agents (`ts/backstop`).
 
 ---
 
@@ -157,16 +162,100 @@ Backstop deliberately avoids:
 
 - **Not a proxy/gateway** — No network hop. Runs entirely in-process.
 - **Not an MCP tool** — Protocol-agnostic. Works with any SDK client that uses `httpx`/`requests`.
-- **Not an observability platform** — It exports Prometheus metrics; it doesn't store, query, or visualize them.
+- **Not an observability platform** — It exports Prometheus *and* OpenTelemetry metrics; it doesn't store, query, or visualize them.
 - **Not an application-layer tool** — It does not consume signals like "disagreement" or "confidence." It operates at the transport layer only.
 - **Not a caching layer** — Optional response caching exists for convenience, not as a primary feature.
 
 Wedge deliberately avoids:
 
 - **Not a production agent framework** — This is a 7-day spike to test a hypothesis, not a finished product.
-- **Not AST-level semantic diffing** — v1 uses `difflib` string comparison. Semantic diffing is a v2 question gated on v1 results.
+- **Not a finished product** — Wedge is a focused proof tool for the per-agent isolation thesis, not a general agent framework. Semantic (token/line-normalized) diffing is included; full AST diffing is a future enhancement.
 
 ---
+
+## Production Reliability
+
+Backstop is drop-in *and* production-grade: it closes the gap vs proxy
+gateways (LiteLLM/BricksLLM) while staying in-process.
+
+### Shared budget across replicas (P1)
+
+A single token budget enforced across processes/replicas — the "AI SaaS team
+with runaway spend" wedge. No Postgres, no Redis admin, no network hop:
+
+```bash
+pip install "backstop[redis]"
+```
+
+```python
+from openai import OpenAI
+from backstop import Backstop, BackstopConfig
+
+client = Backstop.wrap(
+    OpenAI(),
+    budget=1_000_000,
+    config=BackstopConfig(shared_budget=True, redis_url="redis://localhost:6379"),
+)
+```
+
+Every `wrap()` session in every process decrements the *same* Redis key via
+atomic Lua scripts, so N replicas cannot overspend one cap beyond tolerance.
+
+### OpenTelemetry export (P2)
+
+Mirror every Prometheus series to a vendor-neutral OTel meter (Datadog,
+Honeycomb, CloudWatch — any OTLP collector):
+
+```bash
+pip install "backstop[otel]"
+```
+
+```python
+client = Backstop.wrap(
+    OpenAI(),
+    budget=50_000,
+    config=BackstopConfig(otel_enabled=True),
+)
+```
+
+### In-process fallback (P3)
+
+On a sustained provider failure (circuit open), retry once against a backup
+model/deployment *within your process* — no proxy, no extra infra:
+
+```python
+client = Backstop.wrap(
+    OpenAI(),
+    budget=50_000,
+    config=BackstopConfig(
+        fallback_model="gpt-4o-mini",
+        fallback_base_url="https://backup-gateway.example.com/v1",  # optional
+    ),
+)
+```
+
+### CLI ergonomics
+
+```bash
+backstop doctor      # validate install, SDKs, keys, wrap smoke test
+backstop benchmark   # deterministic, seeded proof (--publish to commit results)
+```
+
+---
+
+## Documentation
+
+- [Concurrency & Scale Limits](docs/concurrency.md) — the GIL ceiling, the
+  configurable `max_wrap_sessions` cap, and when a proxy gateway is the better
+  fit.
+- [Competitive benchmark: Backstop vs. LiteLLM/BricksLLM (2026-07-20)](docs/competitive-benchmark-2026-07-20.md)
+  — Firecrawl-sourced feature matrix and the "10× better" wedge.
+- [Deep Research: Making Backstop a 10× Better LLM Guardrail (2026-07-20)](docs/deep-research-10x-better-2026-07-20.md)
+  — exhaustive, 6-agent Firecrawl synthesis across gateways, observability,
+  frameworks, clouds, in-process techniques, and contrarian risks, with a
+  prioritized 10× roadmap.
+- [Published benchmark results (2026-07-20)](docs/benchmark-results-2026-07-20.md)
+  — deterministic, reproducible proof from `backstop benchmark`.
 
 ## Architecture
 
@@ -432,20 +521,23 @@ Backstop overhead is measured separately from provider latency using a local moc
 | p95 latency | 0.22 ms | 0.30 ms | **0.07 ms** |
 | p99 latency | 0.30 ms | 0.38 ms | **0.07 ms** |
 
-Key scenario results (1,000 requests, mock provider):
-
-> **Illustrative, not exact.** The harness injects randomized latency and error
-> injection, so per-run counts vary (especially for Error Storm, where the
-> circuit breaker trips on a sustained failure *rate* rather than a fixed error
-> count). The figures below are representative of a typical run, not a guarantee.
+Key scenario results (deterministic: local mock transport, fixed seed `0xC0FFEE`, reproducible via `backstop benchmark`):
 
 | Scenario | Requests | Provider Calls | Blocked | Why |
 |---|---:|---:|---:|---|
 | **Burst** | 50 | 50 | 0 | All requests within budget |
-| **Error Storm** | 50 | ~15 | ~42 | Circuit breaker tripped under sustained failures |
-| **Budget Hit** | 80 | ~18 | ~62 | Pre-flight budget blocking saved ~62 API calls |
+| **Error Storm** | 50 | 12 | 42 | Circuit breaker tripped under sustained failures |
+| **Budget Hit** | 80 | 16 | 64 | Pre-flight budget blocking saved 64 API calls |
 
-Full results: [`docs/benchmark-results-2026-07-04.md`](docs/benchmark-results-2026-07-04.md) · Methodology: [`docs/benchmarks.md`](docs/benchmarks.md)
+Per-run counts are exact and reproducible — the seeded harness removes the
+randomized error injection that made earlier runs non-deterministic. Re-run
+any time to confirm:
+
+```bash
+backstop benchmark --publish   # writes docs/benchmark-results-<date>.md
+```
+
+Full results: [`docs/benchmark-results-2026-07-20.md`](docs/benchmark-results-2026-07-20.md) · Methodology: [`docs/benchmarks.md`](docs/benchmarks.md)
 
 ---
 

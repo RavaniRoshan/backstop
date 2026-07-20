@@ -11,7 +11,13 @@ from .budget import Reservation
 from .cache import ResponseCache
 from .circuit import CircuitState
 from .config import BackstopConfig, Priority
-from .exceptions import BudgetExceededError, CircuitBreakerOpenError, LatencyBudgetExceededError
+from .exceptions import (
+    BudgetExceededError,
+    CircuitBreakerOpenError,
+    GuardrailViolationError,
+    LatencyBudgetExceededError,
+    RateLimitError,
+)
 from .extract import _json_body, request_metadata, response_usage_tokens
 from .hooks import AfterResponseHook, BeforeRequestHook
 from .latency import _LatencyTracker, extract_backstop_headers
@@ -49,6 +55,37 @@ def _deadline_exceeded(deadline: float | None) -> bool:
 _REPLAY_STRIP_HEADERS = frozenset(
     {"content-encoding", "content-length", "transfer-encoding"}
 )
+
+
+def _build_fallback_request(
+    request: httpx.Request,
+    model: str,
+    base_url: str | None,
+) -> httpx.Request | None:
+    """Clone ``request`` pointing at a fallback target.
+
+    Rewrites the request body's ``model`` to ``model`` and, when ``base_url`` is
+    set, repoints the URL. Returns ``None`` when the request body isn't JSON.
+    """
+    body = _json_body(request)
+    if not isinstance(body, dict):
+        return None
+    new_body = dict(body)
+    new_body["model"] = model
+    new_content = json.dumps(new_body).encode("utf-8")
+
+    headers = request.headers.copy()
+    headers["content-length"] = str(len(new_content))
+    if base_url:
+        base = base_url.rstrip("/")
+        path = request.url.raw_path.decode("ascii", "replace")
+        try:
+            url = httpx.URL(base + path)
+        except Exception:
+            return None
+    else:
+        url = request.url
+    return httpx.Request(request.method, url, content=new_content, headers=headers)
 
 
 def _build_cached_response(
@@ -102,6 +139,8 @@ class BackstopTransport(httpx.BaseTransport):
         self._cache = ResponseCache(
             max_entries=state.config.cache_max_entries,
             ttl=state.config.cache_ttl,
+            embed=state.config.cache_embedder if state.config.cache_semantic else None,
+            similarity_threshold=state.config.cache_similarity_threshold,
         ) if state.config.cache_enabled else None
 
     def handle_request(self, request: httpx.Request) -> httpx.Response:
@@ -116,12 +155,15 @@ class BackstopTransport(httpx.BaseTransport):
         if self._cache is not None and body is not None and not streaming:
             cached = self._cache.get(body)
             if cached is not None:
+                content, usage, headers, semantic = cached
                 self._metrics.call("cache_hits")
+                if semantic:
+                    self._metrics.call("cache_semantic_hits")
                 tracker.completed_at = time.monotonic()
-                response = _build_cached_response(cached[0], cached[1], cached[2])
+                response = _build_cached_response(content, usage, headers)
                 backstop_meta = tracker.build_meta(
                     estimated_tokens=meta.estimated_tokens,
-                    actual_tokens=cached[1],
+                    actual_tokens=usage,
                     circuit_state=self.state.circuit.state.value,
                     endpoint=meta.endpoint,
                 )
@@ -130,10 +172,17 @@ class BackstopTransport(httpx.BaseTransport):
 
         hook_metadata = extract_backstop_headers(request)
         tenant_id = get_current_tenant()
+        if self.state.config.virtual_keys is not None:
+            vk = request.headers.get(self.state.config.virtual_key_header)
+            if vk is not None:
+                tid = self.state.config.tenant_for_key(vk)
+                if tid is not None:
+                    tenant_id = tid
         tenant_budget: object | None = None
         if tenant_id is not None:
             ledger = get_ledger()
             tenant_budget = ledger.get(tenant_id) if ledger else None
+        circuit = self.state.circuit_for(tenant_id)
 
         downgraded = False
         try:
@@ -149,6 +198,7 @@ class BackstopTransport(httpx.BaseTransport):
             ):
                 if self._try_downgrade(request, body):
                     downgraded = True
+                    self._audit("downgrade", "budget_exceeded", meta, tenant_id=tenant_id)
                     meta = request_metadata(request, self.state.config)
                     try:
                         if tenant_budget is not None:
@@ -161,12 +211,16 @@ class BackstopTransport(httpx.BaseTransport):
                     self._metrics.call("budget_exceeded")
                     if tenant_id:
                         self._metrics.call("tenant_budget_exceeded", tenant_id)
+                    self._audit("deny", "budget_exceeded", meta, tenant_id=tenant_id)
                     raise
             else:
                 self._metrics.call("budget_exceeded")
                 if tenant_id:
                     self._metrics.call("tenant_budget_exceeded", tenant_id)
+                self._audit("deny", "budget_exceeded", meta, tenant_id=tenant_id)
                 raise
+
+        self._pre_admit_checks(request, meta, tenant_id)
 
         try:
             if self.state.config.before_request is not None:
@@ -184,10 +238,20 @@ class BackstopTransport(httpx.BaseTransport):
             admitted = True
             tracker.queue_entered_at = time.monotonic()
             self._observe_queue(wait, meta.priority)
-            self.state.circuit.before_request()
+            circuit.before_request()
             tracker.request_sent_at = time.monotonic()
 
-            response = self._send_with_retries(request, meta.endpoint, deadline)
+            if self.state.config.compress is not None and isinstance(body, dict):
+                try:
+                    compressed = self.state.config.compress(body, body.get("model", ""))
+                    if isinstance(compressed, dict):
+                        new_content = json.dumps(compressed).encode("utf-8")
+                        object.__setattr__(request, "_content", new_content)
+                        request.headers["content-length"] = str(len(new_content))
+                except Exception:
+                    pass
+
+            response = self._send_with_retries(request, meta.endpoint, deadline, circuit)
             tracker.retry_count = self._retry_count
 
             if streaming:
@@ -206,8 +270,11 @@ class BackstopTransport(httpx.BaseTransport):
                 tracker.first_byte_at = tracker.request_sent_at
                 usage = response_usage_tokens(response)
                 success = response.status_code < 400
+                if self.state.quota is not None:
+                    self.state.quota.ingest(dict(response.headers))
+                    self.state.quota.adjust(self.state.aimd)
                 _reconcile(tenant_budget, self.state.budget, reservation, usage, success=success, downgraded=downgraded)
-                self._record_outcome(response.status_code, success=success)
+                self._record_outcome(response.status_code, success=success, circuit=circuit)
                 if self._cache is not None and body is not None and usage is not None:
                     self._cache.set(body, response.content, usage, dict(response.headers))
 
@@ -218,7 +285,7 @@ class BackstopTransport(httpx.BaseTransport):
             backstop_meta = tracker.build_meta(
                 estimated_tokens=meta.estimated_tokens,
                 actual_tokens=usage,
-                circuit_state=self.state.circuit.state.value,
+                circuit_state=circuit.state.value,
                 endpoint=meta.endpoint,
                 metadata=hook_metadata,
             )
@@ -240,20 +307,27 @@ class BackstopTransport(httpx.BaseTransport):
 
             return response
         except CircuitBreakerOpenError:
+            fallback = self._try_fallback(
+                request, meta, reservation, tenant_budget, tracker, hook_metadata, circuit
+            )
+            if fallback is not None:
+                self._audit("fallback", "circuit_open", meta, tenant_id=tenant_id)
+                return fallback
             tracker.completed_at = time.monotonic()
             _reconcile(tenant_budget, self.state.budget, reservation, 0, success=False)
             self._observe_request(meta.endpoint, meta.priority, tracker.created_at, "circuit_open")
+            self._audit("deny", "circuit_open", meta, tenant_id=tenant_id)
             raise
         except Exception:
             tracker.completed_at = time.monotonic()
             _reconcile(tenant_budget, self.state.budget, reservation, 0, success=False)
-            self._record_outcome(599, success=False)
+            self._record_outcome(599, success=False, circuit=circuit)
             self._observe_request(meta.endpoint, meta.priority, tracker.created_at, "exception")
             raise
         finally:
             if admitted:
                 self.state.gate.release()
-                self._observe_gauges()
+                self._observe_gauges(circuit)
 
     def close(self) -> None:
         self._transport.close()
@@ -271,6 +345,79 @@ class BackstopTransport(httpx.BaseTransport):
         request.headers["content-length"] = str(len(new_content))
         return True
 
+    def _try_fallback(
+        self,
+        request: httpx.Request,
+        meta: object,
+        reservation: object,
+        tenant_budget: object,
+        tracker: object,
+        hook_metadata: dict,
+        circuit: CircuitBreaker | None = None,
+    ) -> httpx.Response | None:
+        """Attempt the configured fallback chain when the circuit is open.
+
+        Walks ``config.fallback_targets`` (priority-aware) in order, returning
+        the first successful response. Returns ``None`` when no target succeeds
+        so the caller can re-raise the original ``CircuitBreakerOpenError``.
+        """
+        config = self.state.config
+        targets = config.fallback_targets(getattr(meta, "priority", None))
+        if not targets:
+            return None
+        for target in targets:
+            fb_request = _build_fallback_request(request, target["model"], target.get("base_url"))
+            if fb_request is None:
+                continue
+            try:
+                response = self._transport.handle_request(fb_request)
+                response.read()
+            except Exception:
+                self._metrics.call("fallback_attempts")
+                continue
+            usage = response_usage_tokens(response)
+            success = response.status_code < 400
+            _reconcile(tenant_budget, self.state.budget, reservation, usage, success=success)
+            self._record_outcome(response.status_code, success=success, circuit=circuit)
+            tracker.completed_at = time.monotonic()
+            self._observe_request(meta.endpoint, meta.priority, tracker.created_at, "fallback")
+            backstop_meta = tracker.build_meta(
+                estimated_tokens=meta.estimated_tokens,
+                actual_tokens=usage,
+                circuit_state=(circuit or self.state.circuit).state.value,
+                endpoint=meta.endpoint,
+                metadata=hook_metadata,
+            )
+            setattr(response, "_backstop_meta", backstop_meta)
+            return response
+        return None
+
+    def _audit(self, decision: str, reason: str, meta: object, **fields: object) -> None:
+        audit = self.state.audit
+        if audit is None:
+            return
+        fields.setdefault("endpoint", getattr(meta, "endpoint", None))
+        fields.setdefault("priority", getattr(meta, "priority", None))
+        fields.setdefault("estimated_tokens", getattr(meta, "estimated_tokens", None))
+        audit.record(decision, reason, **fields)
+
+    def _pre_admit_checks(self, request: httpx.Request, meta: object, tenant_id: str | None) -> None:
+        cfg = self.state.config
+        if cfg.shadow_policy is not None and cfg.shadow_policy.should_shadow():
+            cfg.shadow_policy.record(
+                "shadow", "sampled", endpoint=getattr(meta, "endpoint", None),
+                estimated_tokens=getattr(meta, "estimated_tokens", None), tenant_id=tenant_id,
+            )
+        if cfg.rate_limiter is not None and not cfg.rate_limiter.allow(getattr(meta, "estimated_tokens", 0)):
+            self._metrics.call("rate_limited")
+            self._audit("deny", "rate_limited", meta, tenant_id=tenant_id)
+            raise RateLimitError("rate limiter rejected request")
+        agent_id = request.headers.get("X-Backstop-Agent")
+        if cfg.agent_guard is not None and agent_id:
+            if not cfg.agent_guard.allow(agent_id, getattr(meta, "estimated_tokens", 0)):
+                self._audit("deny", "agent_guardrail", meta, tenant_id=tenant_id, agent_id=agent_id)
+                raise GuardrailViolationError(f"agent {agent_id!r} exceeded guardrail")
+
     def _acquire_gate(self, priority: Priority, deadline: float | None) -> float:
         effective: float | None = None
         if deadline is not None:
@@ -286,7 +433,7 @@ class BackstopTransport(httpx.BaseTransport):
         return wait
 
     def _send_with_retries(
-        self, request: httpx.Request, endpoint: str, deadline: float | None
+        self, request: httpx.Request, endpoint: str, deadline: float | None, circuit: CircuitBreaker | None = None
     ) -> httpx.Response:
         self._retry_count = 0
         last_response: httpx.Response | None = None
@@ -298,7 +445,7 @@ class BackstopTransport(httpx.BaseTransport):
                 response = self._transport.handle_request(request)
             except (httpx.TimeoutException, httpx.TransportError):
                 self._retry_count += 1
-                self._after_attempt(success=False, pressure=True)
+                self._after_attempt(success=False, pressure=True, circuit=circuit)
                 if attempt >= self.state.config.retry_max_attempts - 1:
                     raise
                 self._metrics.call("retry_attempts", endpoint)
@@ -313,22 +460,22 @@ class BackstopTransport(httpx.BaseTransport):
             response.read()
             response.close()
             last_response = response
-            self._after_attempt(success=False, pressure=True)
+            self._after_attempt(success=False, pressure=True, circuit=circuit)
             self._metrics.call("retry_attempts", endpoint)
             self._sleep(backoff_delay(attempt, self.state.config))
 
         assert last_response is not None
         return last_response
 
-    def _after_attempt(self, *, success: bool, pressure: bool) -> None:
-        tripped = self.state.circuit.after_request(success=success)
+    def _after_attempt(self, *, success: bool, pressure: bool, circuit: CircuitBreaker | None = None) -> None:
+        tripped = (circuit or self.state.circuit).after_request(success=success)
         if tripped:
             self._metrics.call("circuit_trips")
         if pressure and self.state.aimd.record_pressure():
             self._metrics.call("aimd_changes", "decrease")
 
-    def _record_outcome(self, status_code: int, *, success: bool) -> None:
-        tripped = self.state.circuit.after_request(success=success)
+    def _record_outcome(self, status_code: int, *, success: bool, circuit: CircuitBreaker | None = None) -> None:
+        tripped = (circuit or self.state.circuit).after_request(success=success)
         if tripped:
             self._metrics.call("circuit_trips")
         if success:
@@ -350,7 +497,7 @@ class BackstopTransport(httpx.BaseTransport):
             "duration", endpoint, priority.value, method="observe", amount=time.monotonic() - started
         )
 
-    def _observe_gauges(self) -> None:
+    def _observe_gauges(self, circuit: CircuitBreaker | None = None) -> None:
         tenant_id = get_current_tenant()
         if tenant_id is not None:
             tb = get_ledger().get(tenant_id)
@@ -362,11 +509,12 @@ class BackstopTransport(httpx.BaseTransport):
         self._metrics.call("queue_depth", method="set", value=self.state.gate.depth)
         self._metrics.call("concurrency_active", method="set", value=self.state.gate.active)
         self._metrics.call("concurrency_limit", method="set", value=self.state.aimd.current_limit)
+        active_circuit = circuit or self.state.circuit
         circuit_value = {
             CircuitState.CLOSED: 0,
             CircuitState.HALF_OPEN: 1,
             CircuitState.OPEN: 2,
-        }[self.state.circuit.state]
+        }[active_circuit.state]
         self._metrics.call("circuit_state", method="set", value=circuit_value)
 
 
@@ -399,12 +547,15 @@ class AsyncBackstopTransport(httpx.AsyncBaseTransport):
         if self._cache is not None and body is not None and not streaming:
             cached = self._cache.get(body)
             if cached is not None:
+                content, usage, headers, semantic = cached
                 self._metrics.call("cache_hits")
+                if semantic:
+                    self._metrics.call("cache_semantic_hits")
                 tracker.completed_at = time.monotonic()
-                response = _build_cached_response(cached[0], cached[1], cached[2])
+                response = _build_cached_response(content, usage, headers)
                 backstop_meta = tracker.build_meta(
                     estimated_tokens=meta.estimated_tokens,
-                    actual_tokens=cached[1],
+                    actual_tokens=usage,
                     circuit_state=self.state.circuit.state.value,
                     endpoint=meta.endpoint,
                 )
@@ -413,10 +564,17 @@ class AsyncBackstopTransport(httpx.AsyncBaseTransport):
 
         hook_metadata = extract_backstop_headers(request)
         tenant_id = get_current_tenant()
+        if self.state.config.virtual_keys is not None:
+            vk = request.headers.get(self.state.config.virtual_key_header)
+            if vk is not None:
+                tid = self.state.config.tenant_for_key(vk)
+                if tid is not None:
+                    tenant_id = tid
         tenant_budget: object | None = None
         if tenant_id is not None:
             ledger = get_ledger()
             tenant_budget = ledger.get(tenant_id) if ledger else None
+        circuit = self.state.circuit_for(tenant_id)
 
         downgraded = False
         try:
@@ -467,10 +625,20 @@ class AsyncBackstopTransport(httpx.AsyncBaseTransport):
             admitted = True
             tracker.queue_entered_at = time.monotonic()
             self._observe_queue(wait, meta.priority)
-            self.state.circuit.before_request()
+            circuit.before_request()
             tracker.request_sent_at = time.monotonic()
 
-            response = await self._asend_with_retries(request, meta.endpoint, deadline)
+            if self.state.config.compress is not None and isinstance(body, dict):
+                try:
+                    compressed = self.state.config.compress(body, body.get("model", ""))
+                    if isinstance(compressed, dict):
+                        new_content = json.dumps(compressed).encode("utf-8")
+                        object.__setattr__(request, "_content", new_content)
+                        request.headers["content-length"] = str(len(new_content))
+                except Exception:
+                    pass
+
+            response = await self._asend_with_retries(request, meta.endpoint, deadline, circuit)
             tracker.retry_count = self._retry_count
 
             if streaming:
@@ -489,8 +657,11 @@ class AsyncBackstopTransport(httpx.AsyncBaseTransport):
                 tracker.first_byte_at = tracker.request_sent_at
                 usage = response_usage_tokens(response)
                 success = response.status_code < 400
+                if self.state.quota is not None:
+                    self.state.quota.ingest(dict(response.headers))
+                    self.state.quota.adjust(self.state.aimd)
                 _reconcile(tenant_budget, self.state.budget, reservation, usage, success=success, downgraded=downgraded)
-                self._record_outcome(response.status_code, success=success)
+                self._record_outcome(response.status_code, success=success, circuit=circuit)
                 if self._cache is not None and body is not None and usage is not None:
                     self._cache.set(body, response.content, usage, dict(response.headers))
 
@@ -501,7 +672,7 @@ class AsyncBackstopTransport(httpx.AsyncBaseTransport):
             backstop_meta = tracker.build_meta(
                 estimated_tokens=meta.estimated_tokens,
                 actual_tokens=usage,
-                circuit_state=self.state.circuit.state.value,
+                circuit_state=circuit.state.value,
                 endpoint=meta.endpoint,
                 metadata=hook_metadata,
             )
@@ -523,6 +694,11 @@ class AsyncBackstopTransport(httpx.AsyncBaseTransport):
 
             return response
         except CircuitBreakerOpenError:
+            fallback = await self._try_fallback(
+                request, meta, reservation, tenant_budget, tracker, hook_metadata, circuit
+            )
+            if fallback is not None:
+                return fallback
             tracker.completed_at = time.monotonic()
             _reconcile(tenant_budget, self.state.budget, reservation, 0, success=False)
             self._observe_request(meta.endpoint, meta.priority, tracker.created_at, "circuit_open")
@@ -530,16 +706,57 @@ class AsyncBackstopTransport(httpx.AsyncBaseTransport):
         except Exception:
             tracker.completed_at = time.monotonic()
             _reconcile(tenant_budget, self.state.budget, reservation, 0, success=False)
-            self._record_outcome(599, success=False)
+            self._record_outcome(599, success=False, circuit=circuit)
             self._observe_request(meta.endpoint, meta.priority, tracker.created_at, "exception")
             raise
         finally:
             if admitted:
                 await self.state.gate.arelease()
-                self._observe_gauges()
+                self._observe_gauges(circuit)
 
     async def aclose(self) -> None:
         await self._transport.aclose()
+
+    async def _try_fallback(
+        self,
+        request: httpx.Request,
+        meta: object,
+        reservation: object,
+        tenant_budget: object,
+        tracker: object,
+        hook_metadata: dict,
+        circuit: CircuitBreaker | None = None,
+    ) -> httpx.Response | None:
+        config = self.state.config
+        targets = config.fallback_targets(getattr(meta, "priority", None))
+        if not targets:
+            return None
+        for target in targets:
+            fb_request = _build_fallback_request(request, target["model"], target.get("base_url"))
+            if fb_request is None:
+                continue
+            try:
+                response = await self._transport.handle_async_request(fb_request)
+                await response.aread()
+            except Exception:
+                self._metrics.call("fallback_attempts")
+                continue
+            usage = response_usage_tokens(response)
+            success = response.status_code < 400
+            _reconcile(tenant_budget, self.state.budget, reservation, usage, success=success)
+            self._record_outcome(response.status_code, success=success, circuit=circuit)
+            tracker.completed_at = time.monotonic()
+            self._observe_request(meta.endpoint, meta.priority, tracker.created_at, "fallback")
+            backstop_meta = tracker.build_meta(
+                estimated_tokens=meta.estimated_tokens,
+                actual_tokens=usage,
+                circuit_state=(circuit or self.state.circuit).state.value,
+                endpoint=meta.endpoint,
+                metadata=hook_metadata,
+            )
+            setattr(response, "_backstop_meta", backstop_meta)
+            return response
+        return None
 
     def _try_downgrade(self, request: httpx.Request, body: dict) -> bool:
         current_model = body.get("model", "")
@@ -553,6 +770,32 @@ class AsyncBackstopTransport(httpx.AsyncBaseTransport):
         object.__setattr__(request, "_content", new_content)
         request.headers["content-length"] = str(len(new_content))
         return True
+
+    def _audit(self, decision: str, reason: str, meta: object, **fields: object) -> None:
+        audit = self.state.audit
+        if audit is None:
+            return
+        fields.setdefault("endpoint", getattr(meta, "endpoint", None))
+        fields.setdefault("priority", getattr(meta, "priority", None))
+        fields.setdefault("estimated_tokens", getattr(meta, "estimated_tokens", None))
+        audit.record(decision, reason, **fields)
+
+    def _pre_admit_checks(self, request: httpx.Request, meta: object, tenant_id: str | None) -> None:
+        cfg = self.state.config
+        if cfg.shadow_policy is not None and cfg.shadow_policy.should_shadow():
+            cfg.shadow_policy.record(
+                "shadow", "sampled", endpoint=getattr(meta, "endpoint", None),
+                estimated_tokens=getattr(meta, "estimated_tokens", None), tenant_id=tenant_id,
+            )
+        if cfg.rate_limiter is not None and not cfg.rate_limiter.allow(getattr(meta, "estimated_tokens", 0)):
+            self._metrics.call("rate_limited")
+            self._audit("deny", "rate_limited", meta, tenant_id=tenant_id)
+            raise RateLimitError("rate limiter rejected request")
+        agent_id = request.headers.get("X-Backstop-Agent")
+        if cfg.agent_guard is not None and agent_id:
+            if not cfg.agent_guard.allow(agent_id, getattr(meta, "estimated_tokens", 0)):
+                self._audit("deny", "agent_guardrail", meta, tenant_id=tenant_id, agent_id=agent_id)
+                raise GuardrailViolationError(f"agent {agent_id!r} exceeded guardrail")
 
     async def _aacquire_gate(self, priority: Priority, deadline: float | None) -> float:
         effective: float | None = None
@@ -569,7 +812,7 @@ class AsyncBackstopTransport(httpx.AsyncBaseTransport):
         return wait
 
     async def _asend_with_retries(
-        self, request: httpx.Request, endpoint: str, deadline: float | None
+        self, request: httpx.Request, endpoint: str, deadline: float | None, circuit: CircuitBreaker | None = None
     ) -> httpx.Response:
         self._retry_count = 0
         last_response: httpx.Response | None = None
@@ -581,7 +824,7 @@ class AsyncBackstopTransport(httpx.AsyncBaseTransport):
                 response = await self._transport.handle_async_request(request)
             except (httpx.TimeoutException, httpx.TransportError):
                 self._retry_count += 1
-                self._after_attempt(success=False, pressure=True)
+                self._after_attempt(success=False, pressure=True, circuit=circuit)
                 if attempt >= self.state.config.retry_max_attempts - 1:
                     raise
                 self._metrics.call("retry_attempts", endpoint)
@@ -596,22 +839,22 @@ class AsyncBackstopTransport(httpx.AsyncBaseTransport):
             await response.aread()
             await response.aclose()
             last_response = response
-            self._after_attempt(success=False, pressure=True)
+            self._after_attempt(success=False, pressure=True, circuit=circuit)
             self._metrics.call("retry_attempts", endpoint)
             await self._sleep(backoff_delay(attempt, self.state.config))
 
         assert last_response is not None
         return last_response
 
-    def _after_attempt(self, *, success: bool, pressure: bool) -> None:
-        tripped = self.state.circuit.after_request(success=success)
+    def _after_attempt(self, *, success: bool, pressure: bool, circuit: CircuitBreaker | None = None) -> None:
+        tripped = (circuit or self.state.circuit).after_request(success=success)
         if tripped:
             self._metrics.call("circuit_trips")
         if pressure and self.state.aimd.record_pressure():
             self._metrics.call("aimd_changes", "decrease")
 
-    def _record_outcome(self, status_code: int, *, success: bool) -> None:
-        tripped = self.state.circuit.after_request(success=success)
+    def _record_outcome(self, status_code: int, *, success: bool, circuit: CircuitBreaker | None = None) -> None:
+        tripped = (circuit or self.state.circuit).after_request(success=success)
         if tripped:
             self._metrics.call("circuit_trips")
         if success:
@@ -633,7 +876,7 @@ class AsyncBackstopTransport(httpx.AsyncBaseTransport):
             "duration", endpoint, priority.value, method="observe", amount=time.monotonic() - started
         )
 
-    def _observe_gauges(self) -> None:
+    def _observe_gauges(self, circuit: CircuitBreaker | None = None) -> None:
         tenant_id = get_current_tenant()
         if tenant_id is not None:
             tb = get_ledger().get(tenant_id)
@@ -645,9 +888,10 @@ class AsyncBackstopTransport(httpx.AsyncBaseTransport):
         self._metrics.call("queue_depth", method="set", value=self.state.gate.depth)
         self._metrics.call("concurrency_active", method="set", value=self.state.gate.active)
         self._metrics.call("concurrency_limit", method="set", value=self.state.aimd.current_limit)
+        active_circuit = circuit or self.state.circuit
         circuit_value = {
             CircuitState.CLOSED: 0,
             CircuitState.HALF_OPEN: 1,
             CircuitState.OPEN: 2,
-        }[self.state.circuit.state]
+        }[active_circuit.state]
         self._metrics.call("circuit_state", method="set", value=circuit_value)
