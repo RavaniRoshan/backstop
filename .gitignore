@@ -2,6 +2,12 @@
 .pytest_cache/
 __pycache__/
 *.py[cod]
+
+# Secrets / environment files — NEVER commit (see .agents/AGENTS.md)
+.env
+.env.*
+*.env
+!.env.example
 .coverage
 htmlcov/
 dist/
@@ -12,3 +18,6 @@ node_modules/
 *.tsbuildinfo
 ts/backstop/dist/
 wedge_report.md
+benchmarks/competitive/compose/
+benchmarks/competitive/*.json
+benchmarks/competitive/__pycache__/

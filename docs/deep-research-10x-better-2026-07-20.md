@@ -323,6 +323,6 @@ topic: Making Backstop a 10x better LLM guardrail — industry-wide competitive 
 depth: exhaustive
 output: markdown
 research_agents: 6 (gateways, observability, frameworks, cloud-native, in-process-techniques, contrarian-risks)
-firecrawl: REST API v1 (search + scrape), key REDACTED_FIRECRAWL_KEY
+firecrawl: REST API v1 (search + scrape), key: ${FIRECRAWL_API_KEY}
 date: 2026-07-20
 ```

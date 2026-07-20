@@ -16,7 +16,7 @@ below to your MCP client config to expose the Firecrawl tools
     "firecrawl": {
       "url": "https://mcp.firecrawl.dev/v2/mcp",
       "headers": {
-        "Authorization": "Bearer REDACTED_FIRECRAWL_KEY"
+        "Authorization": "Bearer ${FIRECRAWL_API_KEY}"
       }
     }
   }
@@ -26,7 +26,7 @@ below to your MCP client config to expose the Firecrawl tools
 Local (stdio) alternative:
 
 ```bash
-env FIRECRAWL_API_KEY=REDACTED_FIRECRAWL_KEY npx -y firecrawl-mcp
+env FIRECRAWL_API_KEY="<your-key-here>" npx -y firecrawl-mcp
 ```
 
 REST API (used directly for the research in
@@ -34,7 +34,7 @@ REST API (used directly for the research in
 
 ```bash
 curl -s https://api.firecrawl.dev/v1/search \
-  -H "Authorization: Bearer REDACTED_FIRECRAWL_KEY" \
+  -H "Authorization: Bearer ${FIRECRAWL_API_KEY}" \
   -H "Content-Type: application/json" \
   -d '{"query":"your query","limit":5}'
 ```
