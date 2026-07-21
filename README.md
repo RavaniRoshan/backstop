@@ -1,5 +1,6 @@
 <div align="center">
-  <img src="docs/assets/logo.png" alt="Backstop Logo" width="600" />
+  <img width="1949" height="807" alt="image" src="https://github.com/user-attachments/assets/2c5cd29f-7bde-4e08-ad25-f79de6c6505d" />
+
   <p>
     <strong>In-process AI SDK backpressure, budgets, retries, circuit breaking, and metrics.</strong>
   </p>
