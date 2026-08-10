@@ -14,6 +14,8 @@
 # Env overrides:
 #   BACKSTOP_EXTRAS=anthropic,metrics   extras to install (default: anthropic)
 #   BACKSTOP_NO_GITFALLBACK=1           don't fall back to GitHub if PyPI fails
+#   BACKSTOP_SHA_URL=...               URL for .sha256 checksum file (default: same URL + .sha256)
+#   BACKSTOP_SKIP_CHECKSUM=1           skip checksum verification (not recommended)
 set -eu
 
 BOLD=''
@@ -21,6 +23,47 @@ NORM=''
 if [ -t 1 ]; then BOLD='\033[1m'; NORM='\033[0m'; fi
 info() { printf "${BOLD}==>${NORM} %s\n" "$1"; }
 warn() { printf "!! %s\n" "$1" >&2; }
+
+# Verify installer checksum if available.
+# The installer script is served with a companion .sha256 file.
+# If BACKSTOP_SHA_URL is set, use that; otherwise append .sha256 to the script URL.
+if [ "${BACKSTOP_SKIP_CHECKSUM:-0}" != "1" ]; then
+  SCRIPT_URL="${BACKSTOP_INSTALLER_URL:-https://raw.githubusercontent.com/RavaniRoshan/backstop/main/install.sh}"
+  SHA_URL="${BACKSTOP_SHA_URL:-${SCRIPT_URL}.sha256}"
+  TMPDIR="$(mktemp -d)"
+  if command -v curl >/dev/null 2>&1; then
+    FETCH="curl -fsSL"
+  elif command -v wget >/dev/null 2>&1; then
+    FETCH="wget -qO-"
+  else
+    warn "Neither curl nor wget found; skipping checksum verification."
+    FETCH=""
+  fi
+  if [ -n "$FETCH" ]; then
+    if $FETCH "$SHA_URL" -o "$TMPDIR/install.sh.sha256" 2>/dev/null; then
+      # Write current script to temp file for verification
+      cp "$0" "$TMPDIR/install.sh"
+      if command -v sha256sum >/dev/null 2>&1; then
+        cd "$TMPDIR" && sha256sum -c install.sh.sha256 2>/dev/null && info "Installer checksum verified." || {
+          warn "Installer checksum mismatch! Aborting."
+          rm -rf "$TMPDIR"
+          exit 1
+        }
+      elif command -v shasum >/dev/null 2>&1; then
+        cd "$TMPDIR" && shasum -a 256 -c install.sh.sha256 2>/dev/null && info "Installer checksum verified." || {
+          warn "Installer checksum mismatch! Aborting."
+          rm -rf "$TMPDIR"
+          exit 1
+        }
+      else
+        warn "No sha256 tool found; skipping checksum verification."
+      fi
+    else
+      warn "Could not fetch installer checksum; skipping verification."
+    fi
+  fi
+  rm -rf "$TMPDIR"
+fi
 
 OS="$(uname -s 2>/dev/null || echo unknown)"
 

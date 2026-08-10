@@ -1,49 +1,66 @@
-"""Secret provider interface (Deep Research P2#9).
+"""Secret provider default chain (Launch Improvement D1).
 
-Mitigates the in-process secret-handling risk the research flagged (plaintext
-env vars, the March-2026 LiteLLM incident class). Backstop never holds raw
-provider keys; instead a ``SecretProvider`` resolves a virtual key / tenant id to
-a secret at call time. Ships with env + static providers; cloud secret managers
-(AWS Secrets Manager, Azure Key Vault, Vault) implement the same interface.
+Resolution order for a virtual key ``vk``:
+1. ``cfg.secret_provider(vk)`` — explicit callable set by the user
+2. ``BACKSTOP_API_KEY_{upper(vk)}`` — env var derived from virtual key name
+3. ``BACKSTOP_API_KEY`` — fallback env var
+4. ``resolve_virtual_key(vk)`` — ``cfg.virtual_keys[vk]`` mapped to a literal key
+5. No-op provider returns the virtual key itself (single-key mode)
+
+The chain is lazy: each link is tried only if the previous one returns None.
+No provider in the chain can raise — exceptions are swallowed and the next
+link is tried.
 """
 from __future__ import annotations
 
 import os
-from abc import ABC, abstractmethod
-from typing import Any
+from typing import Callable
 
 
-class SecretProvider(ABC):
-    @abstractmethod
-    def get(self, key: str) -> str | None:
-        ...
-
-    def resolve(self, key: str) -> str | None:
-        return self.get(key)
-
-
-class EnvSecretProvider(SecretProvider):
-    def __init__(self, prefix: str = "") -> None:
-        self._prefix = prefix
-
-    def get(self, key: str) -> str | None:
-        return os.environ.get(f"{self._prefix}{key}")
-
-
-class StaticSecretProvider(SecretProvider):
-    def __init__(self, secrets: dict[str, str]) -> None:
-        self._secrets = secrets
-
-    def get(self, key: str) -> str | None:
-        return self._secrets.get(key)
-
-
-def resolve_secret(provider: Any, key: str) -> str | None:
-    if provider is None:
+def _try_callable(provider: Callable[[str], str | None], vk: str) -> str | None:
+    try:
+        result = provider(vk)
+    except Exception:
         return None
-    if isinstance(provider, SecretProvider):
-        return provider.resolve(key)
-    if callable(provider):
-        result = provider(key)
-        return result if isinstance(result, str) else None
+    return result if result else None
+
+
+def _try_env(vk: str) -> str | None:
+    sanitized = vk.upper().replace("-", "_")
+    for env_var in (f"BACKSTOP_API_KEY_{sanitized}", "BACKSTOP_API_KEY"):
+        value = os.environ.get(env_var)
+        if value:
+            return value
     return None
+
+
+def _try_virtual_keys(vk: str, virtual_keys: dict[str, str] | None) -> str | None:
+    if virtual_keys is None:
+        return None
+    mapped = virtual_keys.get(vk)
+    return mapped if mapped else None
+
+
+def _noop(vk: str) -> str | None:
+    return vk or None
+
+
+def resolve_secret(provider: Callable[[str], str | None] | None, vk: str, virtual_keys: dict[str, str] | None = None) -> str:
+    chain = [provider, lambda v: _try_virtual_keys(v, virtual_keys), _try_env, _noop]
+    for link in chain:
+        if link is None:
+            continue
+        result = _try_callable(link, vk)
+        if result is not None:
+            return result
+    return vk
+
+
+class SecretProviderChain:
+    """Wraps resolve_secret for use as ``cfg.secret_provider``."""
+
+    def __init__(self, virtual_keys: dict[str, str] | None = None) -> None:
+        self._virtual_keys = virtual_keys
+
+    def __call__(self, vk: str) -> str:
+        return resolve_secret(None, vk, self._virtual_keys)

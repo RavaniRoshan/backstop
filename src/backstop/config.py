@@ -139,6 +139,7 @@ class BackstopConfig:
 
     # --- Secret provider (Deep Research P2#9) ---
     # Resolves virtual keys / tenant ids to provider secrets at call time.
+    # Default: provider-first env-last chain (SecretProviderChain).
     secret_provider: Any = None
 
     # --- Agent guardrails (Deep Research P2#11) ---
@@ -156,7 +157,26 @@ class BackstopConfig:
     # horizon, proactively tighten the AIMD concurrency limit. ``0`` disables.
     forecast_horizon_seconds: float = 0.0
 
+    # --- Budget-exhaustion alerts / webhooks (Launch Improvement B1) ---
+    # Warn BEFORE the cap. ``webhook_endpoints`` is a list of URLs; ``webhook_secret``
+    # anchors the HMAC-SHA256 signature. ``alert_tiers`` are usage fractions that
+    # fire ``threshold_crossed``; ``alert_dedup_ttl`` bounds repeat alerts; the
+    # manager also emits ``projected_exceeded`` (calls-remaining) when burn rate
+    # implies exhaustion within ``alert_project_horizon_calls`` more calls.
+    webhook_endpoints: list | None = None
+    webhook_secret: str | None = None
+    alert_tiers: list[float] | None = None
+    alert_dedup_ttl: float = 86400.0
+    alert_project_horizon_calls: int = 5
+
     # --- Safe rollout: shadow / canary (Deep Research P2#13) ---
+    # When ``shadow`` is True every enforcement decision (budget block, circuit
+    # open, rate-limit, agent-guardrail, latency budget) is *recorded* as a
+    # "would-have" but NEVER acted on — requests flow through untouched. This is
+    # the enabled!=enforced two-axis rollout primitive (Envoy filter_enabled vs
+    # filter_enforced): turn shadow on, watch would_* counters, then flip it off
+    # to start enforcing. A kill-switch via env (BACKSTOP_SHADOW=false) overrides.
+    shadow: bool = False
     shadow_policy: Any = None
 
     def __post_init__(self) -> None:
@@ -236,9 +256,15 @@ class BackstopConfig:
             for prio, chain in self.fallback_chain_for_priority.items():
                 if not isinstance(chain, list) or not chain:
                     raise ValueError(f"fallback_chain_for_priority[{prio!r}] must be a non-empty list")
-                for entry in chain:
-                    if not isinstance(entry, dict) or not isinstance(entry.get("model"), str):
-                        raise ValueError(f"fallback_chain_for_priority[{prio!r}] entries need a string 'model'")
+            for entry in chain:
+                if not isinstance(entry, dict) or not isinstance(entry.get("model"), str):
+                    raise ValueError(f"fallback_chain_for_priority[{prio!r}] entries need a string 'model'")
+        if self.secret_provider is None:
+            try:
+                from .secrets import SecretProviderChain
+                self.secret_provider = SecretProviderChain(self.virtual_keys)
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------
     # Fallback chain resolution

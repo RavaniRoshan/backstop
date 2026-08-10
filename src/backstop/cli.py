@@ -17,6 +17,7 @@ from .real_anthropic import run_real_anthropic_smoke
 from .real_openai import run_real_openai_smoke
 from .state import BackstopState
 from .transports import BackstopTransport
+from .verify import run_verify
 
 
 SCENARIOS = ["burst", "steady-state", "error-storm", "budget-hit"]
@@ -236,6 +237,19 @@ def main(argv: list[str] | None = None) -> int:
     metrics = subparsers.add_parser("metrics", help="start a Prometheus metrics server")
     metrics.add_argument("--port", type=int, default=9090)
 
+    verify = subparsers.add_parser(
+        "verify", help="run reproducible proof checks against this install (collapse install -> trust)"
+    )
+    verify.add_argument("--live", action="store_true", help="also probe the real provider (GET /models)")
+    verify.add_argument("--offline", action="store_true", help="never touch the network (default)")
+    verify.add_argument("--strict", action="store_true", help="treat warnings as failures (for CI)")
+    verify.add_argument("--json", action="store_true", help="emit JSON instead of Markdown")
+    verify.add_argument("--provider", choices=["openai", "anthropic"], default="openai")
+    verify.add_argument("--model", help="unused for auth probe; documented for future live completion")
+    verify.add_argument("--base-url", help="override provider base URL for the live probe")
+    verify.add_argument("--api-key-env", default="OPENAI_API_KEY", help="env var holding the provider key")
+    verify.add_argument("--timeout", type=float, default=30.0, help="per-check timeout for live probes")
+
     real = subparsers.add_parser("real-openai", help="run a tiny real OpenAI API smoke test")
     real.add_argument("--model", help="model to use; defaults to OPENAI_MODEL or gpt-4.1-mini")
     real.add_argument("--base-url", help="override API base URL; defaults to OPENAI_BASE_URL")
@@ -303,6 +317,18 @@ def main(argv: list[str] | None = None) -> int:
                 time.sleep(3600)
         except KeyboardInterrupt:
             return 0
+
+    if args.command == "verify":
+        return run_verify(
+            live=args.live,
+            strict=args.strict,
+            json_output=args.json,
+            timeout=args.timeout,
+            provider=args.provider,
+            model=args.model,
+            base_url=args.base_url,
+            api_key_env=args.api_key_env,
+        )
 
     if args.command == "real-openai":
         try:

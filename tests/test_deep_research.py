@@ -17,7 +17,7 @@ from backstop.forecast import BurnSample, CostForecaster, detect_spend_anomaly, 
 from backstop.limiter import TokenBucketLimiter
 from backstop.quotas import QuotaMonitor, parse_ratelimit_headers
 from backstop.rollout import CanaryRouter, ShadowPolicy
-from backstop.secrets import EnvSecretProvider, SecretProvider, StaticSecretProvider, resolve_secret
+from backstop.secrets import resolve_secret, SecretProviderChain
 from backstop.state import BackstopState
 from backstop.transports import AsyncBackstopTransport, BackstopTransport
 from backstop.ledger import TenantBudget
@@ -106,17 +106,18 @@ def test_token_bucket_limiter_refill_and_deny():
 
 # --- P2#9 secrets ----------------------------------------------------------
 def test_secret_providers(monkeypatch):
-    monkeypatch.setenv("BS_KEY", "v1")
-    assert EnvSecretProvider().get("BS_KEY") == "v1"
-    assert StaticSecretProvider({"a": "b"}).get("a") == "b"
-    assert resolve_secret(StaticSecretProvider({"a": "b"}), "a") == "b"
+    monkeypatch.setenv("BACKSTOP_API_KEY_A", "v1")
+    assert resolve_secret(None, "a") == "v1"
+    vks = {"b": "b_val"}
+    # Virtual keys mapping takes precedence over env (provider-first, env-last)
+    monkeypatch.setenv("BACKSTOP_API_KEY_B", "env-b")
+    assert resolve_secret(None, "b", vks) == "b_val"
+    monkeypatch.delenv("BACKSTOP_API_KEY_B", raising=False)
+    assert resolve_secret(None, "b", vks) == "b_val"
     assert resolve_secret(lambda k: "x", "anything") == "x"
 
-    class _Concrete(SecretProvider):
-        def get(self, key):
-            return "z"
-
-    assert _Concrete().get("anything") == "z"
+    chain = SecretProviderChain({"a": "b"})
+    assert chain("a") == "b"
 
 
 # --- P2#11 agent guard -----------------------------------------------------

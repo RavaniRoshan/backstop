@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from typing import Any
 
 
@@ -14,6 +15,8 @@ class OtelMetrics:
     def __init__(self, meter_name: str = "backstop") -> None:
         self.enabled = False
         self._gauges: dict[str, float] = {}
+        self._exemplars: dict[str, str] = {}
+        self._exemplar_lock = threading.Lock()
         try:
             from opentelemetry import metrics as otel_metrics
         except Exception:
@@ -59,6 +62,18 @@ class OtelMetrics:
             "backstop_cache_hits_total",
             description="Cache hit count.",
         )
+        self.fallback_attempts = meter.create_counter(
+            "backstop_fallback_attempts_total",
+            description="Fallback attempts.",
+        )
+        self.rate_limited = meter.create_counter(
+            "backstop_rate_limited_total",
+            description="Requests rejected by pluggable rate limiter.",
+        )
+        self.tenant_budget_exceeded = meter.create_counter(
+            "backstop_tenant_budget_exceeded_total",
+            description="Requests blocked by per-tenant budget.",
+        )
 
         for name, desc in (
             ("backstop_budget_remaining_tokens", "Remaining token budget."),
@@ -102,6 +117,14 @@ class OtelMetrics:
         except Exception:
             pass
 
+    def record_exemplar(self, metric_name: str, trace_id: str) -> None:
+        with self._exemplar_lock:
+            self._exemplars[metric_name] = trace_id
+
+    def exemplar_for(self, metric_name: str) -> str | None:
+        with self._exemplar_lock:
+            return self._exemplars.get(metric_name)
+
     def call(self, name: str, *args: Any, method: str = "inc", **kwargs: Any) -> None:
         if not self.enabled:
             return
@@ -136,6 +159,12 @@ class OtelMetrics:
                 self._inc_counter(self.aimd_changes, 1, attrs)
             elif name == "cache_hits":
                 self._inc_counter(self.cache_hits, 1, attrs)
+            elif name == "fallback_attempts":
+                self._inc_counter(self.fallback_attempts, 1, attrs)
+            elif name == "rate_limited":
+                self._inc_counter(self.rate_limited, 1, attrs)
+            elif name == "tenant_budget_exceeded":
+                self._inc_counter(self.tenant_budget_exceeded, 1, attrs)
             elif name == "budget_remaining":
                 self._set_gauge("backstop_budget_remaining_tokens", float(kwargs.get("value", 0)))
             elif name == "queue_depth":
