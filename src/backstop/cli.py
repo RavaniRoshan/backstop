@@ -4,19 +4,26 @@ import argparse
 import datetime as _dt
 import json
 import platform
+import statistics
 import sys
 import time
 
+import httpx
+
+from .config import BackstopConfig
 from .harness import DEFAULT_SEED, run_harness
 from .metrics import start_metrics_server
 from .real_anthropic import run_real_anthropic_smoke
 from .real_openai import run_real_openai_smoke
+from .state import BackstopState
+from .transports import BackstopTransport
 
 
 SCENARIOS = ["burst", "steady-state", "error-storm", "budget-hit"]
 
 
 def _format_benchmark(results: list) -> str:
+    overhead = _measure_overhead()
     lines = [
         "# Backstop Benchmark Results",
         "",
@@ -24,13 +31,13 @@ def _format_benchmark(results: list) -> str:
         f"- Seed: `0x{DEFAULT_SEED:08X}` (deterministic)",
         "- Method: local `httpx.MockTransport`; no network; counts are exact and reproducible.",
         "",
-        "## Overhead (local mock transport, 1,000 requests)",
+        "## Overhead (local mock transport, measured)",
         "",
         "| Metric | Direct | Backstop | Overhead |",
         "| --- | ---: | ---: | ---: |",
-        "| p50 latency | 0.12 ms | 0.19 ms | **0.07 ms** |",
-        "| p95 latency | 0.22 ms | 0.30 ms | **0.07 ms** |",
-        "| p99 latency | 0.30 ms | 0.38 ms | **0.07 ms** |",
+        f"| p50 latency | {overhead['direct_p50']:.2f} ms | {overhead['backstop_p50']:.2f} ms | **{overhead['overhead_p50']:.2f} ms** |",
+        f"| p95 latency | {overhead['direct_p95']:.2f} ms | {overhead['backstop_p95']:.2f} ms | **{overhead['overhead_p95']:.2f} ms** |",
+        f"| p99 latency | {overhead['direct_p99']:.2f} ms | {overhead['backstop_p99']:.2f} ms | **{overhead['overhead_p99']:.2f} ms** |",
         "",
         "> Latency is measured separately from provider latency. See `benchmarks/local_overhead.py`.",
         "",
@@ -52,6 +59,62 @@ def _format_benchmark(results: list) -> str:
     lines.append("```")
     lines.append("")
     return "\n".join(lines)
+
+
+def _measure_overhead(n: int = 500) -> dict:
+    """Measure the control-path overhead of Backstop vs a bare httpx client.
+
+    Returns a dict with direct/backstop p50/p95/p99 and overhead values (ms).
+    Uses a no-op mock provider so the measurement reflects only Backstop's
+    in-process work, not network latency.
+    """
+    import statistics
+    import time
+
+    def _series(client):
+        lats = []
+        for i in range(n):
+            t0 = time.perf_counter()
+            client.post(
+                "/v1/chat/completions",
+                json={"model": "mock", "messages": [{"role": "user", "content": f"b{i}"}], "max_tokens": 8},
+            )
+            lats.append((time.perf_counter() - t0) * 1000)
+        return sorted(lats)
+
+    def _pct(vals, p):
+        idx = round((p / 100) * (len(vals) - 1))
+        return vals[idx]
+
+    direct_client = httpx.Client(
+        transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True})),
+        base_url="https://mock.local",
+    )
+    direct = _series(direct_client)
+    direct_client.close()
+
+    state = BackstopState.create(
+        n * 100,
+        BackstopConfig(initial_concurrency=64, max_concurrency=64, retry_max_attempts=1, circuit_min_requests=n + 1),
+    )
+    backstop_client = httpx.Client(
+        transport=BackstopTransport(state, httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True, "usage": {"total_tokens": 1}}))),
+        base_url="https://mock.local",
+    )
+    backstop = _series(backstop_client)
+    backstop_client.close()
+
+    return {
+        "direct_p50": statistics.median(direct),
+        "direct_p95": _pct(direct, 95),
+        "direct_p99": _pct(direct, 99),
+        "backstop_p50": statistics.median(backstop),
+        "backstop_p95": _pct(backstop, 95),
+        "backstop_p99": _pct(backstop, 99),
+        "overhead_p50": statistics.median(backstop) - statistics.median(direct),
+        "overhead_p95": _pct(backstop, 95) - _pct(direct, 95),
+        "overhead_p99": _pct(backstop, 99) - _pct(direct, 99),
+    }
 
 
 def _run_benchmark(publish: bool) -> int:
@@ -156,6 +219,15 @@ def main(argv: list[str] | None = None) -> int:
     serve.add_argument("--port", type=int, default=8080)
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument(
+        "--api-keys",
+        help="comma-separated set of allowed Bearer tokens (auth disabled if omitted)",
+        default=None,
+    )
+    serve.add_argument(
+        "--rate-limit", type=int, default=None,
+        help="max requests per minute per API key (requires --api-keys)",
+    )
+    serve.add_argument(
         "--config-json",
         help="optional BackstopConfig overrides as a JSON object",
         default=None,
@@ -214,7 +286,11 @@ def main(argv: list[str] | None = None) -> int:
         if args.config_json:
             overrides = json.loads(args.config_json)
             config = BackstopConfig(**overrides)
-        app = make_gateway_app(args.target, args.budget, config)
+        api_keys = set(args.api_keys.split(",")) if args.api_keys else None
+        app = make_gateway_app(
+            args.target, args.budget, config,
+            api_keys=api_keys, rate_limit_per_key=args.rate_limit,
+        )
         print(f"Backstop gateway listening on {args.host}:{args.port} -> {args.target}")
         uvicorn.run(app, host=args.host, port=args.port)
         return 0

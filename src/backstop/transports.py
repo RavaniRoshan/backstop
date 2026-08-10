@@ -178,6 +178,7 @@ class BackstopTransport(httpx.BaseTransport):
                 tid = self.state.config.tenant_for_key(vk)
                 if tid is not None:
                     tenant_id = tid
+        self._resolve_secret(request)
         tenant_budget: object | None = None
         if tenant_id is not None:
             ledger = get_ledger()
@@ -277,6 +278,7 @@ class BackstopTransport(httpx.BaseTransport):
                 self._record_outcome(response.status_code, success=success, circuit=circuit)
                 if self._cache is not None and body is not None and usage is not None:
                     self._cache.set(body, response.content, usage, dict(response.headers))
+                self._maybe_forecast_enforce()
 
             tracker.completed_at = time.monotonic()
             outcome = "success" if success else "error"
@@ -517,6 +519,44 @@ class BackstopTransport(httpx.BaseTransport):
         }[active_circuit.state]
         self._metrics.call("circuit_state", method="set", value=circuit_value)
 
+    def _maybe_forecast_enforce(self) -> None:
+        """Proactively tighten AIMD when burn rate projects exhaustion.
+
+        Called after every successful response. When ``forecast_horizon_seconds``
+        is configured and the current burn rate would exhaust the budget within
+        that horizon, clamp the AIMD concurrency limit to slow down before the
+        cap is hit.
+        """
+        horizon = self.state.config.forecast_horizon_seconds
+        if not horizon or self.state.budget.total is None:
+            return
+        remaining = self.state.budget.remaining
+        if remaining is None or remaining <= 0:
+            return
+        spent = self.state.budget.spent
+        if spent <= 0:
+            return
+        from .forecast import BurnSample, will_exhaust
+
+        sample = BurnSample(used_tokens=spent, window_seconds=max(1.0, min(spent / max(1, 1), 30.0)))
+        if will_exhaust(sample, self.state.budget.total, horizon):
+            self.state.aimd.record_pressure()
+            self._metrics.call("aimd_changes", "decrease")
+
+    def _resolve_secret(self, request: httpx.Request) -> None:
+        """Resolve a virtual key to a provider secret at call time."""
+        cfg = self.state.config
+        if cfg.secret_provider is None or cfg.virtual_keys is None:
+            return
+        vk = request.headers.get(cfg.virtual_key_header)
+        if vk is None or vk not in cfg.virtual_keys:
+            return
+        from .secrets import resolve_secret
+
+        secret = resolve_secret(cfg.secret_provider, vk)
+        if secret:
+            request.headers["authorization"] = f"Bearer {secret}"
+
 
 class AsyncBackstopTransport(httpx.AsyncBaseTransport):
     def __init__(
@@ -570,6 +610,7 @@ class AsyncBackstopTransport(httpx.AsyncBaseTransport):
                 tid = self.state.config.tenant_for_key(vk)
                 if tid is not None:
                     tenant_id = tid
+        self._resolve_secret(request)
         tenant_budget: object | None = None
         if tenant_id is not None:
             ledger = get_ledger()
@@ -664,6 +705,7 @@ class AsyncBackstopTransport(httpx.AsyncBaseTransport):
                 self._record_outcome(response.status_code, success=success, circuit=circuit)
                 if self._cache is not None and body is not None and usage is not None:
                     self._cache.set(body, response.content, usage, dict(response.headers))
+                self._maybe_forecast_enforce()
 
             tracker.completed_at = time.monotonic()
             outcome = "success" if success else "error"
@@ -895,3 +937,40 @@ class AsyncBackstopTransport(httpx.AsyncBaseTransport):
             CircuitState.OPEN: 2,
         }[active_circuit.state]
         self._metrics.call("circuit_state", method="set", value=circuit_value)
+    def _resolve_secret(self, request: httpx.Request) -> None:
+        """Resolve a virtual key to a provider secret at call time."""
+        cfg = self.state.config
+        if cfg.secret_provider is None or cfg.virtual_keys is None:
+            return
+        vk = request.headers.get(cfg.virtual_key_header)
+        if vk is None or vk not in cfg.virtual_keys:
+            return
+        from .secrets import resolve_secret
+
+        secret = resolve_secret(cfg.secret_provider, vk)
+        if secret:
+            request.headers["authorization"] = f"Bearer {secret}"
+
+    def _maybe_forecast_enforce(self) -> None:
+        """Proactively tighten AIMD when burn rate projects exhaustion.
+
+        Called after every successful response. When ``forecast_horizon_seconds``
+        is configured and the current burn rate would exhaust the budget within
+        that horizon, clamp the AIMD concurrency limit to slow down before the
+        cap is hit.
+        """
+        horizon = self.state.config.forecast_horizon_seconds
+        if not horizon or self.state.budget.total is None:
+            return
+        remaining = self.state.budget.remaining
+        if remaining is None or remaining <= 0:
+            return
+        spent = self.state.budget.spent
+        if spent <= 0:
+            return
+        from .forecast import BurnSample, will_exhaust
+
+        sample = BurnSample(used_tokens=spent, window_seconds=max(1.0, min(spent / max(1, 1), 30.0)))
+        if will_exhaust(sample, self.state.budget.total, horizon):
+            self.state.aimd.record_pressure()
+            self._metrics.call("aimd_changes", "decrease")

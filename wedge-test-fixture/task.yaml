@@ -1,0 +1,12 @@
+name: "Refactor to class-based Item"
+prompt: >
+  Refactor src/main.py so the standalone functions (create_item, apply_discount,
+  format_item) become methods on a single class called `Item`. Preserve the
+  existing behavior and keep the same function signatures available as thin
+  wrappers for backward compatibility. Output only the unified diff.
+test_command: "python -m pytest tests/ -q"
+runners: 3
+provider: anthropic
+repo_path: "."
+test_timeout: 60.0
+max_retries: 2

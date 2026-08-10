@@ -145,6 +145,17 @@ class BackstopConfig:
     # ``AgentGuard`` instance fencing runaway agent loops.
     agent_guard: Any = None
 
+    # --- Structured logging ---
+    # When True, emit a JSON line per request/response to the ``log_sink``
+    # (a file path or callable(str)) for operational debugging.
+    log_json: bool = False
+    log_sink: Any = None
+
+    # --- Cost forecasting → enforcement (Deep Research P1#7) ---
+    # When the projected burn rate would exhaust the budget within this
+    # horizon, proactively tighten the AIMD concurrency limit. ``0`` disables.
+    forecast_horizon_seconds: float = 0.0
+
     # --- Safe rollout: shadow / canary (Deep Research P2#13) ---
     shadow_policy: Any = None
 
@@ -196,6 +207,10 @@ class BackstopConfig:
             raise ValueError("otel_meter_name must be a non-empty string")
         if self.max_wrap_sessions < 0:
             raise ValueError("max_wrap_sessions must be >= 0")
+        if self.forecast_horizon_seconds < 0:
+            raise ValueError("forecast_horizon_seconds must be >= 0")
+        if self.log_json and self.log_sink is None:
+            raise ValueError("log_json requires log_sink (file path or callable)")
         if self.audit_enabled:
             if self.audit_hmac_key is None:
                 raise ValueError("audit_enabled requires audit_hmac_key for tamper-evidence")

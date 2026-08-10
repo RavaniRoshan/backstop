@@ -14,17 +14,22 @@ from backstop.config import BackstopConfig
 def _extract_patch_from_output(output: str) -> str:
     """Extract a unified diff from messy LLM output.
 
-    Supports: plain unified diff, inline search/replace blocks,
-    or any text containing an embedded unified diff. A clean diff that begins
-    at the very start of the output is returned verbatim (whitespace and
-    trailing newline preserved) so it can be applied byte-for-byte.
+    Supports (in priority order):
+    1. Plain unified diff (starts with ``--- ``).
+    2. Embedded unified diff anywhere in the text.
+    3. Markdown code blocks with a file-path comment or filename header.
+    4. Inline search/replace blocks (``### search:`` / ``### replace:``).
+    5. Raw code output (wrapped in a synthetic single-file diff).
     """
     if not output:
         return ""
-    if output.lstrip().startswith("--- "):
-        return output
     text = output.strip()
 
+    # 1. Clean unified diff at the very start.
+    if output.startswith("--- "):
+        return output
+
+    # 2. Embedded unified diff anywhere in the text.
     unified = re.search(
         r'(?m)^---\s+a/\S+.*?\+\+\+\s+b/\S+.*?((?=^---\s) |\Z)',
         text,
@@ -33,6 +38,13 @@ def _extract_patch_from_output(output: str) -> str:
     if unified:
         return unified.group(0).rstrip()
 
+    # 3. Markdown code blocks — extract code, convert to a diff.
+    code_blocks = re.findall(r"```[a-zA-Z0-9_]*\s*\n(.*?)```", text, re.DOTALL)
+    if code_blocks:
+        filename, body = _infer_filename(text, code_blocks[0])
+        return _wrap_as_diff(filename, code_blocks[0], text)
+
+    # 4. Search/replace blocks.
     if "### search:" in text and "### replace:" in text:
         blocks = re.findall(
             r"### search:\s*(.*?)### replace:\s*(.*?)(?=### search:|\Z)",
@@ -47,7 +59,57 @@ def _extract_patch_from_output(output: str) -> str:
                     f"-{search.rstrip()}\n+{replace.rstrip()}"
                 )
             return "\n".join(hunks)
+
+    # 5. FILE: path header format.
+    file_header = re.search(r"^FILE:\s*(\S+)\s*$", text, re.MULTILINE)
+    if file_header:
+        filename = file_header.group(1)
+        body = text[file_header.end():].strip()
+        body = re.sub(r"```[a-zA-Z0-9_]*\s*\n?", "", body)
+        body = re.sub(r"```\s*$", "", body).strip()
+        return _wrap_as_diff(filename, body, text)
+
+    # 6. Fallback: treat multi-line output as a single-file replacement.
+    # Only trigger when there are multiple lines (a real code blob), not for
+    # short prose like "I cannot help with that."
+    if text and text.count("\n") >= 3:
+        filename = _infer_filename(text, text)[0]
+        return _wrap_as_diff(filename, text, text)
+
     return ""
+
+
+def _infer_filename(text: str, code: str) -> tuple[str, str]:
+    """Infer a filename from a comment line or the surrounding text."""
+    # Look for a comment like "# main.py" or "# file: main.py" at the start.
+    m = re.match(r"\s*#\s*(?:file:\s*)?(\S+\.\w+)\s*\n", code)
+    if m:
+        return m.group(1), code[m.end():]
+    # Look for a markdown heading like "## main.py" in the surrounding text.
+    m = re.search(r"^#{1,3}\s+(\S+\.\w+)\s*$", text, re.MULTILINE)
+    if m:
+        return m.group(1), code
+    # Look for "in <filename>" mentions in surrounding text.
+    m = re.search(r"\b(?:in|file|filename|path)\s*[:\s]\s*`?(\S+\.\w+)`?", text)
+    if m:
+        return m.group(1), code
+    return "main.py", code
+
+
+def _wrap_as_diff(filename: str, body: str, full_text: str) -> str:
+    """Wrap a code block as a unified diff that replaces the whole file."""
+    body = body.rstrip()
+    if not body:
+        return ""
+    body_lines = body.split("\n")
+    return (
+        f"--- a/{filename}\n"
+        f"+++ b/{filename}\n"
+        f"@@ -1,{len(body_lines)} +1,{len(body_lines)} @@\n"
+        + "\n".join(f"-{ln}" for ln in body_lines)
+        + "\n"
+        + "\n".join(f"+{ln}" for ln in body_lines)
+    )
 
 
 def apply_patch(patch: str, target_file: str) -> bool:
@@ -213,12 +275,16 @@ class WedgeRunner:
         provider: str = "anthropic",
         base_url: str | None = None,
         model: str | None = None,
+        test_timeout: float = 60.0,
+        max_retries: int = 2,
     ):
         self.runner_id = runner_id
         self.repo_path = repo_path
         self.provider = provider.lower()
         self.base_url = base_url
         self.model = model
+        self.test_timeout = test_timeout
+        self.max_retries = max_retries
         self.worktree_path = ""
         self.patch_text = ""
 
@@ -372,7 +438,14 @@ class WedgeRunner:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            _, _ = await proc.communicate()
+            try:
+                _, _ = await asyncio.wait_for(
+                    proc.communicate(), timeout=self.test_timeout
+                )
+            except asyncio.TimeoutError:
+                proc.kill()
+                await proc.wait()
+                return False
             return proc.returncode == 0
         except Exception:
             return False
@@ -405,20 +478,86 @@ class WedgeRunner:
         test_command: str,
         patch: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Run the task in an isolated worktree and execute test_command."""
+        """Run the task in an isolated worktree and execute test_command.
+
+        If the first attempt fails the tests, retries up to ``max_retries``
+        times with the test output and source context fed back to the LLM.
+        """
         self._setup_worktree()
+        attempts = []
         try:
             raw = patch if patch is not None else await self._generate_patch_from_llm(task_prompt)
             extracted = _extract_patch_from_output(raw)
             self.patch_text = extracted or raw
             applied = self._apply_patch(self.patch_text) if extracted else False
-            test_passed = await self._run_test_command(test_command)
+            test_passed, test_output = await self._run_test_command_with_output(test_command)
+            attempts.append({"applied": applied, "test_passed": test_passed, "output": test_output})
+
+            for retry in range(self.max_retries):
+                if test_passed:
+                    break
+                fix_prompt = (
+                    f"{task_prompt}\n\n"
+                    f"Your previous patch failed the tests. Test output:\n"
+                    f"```\n{test_output}\n```\n"
+                    f"Original file content:\n```\n{self._read_patched_file()}\n```\n"
+                    f"Please fix the patch."
+                )
+                raw = await self._generate_patch_from_llm(fix_prompt)
+                extracted = _extract_patch_from_output(raw)
+                if extracted:
+                    self.patch_text = extracted
+                    applied = self._apply_patch(self.patch_text)
+                    test_passed, test_output = await self._run_test_command_with_output(test_command)
+                    attempts.append({"applied": applied, "test_passed": test_passed, "output": test_output})
+                else:
+                    attempts.append({"applied": False, "test_passed": False, "output": "no patch extracted"})
+
             return {
                 "runner_id": self.runner_id,
                 "patch": {"main.py": self.patch_text},
                 "patch_applied": applied,
                 "test_passed": test_passed,
                 "budget_remaining": getattr(self.client, "_backstop_state").budget.remaining,
+                "attempts": attempts,
             }
         finally:
             self._teardown_worktree()
+
+    def _read_patched_file(self) -> str:
+        """Read the primary patched file to provide context for retries."""
+        for name in ("main.py", "main.ts", "index.py", "app.py"):
+            path = os.path.join(self.worktree_path, name)
+            if os.path.exists(path):
+                try:
+                    with open(path, "r") as f:
+                        return f.read()
+                except OSError:
+                    continue
+        return ""
+
+    async def _run_test_command_with_output(self, test_command: str) -> tuple[bool, str]:
+        """Run the test command and return (passed, output_text)."""
+        if not self.worktree_path or not test_command:
+            return False, ""
+        try:
+            proc = await asyncio.create_subprocess_shell(
+                test_command,
+                cwd=self.worktree_path,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    proc.communicate(), timeout=self.test_timeout
+                )
+            except asyncio.TimeoutError:
+                proc.kill()
+                await proc.wait()
+                return False, "TIMEOUT"
+            output = (stdout or b"").decode("utf-8", "replace")
+            if stderr:
+                output += "\n" + (stderr or b"").decode("utf-8", "replace")
+            return proc.returncode == 0, output[-4000:]
+        except Exception as exc:
+            return False, str(exc)[-4000:]

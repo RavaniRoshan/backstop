@@ -4,7 +4,7 @@ Backstop is a Python package (library + `backstop` / `wedge` CLIs). This page
 covers every supported install path, from a one-line end-user command to
 air-gapped enterprise deployment.
 
-> All commands below were verified against `backstop==0.4.0` by building the
+> All commands below were verified against `backstop==0.5.0` by building the
 > wheel and installing it into a clean virtual environment.
 
 ## End users
@@ -108,9 +108,9 @@ upstream.
 ### Pinned, reproducible installs
 
 ```bash
-pip install "backstop[anthropic]==0.4.0"
+pip install "backstop[anthropic]==0.5.0"
 # or, for the isolated CLI
-pipx install "backstop==0.4.0"
+pipx install "backstop==0.5.0"
 ```
 
 For applications, commit a lockfile so every environment resolves identical
@@ -120,12 +120,12 @@ versions (e.g. `pip-compile` from `pip-tools`, or your org's lock workflow).
 
 1. Build the wheel on a connected machine:
    ```bash
-   python -m build --wheel   # produces dist/backstop-0.4.0-py3-none-any.whl
-   ```
-2. Transfer `backstop-0.4.0-py3-none-any.whl` (plus its dependency wheels) to
+   python -m build --wheel   # produces dist/backstop-0.5.0-py3-none-any.whl
+```
+2. Transfer `backstop-0.5.0-py3-none-any.whl` (plus its dependency wheels) to
    the target and install:
-   ```bash
-   pip install ./backstop-0.4.0-py3-none-any.whl
+```bash
+   pip install ./backstop-0.5.0-py3-none-any.whl
    ```
 
 ### Server surface (metrics / Wedge harness)

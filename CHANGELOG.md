@@ -99,6 +99,34 @@ installs keep their default behavior.
   `CanaryRouter`) samples traffic to a candidate config/policy and records
   reason-coded decisions before any hard cutover.
 
+### v0.5.0 — Launch Readiness (2026-08-10)
+
+Production-readiness pass: every claim is now backed by proof, every stale
+doc is corrected, and the TypeScript SDK reaches full feature parity.
+
+- **Proof infrastructure** — runnable proof scripts (`proofs/`) demonstrate
+  budget exhaustion prevention, multi-agent isolation, real-provider overhead,
+  and semantic cache savings against live providers.
+- **Wedge fixed** — patch extraction now handles markdown code blocks, `FILE:`
+  headers, and multi-line LLM output (was unified-diff-only). Agent loop with
+  retry/fix on test failure. Per-runner test timeout.
+- **Bundled test fixture** — `wedge-test-fixture/` gives `wedge run task.yaml`
+  a real repo to run against out of the box.
+- **Docs corrected** — README benchmark table regenerated dynamically (was
+  stale), benchmark overhead measured live, version strings unified at `0.5.0`
+  across `pyproject.toml`, `wedge/__init__.py`, `install.sh`, and `docs/install.md`.
+- **Gateway hardened** — auth (`--api-keys`), per-key rate limiting, 1 MB body
+  size guard, path traversal rejection, and error handling.
+- **Cost forecasting → enforcement** — `forecast_horizon_seconds` proactively
+  tightens AIMD concurrency when burn rate projects exhaustion.
+- **Secret provider wired** — virtual keys resolve to provider secrets at call
+  time in the transport, not just at wrap time.
+- **TypeScript SDK v0.5.0** — full parity: priority admission, AIMD concurrency,
+  fallback chains, response cache (exact + semantic), hooks, audit log, agent
+  guardrails, quota-aware auto-tuning, cost forecasting, and `shadow/canary`.
+- **Concurrent budget stress tests** — 20-thread hammer proves the no-overspend
+  invariant. CI matrix tests multiple SDK versions.
+
 ## v0.4.0
 
 - Integrated the `wedge` tool directly into the `backstop` codebase as an executable package script (`wedge run task.yaml`).

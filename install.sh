@@ -65,8 +65,9 @@ fi
 
 EXTRAS="${BACKSTOP_EXTRAS:-anthropic}"
 SPEC="backstop[$EXTRAS]"
+BACKSTOP_VERSION="0.5.0"
 
-info "Installing $SPEC (user scheme)..."
+info "Installing $SPEC @ v${BACKSTOP_VERSION} (user scheme)..."
 if python3 -m pip install --user --upgrade "$SPEC"; then
   :
 elif [ "${BACKSTOP_NO_GITFALLBACK:-0}" = "1" ]; then

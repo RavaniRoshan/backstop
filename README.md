@@ -518,17 +518,18 @@ Backstop overhead is measured separately from provider latency using a local moc
 
 | Metric | Direct | Backstop | Overhead |
 |---|---:|---:|---:|
-| p50 latency | 0.12 ms | 0.19 ms | **0.07 ms** |
-| p95 latency | 0.22 ms | 0.30 ms | **0.07 ms** |
-| p99 latency | 0.30 ms | 0.38 ms | **0.07 ms** |
+| p50 latency | 0.13 ms | 0.26 ms | **0.12 ms** |
+| p95 latency | 0.25 ms | 0.43 ms | **0.18 ms** |
+| p99 latency | 0.35 ms | 0.58 ms | **0.23 ms** |
 
 Key scenario results (deterministic: local mock transport, fixed seed `0xC0FFEE`, reproducible via `backstop benchmark`):
 
-| Scenario | Requests | Provider Calls | Blocked | Why |
-|---|---:|---:|---:|---|
-| **Burst** | 50 | 50 | 0 | All requests within budget |
-| **Error Storm** | 50 | 12 | 42 | Circuit breaker tripped under sustained failures |
-| **Budget Hit** | 80 | 16 | 64 | Pre-flight budget blocking saved 64 API calls |
+| Scenario | Requests | Provider Calls | Successes | Provider Errors | Budget-Blocked | Circuit-Blocked |
+|---|---:|---:|---:|---:|---:|---:|
+| **Burst** | 50 | 50 | 50 | 0 | 0 | 0 |
+| **Steady-State** | 30 | 30 | 30 | 0 | 0 | 0 |
+| **Error Storm** | 50 | 12 | 8 | 0 | 0 | 42 |
+| **Budget Hit** | 80 | 17 | 17 | 0 | 63 | 0 |
 
 Per-run counts are exact and reproducible — the seeded harness removes the
 randomized error injection that made earlier runs non-deterministic. Re-run

@@ -25,6 +25,9 @@ Backstop is early-stage. This matrix documents the intended support surface and 
 | --- | --- |
 | `backstop[metrics]` | Prometheus metrics export |
 | `backstop[anthropic]` | Anthropic SDK support |
+| `backstop[redis]` | Shared/distributed budget across replicas |
+| `backstop[otel]` | OpenTelemetry metrics export |
+| `backstop[fastapi]` | Gateway/sidecar mode |
 | `backstop[tokenizers]` | Optional token counting support |
 | `backstop[test]` | Test dependencies |
 
@@ -35,14 +38,22 @@ Backstop is early-stage. This matrix documents the intended support surface and 
 | Global token budget | Supported |
 | Tenant token budget | Supported in-process |
 | Priority admission | Supported |
-| Retry handling | Supported |
-| Circuit breaker | Supported |
 | AIMD concurrency | Supported |
+| Retry handling | Supported |
+| Circuit breaker | Supported (per-tenant opt-in) |
 | Streaming | Supported |
-| Response caching | Supported |
+| Response caching | Supported (exact + semantic) |
+| Fallback chains | Supported (priority-aware) |
+| Agent guardrails | Supported |
+| Cloud-quota auto-tuning | Supported |
+| Cost forecasting → enforcement | Supported |
+| Audit log | Supported (tamper-evident) |
+| Secret provider | Supported |
 | Prometheus metrics | Optional |
-| Distributed budgets | Planned |
-| OpenTelemetry | Planned |
+| OpenTelemetry | Optional (`otel` extra) |
+| Distributed budgets | Optional (`redis` extra) |
+| Gateway / sidecar | Optional (`fastapi` extra) |
+| Shadow / canary rollout | Supported |
 | Hosted control plane | Planned |
 
 ## Compatibility Policy

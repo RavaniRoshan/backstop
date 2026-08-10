@@ -12,6 +12,19 @@ jobs:
     strategy:
       matrix:
         python-version: ["3.10", "3.11", "3.12"]
+        # Test against the latest patch of each recent SDK major to catch
+        # transport-injection drift early. openai/anthropic both change
+        # internal attribute names between majors.
+        openai-version: ["latest"]
+        anthropic-version: ["latest"]
+        include:
+          - python-version: "3.12"
+            openai-version: "1.54.0"
+            anthropic-version: "latest"
+          - python-version: "3.12"
+            openai-version: "latest"
+            anthropic-version: "0.40.0"
+      fail-fast: false
 
     steps:
       - uses: actions/checkout@v4
@@ -22,8 +35,16 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -e ".[test,metrics,anthropic]"
+          if [ "${{ matrix.openai-version }}" != "latest" ]; then
+            pip install "openai==${{ matrix.openai-version }}"
+          fi
+          if [ "${{ matrix.anthropic-version }}" != "latest" ]; then
+            pip install "anthropic==${{ matrix.anthropic-version }}"
+          fi
       - name: Run tests
         run: pytest
+      - name: Run benchmark smoke
+        run: python -m backstop benchmark
 
   build:
     needs: test

@@ -38,6 +38,9 @@ def generate_report(
         lines.append(f"  - Budget remaining: {remaining if remaining is not None else 'unlimited'}")
         lines.append(f"  - Tokens spent: {spent} ({pct} of cap)")
         lines.append(f"  - Patch applied: {r.get('patch_applied', 'n/a')}")
+        attempts = r.get("attempts", [])
+        if len(attempts) > 1:
+            lines.append(f"  - Attempts: {len(attempts)} (retries)")
     lines.append("")
 
     lines.append("## Budget Isolation Evidence")

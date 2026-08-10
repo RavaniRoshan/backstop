@@ -89,6 +89,18 @@ class Metrics:
             "backstop_cache_hits_total",
             "Cache hit count.",
         )
+        self.cache_semantic_hits = Counter(
+            "backstop_cache_semantic_hits_total",
+            "Semantic (near-duplicate) cache hit count.",
+        )
+        self.fallback_attempts = Counter(
+            "backstop_fallback_attempts_total",
+            "Fallback attempts.",
+        )
+        self.rate_limited = Counter(
+            "backstop_rate_limited_total",
+            "Requests rejected by pluggable rate limiter.",
+        )
         self.tenant_budget_exceeded = Counter(
             "backstop_tenant_budget_exceeded_total",
             "Requests blocked by per-tenant budget.",

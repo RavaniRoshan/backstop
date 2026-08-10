@@ -1,12 +1,3 @@
-/**
- * Type definitions for the Backstop TypeScript SDK.
- *
- * The SDK mirrors the Python `backstop.wrap(client, budget, config)` semantics:
- * one drop-in call wraps an OpenAI-like client and adds budget enforcement,
- * a circuit breaker, automatic retry with backoff, and an in-process fallback
- * model on sustained provider failure.
- */
-
 export type Priority = "critical" | "high" | "default" | "low" | "bulk";
 
 export interface BackstopConfig {
@@ -24,13 +15,83 @@ export interface BackstopConfig {
   fallbackModel?: string;
   /** Optional base URL for the fallback model. */
   fallbackBaseUrl?: string;
+  /** Ordered list of fallback targets walked on circuit-open. */
+  fallbackChain?: FallbackTarget[];
   /** Custom token estimator; defaults to a chars/4 heuristic. */
   estimateTokens?: (req: unknown) => number;
+
+  // --- AIMD concurrency ---
+  initialConcurrency?: number;
+  minConcurrency?: number;
+  maxConcurrency?: number;
+  aimdDecreaseFactor?: number;
+  aimdAdjustmentIntervalMs?: number;
+
+  // --- Priority admission ---
+  starvationAfterMs?: number;
+  queueTimeoutMs?: number | null;
+  requestTimeoutMs?: number | null;
+
+  // --- Hooks ---
+  beforeRequest?: (hook: BeforeRequestHook) => void;
+  afterResponse?: (hook: AfterResponseHook) => void;
+
+  // --- Caching ---
+  cacheEnabled?: boolean;
+  cacheMaxEntries?: number;
+  cacheTtlMs?: number;
+  cacheSemantic?: boolean;
+  cacheEmbedder?: (text: string) => number[] | Promise<number[]>;
+  cacheSimilarityThreshold?: number;
+
+  // --- Streaming ---
+  streamTimeoutMs?: number;
+
+  // --- Agent guardrails ---
+  agentMaxCalls?: number;
+  agentWindowMs?: number;
+  agentMaxTokens?: number | null;
+
+  // --- Quota-aware auto-tuning ---
+  quotaAware?: boolean;
+  quotaPressureThreshold?: number;
+
+  // --- Audit ---
+  auditEnabled?: boolean;
+  auditSink?: AuditSink;
+  auditHmacKey?: string;
+
+  // --- Forecasting ---
+  forecastHorizonMs?: number;
 }
+
+export interface FallbackTarget {
+  model: string;
+  base_url?: string;
+}
+
+export interface BeforeRequestHook {
+  endpoint: string;
+  priority: Priority;
+  estimatedTokens: number;
+  metadata: Record<string, string>;
+}
+
+export interface AfterResponseHook {
+  endpoint: string;
+  status: number;
+  actualTokens: number | null;
+  latencyMs: number;
+  success: boolean;
+  metadata: Record<string, string>;
+}
+
+export type AuditSink = string | ((line: string) => void);
 
 export interface ChatCompletionRequest {
   model: string;
   messages: Array<{ role: string; content?: unknown }>;
+  stream?: boolean;
   [key: string]: unknown;
 }
 
