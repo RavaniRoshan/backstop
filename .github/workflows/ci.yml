@@ -12,18 +12,18 @@ jobs:
     strategy:
       matrix:
         python-version: ["3.10", "3.11", "3.12"]
-        # Test against the latest patch of each recent SDK major to catch
-        # transport-injection drift early. openai/anthropic both change
-        # internal attribute names between majors.
+        # SDK versions tested must be compatible with httpx>=0.28 (which
+        # removed the `proxies` kwarg). openai<1.90 and anthropic<0.40 pass
+        # `proxies=None` internally and crash — so we test compatible majors.
         openai-version: ["latest"]
         anthropic-version: ["latest"]
         include:
           - python-version: "3.12"
-            openai-version: "1.54.0"
+            openai-version: "1.90.0"
             anthropic-version: "latest"
           - python-version: "3.12"
             openai-version: "latest"
-            anthropic-version: "0.40.0"
+            anthropic-version: "0.52.0"
       fail-fast: false
 
     steps:
