@@ -124,6 +124,35 @@ def _reconcile(
         global_budget.reconcile(reservation, usage, success=success)
 
 
+def _build_alerts(config) -> object | None:
+    """Build a BudgetAlertManager from config, or None when unconfigured."""
+    if not config.webhook_endpoints:
+        return None
+    from .notifications import BudgetAlertManager
+
+    return BudgetAlertManager(
+        endpoints=list(config.webhook_endpoints),
+        secret=config.webhook_secret,
+        tiers=list(config.alert_tiers) if config.alert_tiers else None,
+        dedup_ttl=config.alert_dedup_ttl,
+        project_horizon_calls=config.alert_project_horizon_calls,
+    )
+
+
+def _dispatch_alert(alerts, tenant_id: str | None, used: float, limit: float) -> None:
+    """Fire-and-forget budget alert so the request path is never blocked."""
+    if alerts is None or limit <= 0:
+        return
+    try:
+        import threading
+
+        threading.Thread(
+            target=alerts.observe, args=(tenant_id or "", used, limit), daemon=True
+        ).start()
+    except Exception:
+        pass
+
+
 class BackstopTransport(httpx.BaseTransport):
     def __init__(
         self,
@@ -136,6 +165,14 @@ class BackstopTransport(httpx.BaseTransport):
         self._transport = transport or httpx.HTTPTransport()
         self._sleep = sleep or time.sleep
         self._metrics = get_metrics()
+        from .rollout import ShadowCollector
+
+        self._shadow = (
+            ShadowCollector(sink=state.config.audit_sink)
+            if ShadowCollector.enabled(state.config.shadow)
+            else None
+        )
+        self._alerts = _build_alerts(state.config)
         self._cache = ResponseCache(
             max_entries=state.config.cache_max_entries,
             ttl=state.config.cache_ttl,
@@ -215,11 +252,15 @@ class BackstopTransport(httpx.BaseTransport):
                     self._audit("deny", "budget_exceeded", meta, tenant_id=tenant_id)
                     raise
             else:
-                self._metrics.call("budget_exceeded")
-                if tenant_id:
-                    self._metrics.call("tenant_budget_exceeded", tenant_id)
-                self._audit("deny", "budget_exceeded", meta, tenant_id=tenant_id)
-                raise
+                if self._shadow is not None:
+                    self._shadow.would_block(tenant_id=tenant_id, estimated_tokens=meta.estimated_tokens)
+                    reservation = None  # observe only: let the request through
+                else:
+                    self._metrics.call("budget_exceeded")
+                    if tenant_id:
+                        self._metrics.call("tenant_budget_exceeded", tenant_id)
+                    self._audit("deny", "budget_exceeded", meta, tenant_id=tenant_id)
+                    raise
 
         self._pre_admit_checks(request, meta, tenant_id)
 
@@ -239,7 +280,11 @@ class BackstopTransport(httpx.BaseTransport):
             admitted = True
             tracker.queue_entered_at = time.monotonic()
             self._observe_queue(wait, meta.priority)
-            circuit.before_request()
+            if self._shadow is None:
+                circuit.before_request()
+            else:
+                # Shadow mode: observe but never block on an open circuit.
+                self._shadow.would_open_circuit(tenant_id=tenant_id)
             tracker.request_sent_at = time.monotonic()
 
             if self.state.config.compress is not None and isinstance(body, dict):
@@ -276,6 +321,11 @@ class BackstopTransport(httpx.BaseTransport):
                     self.state.quota.adjust(self.state.aimd)
                 _reconcile(tenant_budget, self.state.budget, reservation, usage, success=success, downgraded=downgraded)
                 self._record_outcome(response.status_code, success=success, circuit=circuit)
+                if self._alerts is not None:
+                    _b = tenant_budget if tenant_budget is not None else self.state.budget
+                    _used = getattr(_b, "spent", None) or getattr(_b, "used", 0)
+                    _lim = getattr(_b, "total", None) or getattr(_b, "limit_tokens", None) or getattr(_b, "limit", 0)
+                    _dispatch_alert(self._alerts, tenant_id, _used, _lim)
                 if self._cache is not None and body is not None and usage is not None:
                     self._cache.set(body, response.content, usage, dict(response.headers))
                 self._maybe_forecast_enforce()
@@ -381,6 +431,9 @@ class BackstopTransport(httpx.BaseTransport):
             success = response.status_code < 400
             _reconcile(tenant_budget, self.state.budget, reservation, usage, success=success)
             self._record_outcome(response.status_code, success=success, circuit=circuit)
+            if self._alerts is not None:
+                _b = tenant_budget if tenant_budget is not None else self.state.budget
+                _dispatch_alert(self._alerts, tenant_id, getattr(_b, "used", 0), getattr(_b, "limit", 0))
             tracker.completed_at = time.monotonic()
             self._observe_request(meta.endpoint, meta.priority, tracker.created_at, "fallback")
             backstop_meta = tracker.build_meta(
@@ -411,14 +464,20 @@ class BackstopTransport(httpx.BaseTransport):
                 estimated_tokens=getattr(meta, "estimated_tokens", None), tenant_id=tenant_id,
             )
         if cfg.rate_limiter is not None and not cfg.rate_limiter.allow(getattr(meta, "estimated_tokens", 0)):
-            self._metrics.call("rate_limited")
-            self._audit("deny", "rate_limited", meta, tenant_id=tenant_id)
-            raise RateLimitError("rate limiter rejected request")
+            if self._shadow is not None:
+                self._shadow.would_throttle(tenant_id=tenant_id)
+            else:
+                self._metrics.call("rate_limited")
+                self._audit("deny", "rate_limited", meta, tenant_id=tenant_id)
+                raise RateLimitError("rate limiter rejected request")
         agent_id = request.headers.get("X-Backstop-Agent")
         if cfg.agent_guard is not None and agent_id:
             if not cfg.agent_guard.allow(agent_id, getattr(meta, "estimated_tokens", 0)):
-                self._audit("deny", "agent_guardrail", meta, tenant_id=tenant_id, agent_id=agent_id)
-                raise GuardrailViolationError(f"agent {agent_id!r} exceeded guardrail")
+                if self._shadow is not None:
+                    self._shadow.would_guardrail(tenant_id=tenant_id, agent_id=agent_id)
+                else:
+                    self._audit("deny", "agent_guardrail", meta, tenant_id=tenant_id, agent_id=agent_id)
+                    raise GuardrailViolationError(f"agent {agent_id!r} exceeded guardrail")
 
     def _acquire_gate(self, priority: Priority, deadline: float | None) -> float:
         effective: float | None = None
@@ -570,6 +629,14 @@ class AsyncBackstopTransport(httpx.AsyncBaseTransport):
         self._transport = transport or httpx.AsyncHTTPTransport()
         self._sleep = sleep or asyncio.sleep
         self._metrics = get_metrics()
+        from .rollout import ShadowCollector
+
+        self._shadow = (
+            ShadowCollector(sink=state.config.audit_sink)
+            if ShadowCollector.enabled(state.config.shadow)
+            else None
+        )
+        self._alerts = _build_alerts(state.config)
         self._cache = ResponseCache(
             max_entries=state.config.cache_max_entries,
             ttl=state.config.cache_ttl,
@@ -640,15 +707,23 @@ class AsyncBackstopTransport(httpx.AsyncBaseTransport):
                     except BudgetExceededError:
                         reservation = None
                 else:
+                    if self._shadow is not None:
+                        self._shadow.would_block(tenant_id=tenant_id, estimated_tokens=meta.estimated_tokens)
+                        reservation = None
+                    else:
+                        self._metrics.call("budget_exceeded")
+                        if tenant_id:
+                            self._metrics.call("tenant_budget_exceeded", tenant_id)
+                        raise
+            else:
+                if self._shadow is not None:
+                    self._shadow.would_block(tenant_id=tenant_id, estimated_tokens=meta.estimated_tokens)
+                    reservation = None
+                else:
                     self._metrics.call("budget_exceeded")
                     if tenant_id:
                         self._metrics.call("tenant_budget_exceeded", tenant_id)
                     raise
-            else:
-                self._metrics.call("budget_exceeded")
-                if tenant_id:
-                    self._metrics.call("tenant_budget_exceeded", tenant_id)
-                raise
 
         try:
             if self.state.config.before_request is not None:
@@ -666,7 +741,11 @@ class AsyncBackstopTransport(httpx.AsyncBaseTransport):
             admitted = True
             tracker.queue_entered_at = time.monotonic()
             self._observe_queue(wait, meta.priority)
-            circuit.before_request()
+            if self._shadow is None:
+                circuit.before_request()
+            else:
+                # Shadow mode: observe but never block on an open circuit.
+                self._shadow.would_open_circuit(tenant_id=tenant_id)
             tracker.request_sent_at = time.monotonic()
 
             if self.state.config.compress is not None and isinstance(body, dict):
@@ -703,6 +782,11 @@ class AsyncBackstopTransport(httpx.AsyncBaseTransport):
                     self.state.quota.adjust(self.state.aimd)
                 _reconcile(tenant_budget, self.state.budget, reservation, usage, success=success, downgraded=downgraded)
                 self._record_outcome(response.status_code, success=success, circuit=circuit)
+                if self._alerts is not None:
+                    _b = tenant_budget if tenant_budget is not None else self.state.budget
+                    _used = getattr(_b, "spent", None) or getattr(_b, "used", 0)
+                    _lim = getattr(_b, "total", None) or getattr(_b, "limit_tokens", None) or getattr(_b, "limit", 0)
+                    _dispatch_alert(self._alerts, tenant_id, _used, _lim)
                 if self._cache is not None and body is not None and usage is not None:
                     self._cache.set(body, response.content, usage, dict(response.headers))
                 self._maybe_forecast_enforce()
@@ -787,6 +871,9 @@ class AsyncBackstopTransport(httpx.AsyncBaseTransport):
             success = response.status_code < 400
             _reconcile(tenant_budget, self.state.budget, reservation, usage, success=success)
             self._record_outcome(response.status_code, success=success, circuit=circuit)
+            if self._alerts is not None:
+                _b = tenant_budget if tenant_budget is not None else self.state.budget
+                _dispatch_alert(self._alerts, tenant_id, getattr(_b, "used", 0), getattr(_b, "limit", 0))
             tracker.completed_at = time.monotonic()
             self._observe_request(meta.endpoint, meta.priority, tracker.created_at, "fallback")
             backstop_meta = tracker.build_meta(
@@ -830,14 +917,20 @@ class AsyncBackstopTransport(httpx.AsyncBaseTransport):
                 estimated_tokens=getattr(meta, "estimated_tokens", None), tenant_id=tenant_id,
             )
         if cfg.rate_limiter is not None and not cfg.rate_limiter.allow(getattr(meta, "estimated_tokens", 0)):
-            self._metrics.call("rate_limited")
-            self._audit("deny", "rate_limited", meta, tenant_id=tenant_id)
-            raise RateLimitError("rate limiter rejected request")
+            if self._shadow is not None:
+                self._shadow.would_throttle(tenant_id=tenant_id)
+            else:
+                self._metrics.call("rate_limited")
+                self._audit("deny", "rate_limited", meta, tenant_id=tenant_id)
+                raise RateLimitError("rate limiter rejected request")
         agent_id = request.headers.get("X-Backstop-Agent")
         if cfg.agent_guard is not None and agent_id:
             if not cfg.agent_guard.allow(agent_id, getattr(meta, "estimated_tokens", 0)):
-                self._audit("deny", "agent_guardrail", meta, tenant_id=tenant_id, agent_id=agent_id)
-                raise GuardrailViolationError(f"agent {agent_id!r} exceeded guardrail")
+                if self._shadow is not None:
+                    self._shadow.would_guardrail(tenant_id=tenant_id, agent_id=agent_id)
+                else:
+                    self._audit("deny", "agent_guardrail", meta, tenant_id=tenant_id, agent_id=agent_id)
+                    raise GuardrailViolationError(f"agent {agent_id!r} exceeded guardrail")
 
     async def _aacquire_gate(self, priority: Priority, deadline: float | None) -> float:
         effective: float | None = None
