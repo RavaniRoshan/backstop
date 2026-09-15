@@ -1,5 +1,5 @@
 <div align="center">
-  <img width="1949" height="807" alt="image" src="https://github.com/user-attachments/assets/2c5cd29f-7bde-4e08-ad25-f79de6c6505d" />
+  <img width="1552" alt="Wedge multi-agent diff demo — 3 isolated runners converge with per-runner budgets" src="./demo.gif" />
 
   <p>
     <strong>In-process AI SDK backpressure, budgets, retries, circuit breaking, and metrics.</strong>
@@ -76,6 +76,8 @@ Run the multi-agent diff tool:
 ```bash
 wedge run task.yaml
 ```
+
+> Demo above: `wedge run task.yaml` with 3 isolated runners (20k budget each) — patches stream in, tests run per runner, convergence scores **PARTIAL (sim=0.98)** with per-runner budgets. See [Verified Results](#verified-results).
 
 ---
 
