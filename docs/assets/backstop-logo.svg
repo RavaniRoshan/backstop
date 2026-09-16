@@ -1,36 +1,15 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 360" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 300" role="img" aria-labelledby="title desc">
   <title id="title">Backstop</title>
-  <desc id="desc">A navy shield containing a rising signal, beside the Backstop wordmark.</desc>
-  <defs>
-    <linearGradient id="shield" x1="56" y1="44" x2="256" y2="296" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#38bdf8"/>
-      <stop offset="1" stop-color="#2563eb"/>
-    </linearGradient>
-    <linearGradient id="wordmark" x1="372" y1="105" x2="1060" y2="248" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#f8fafc"/>
-      <stop offset="1" stop-color="#cbd5e1"/>
-    </linearGradient>
-    <filter id="glow" x="-35%" y="-35%" width="170%" height="170%">
-      <feGaussianBlur stdDeviation="12" result="blur"/>
-      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-    </filter>
-  </defs>
+  <desc id="desc">The Backstop wordmark beside a simple blue shield.</desc>
 
-  <rect width="1200" height="360" rx="36" fill="#0b1120"/>
-  <path d="M0 280C200 196 350 380 590 270s365-35 610-125v215H0Z" fill="#111c33" opacity=".72"/>
-  <path d="M0 104C188 30 355 139 570 66s397 18 630-57v112C966 202 806 97 590 170S196 61 0 158Z" fill="#172554" opacity=".45"/>
-
-  <g transform="translate(56 40)">
-    <path d="M124 0 238 42v85c0 68-47 119-114 153C57 246 10 195 10 127V42L124 0Z" fill="#0f1f46" stroke="#60d8ff" stroke-width="5"/>
-    <path d="M124 22 216 56v70c0 52-34 94-92 126-58-32-92-74-92-126V56l92-34Z" fill="url(#shield)"/>
-    <path d="M74 150h31v-36h38v36h31v-74h-31v12h-38V76H74v74Z" fill="#071426" opacity=".96"/>
-    <path d="m76 180 32-32 25 21 54-63" fill="none" stroke="#e0f2fe" stroke-linecap="round" stroke-linejoin="round" stroke-width="12"/>
-    <circle cx="187" cy="91" r="11" fill="#fef08a" filter="url(#glow)"/>
+  <g transform="translate(42 36)">
+    <path d="M114 0 212 36v74c0 58-39 102-98 130C55 212 16 168 16 110V36L114 0Z" fill="#2563eb"/>
+    <path d="M114 28 184 54v54c0 38-24 69-70 94-46-25-70-56-70-94V54l70-26Z" fill="none" stroke="#fff" stroke-width="12" stroke-linejoin="round"/>
   </g>
 
-  <g transform="translate(352 0)">
-    <text x="0" y="180" fill="url(#wordmark)" font-family="Inter, Avenir Next, Segoe UI, Helvetica, Arial, sans-serif" font-size="132" font-weight="800" letter-spacing="-6">Backstop</text>
-    <rect x="4" y="213" width="81" height="7" rx="3.5" fill="#38bdf8"/>
-    <text x="103" y="222" fill="#93c5fd" font-family="Inter, Avenir Next, Segoe UI, Helvetica, Arial, sans-serif" font-size="28" font-weight="650" letter-spacing="4.5">IN-PROCESS AI GUARDRAILS</text>
+  <g fill="#0f172a" font-family="Inter, Avenir Next, Segoe UI, Helvetica, Arial, sans-serif">
+    <text x="300" y="142" font-size="120" font-weight="800" letter-spacing="-5">Backstop</text>
+    <rect x="304" y="175" width="64" height="6" rx="3" fill="#2563eb"/>
+    <text x="390" y="184" fill="#475569" font-size="25" font-weight="600" letter-spacing="3.7">IN-PROCESS AI GUARDRAILS</text>
   </g>
 </svg>
