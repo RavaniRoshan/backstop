@@ -1,9 +1,5 @@
 <div align="center">
-
-
-
-  
-  <img width="1552" alt="Wedge multi-agent diff demo — 3 isolated runners converge with per-runner budgets" src="./demo.gif" />
+  <img width="900" alt="Backstop — in-process AI guardrails" src="docs/assets/backstop-logo.svg" />
 
   <p>
     <strong>In-process AI SDK backpressure, budgets, retries, circuit breaking, and metrics.</strong>
