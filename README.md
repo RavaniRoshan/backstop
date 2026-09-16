@@ -1,4 +1,8 @@
 <div align="center">
+
+<img width="1254" height="1254" alt="ChatGPT Image Sep 16, 2026, 05_19_01 PM" src="https://github.com/user-attachments/assets/e4c15234-b90f-4424-9f3c-e9cc2fdf452d" />
+
+  
   <img width="1552" alt="Wedge multi-agent diff demo — 3 isolated runners converge with per-runner budgets" src="./demo.gif" />
 
   <p>
