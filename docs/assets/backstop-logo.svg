@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 300" role="img" aria-labelledby="title desc">
+  <title id="title">Backstop</title>
+  <desc id="desc">The Backstop wordmark beside a simple blue shield.</desc>
+
+  <g transform="translate(42 36)">
+    <path d="M114 0 212 36v74c0 58-39 102-98 130C55 212 16 168 16 110V36L114 0Z" fill="#2563eb"/>
+    <path d="M114 28 184 54v54c0 38-24 69-70 94-46-25-70-56-70-94V54l70-26Z" fill="none" stroke="#fff" stroke-width="12" stroke-linejoin="round"/>
+  </g>
+
+  <g fill="#0f172a" font-family="Inter, Avenir Next, Segoe UI, Helvetica, Arial, sans-serif">
+    <text x="300" y="142" font-size="120" font-weight="800" letter-spacing="-5">Backstop</text>
+    <rect x="304" y="175" width="64" height="6" rx="3" fill="#2563eb"/>
+    <text x="390" y="184" fill="#475569" font-size="25" font-weight="600" letter-spacing="3.7">IN-PROCESS AI GUARDRAILS</text>
+  </g>
+</svg>
