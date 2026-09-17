@@ -11,11 +11,13 @@ import time
 import httpx
 
 from .config import BackstopConfig
+from .dashboard_app import DEFAULT_HOST, DEFAULT_PORT, Dashboard, serve as serve_dashboard
 from .harness import DEFAULT_SEED, run_harness
 from .metrics import start_metrics_server
 from .real_anthropic import run_real_anthropic_smoke
 from .real_openai import run_real_openai_smoke
 from .state import BackstopState
+from .telemetry import DEFAULT_SAMPLE_INTERVAL
 from .transports import BackstopTransport
 from .verify import run_verify
 
@@ -237,6 +239,44 @@ def main(argv: list[str] | None = None) -> int:
     metrics = subparsers.add_parser("metrics", help="start a Prometheus metrics server")
     metrics.add_argument("--port", type=int, default=9090)
 
+    dashboard = subparsers.add_parser(
+        "dashboard",
+        help="serve the built-in dashboard for this process",
+    )
+    dashboard.add_argument("--port", type=int, default=DEFAULT_PORT)
+    dashboard.add_argument("--host", default=DEFAULT_HOST, help="bind address (non-loopback requires --token)")
+    dashboard.add_argument(
+        "--refresh",
+        type=float,
+        default=None,
+        help="sample interval in seconds (default: 1.0 in demo mode, else 2.0)",
+    )
+    dashboard.add_argument(
+        "--cost-model",
+        help="model whose input rate converts tokens into a USD lower bound, e.g. gpt-4o",
+    )
+    dashboard.add_argument(
+        "--audit",
+        help="path to an audit JSONL sink; enables the enforcement event stream",
+    )
+    dashboard.add_argument(
+        "--demo",
+        action="store_true",
+        help="run a deterministic mock workload so the dashboard is live with no API keys",
+    )
+    dashboard.add_argument("--runners", type=int, default=3, help="demo runner count (default 3)")
+    dashboard.add_argument(
+        "--token",
+        help="require this bearer token; mandatory when --host is not loopback",
+    )
+    dashboard.add_argument(
+        "--theme",
+        choices=("auto", "dark", "light"),
+        default="auto",
+        help="initial colour theme: auto follows the OS (default), or force dark/light",
+    )
+    dashboard.add_argument("--no-browser", action="store_true", help="do not open a browser")
+
     verify = subparsers.add_parser(
         "verify", help="run reproducible proof checks against this install (collapse install -> trust)"
     )
@@ -317,6 +357,34 @@ def main(argv: list[str] | None = None) -> int:
                 time.sleep(3600)
         except KeyboardInterrupt:
             return 0
+
+    if args.command == "dashboard":
+        workload = None
+        if args.demo:
+            from .dashboard_demo import DemoWorkload
+
+            workload = DemoWorkload(runners=args.runners)
+        interval = args.refresh or (1.0 if args.demo else DEFAULT_SAMPLE_INTERVAL)
+        panel = Dashboard(
+            mode="demo" if args.demo else "live",
+            cost_model=args.cost_model,
+            audit=args.audit,
+            interval=interval,
+            token=args.token,
+            demo=workload,
+            theme=args.theme,
+        )
+        try:
+            serve_dashboard(
+                panel,
+                host=args.host,
+                port=args.port,
+                open_browser=not args.no_browser,
+            )
+        except ValueError as exc:
+            print(f"error: {exc}")
+            return 1
+        return 0
 
     if args.command == "verify":
         return run_verify(

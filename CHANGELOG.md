@@ -9,6 +9,23 @@
 
 All notable changes to Backstop should be documented in this file.
 
+## Unreleased
+
+- **Custom dashboard hardened (visual audit follow-up).** Fixed the topbar
+  collision between the mode badge and wordmark at phone widths (≤640px: the
+  brand row now wraps onto its own line); fixed keyboard focus being dropped to
+  `<body>` on every table re-render (row focus is restored across polls); grew
+  the refresh control and badges to comfortable touch-target sizes under
+  `pointer: coarse`.
+- **Dashboard theme control.** `backstop dashboard --theme auto|dark|light`
+  sets the initial theme (default `auto` follows the OS), and a new **theme**
+  button in the topbar cycles auto → dark → light per browser, persisted in
+  `localStorage`.
+- **Grafana export removed.** `backstop.dashboard` (the JSON spec module),
+  `tests/test_dashboard.py`, and `observability/grafana/` are gone — the
+  built-in dashboard is the single custom ops surface. Prometheus metrics and
+  `observability/prometheus-alerts.yml` are unchanged.
+
 ## v0.5.0 — 10× Better
 
 Closes the gap between Backstop and proxy gateways (LiteLLM / BricksLLM) while

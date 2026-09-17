@@ -35,6 +35,7 @@ class Backstop:
             )
 
         state = BackstopState.create(budget, config)
+        state.provider = provider
         if provider == "anthropic":
             if cls.__name__ == "AsyncAnthropic":
                 wrapped_http_client = _build_async_anthropic_http_client(client, state)
@@ -53,6 +54,22 @@ class Backstop:
 
     start_metrics_server = staticmethod(start_metrics_server)
     metrics_app = staticmethod(metrics_app)
+
+    @staticmethod
+    def dashboard_app(**kwargs: Any) -> Any:
+        """Mount the built-in dashboard in your own server.
+
+        Lazy import on purpose: ``import backstop`` stays cheap and the
+        dashboard's shell, CSS and JS are only loaded when actually used.
+
+        ::
+
+            app = FastAPI()
+            app.mount("/", WSGIMiddleware(Backstop.dashboard_app()))
+        """
+        from .dashboard_app import dashboard_wsgi_app
+
+        return dashboard_wsgi_app(**kwargs)
 
 
 def _detect_provider(cls: type) -> str:

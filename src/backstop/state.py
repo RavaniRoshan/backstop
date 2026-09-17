@@ -11,6 +11,7 @@ from .config import BackstopConfig
 from .metrics import disable_otel, enable_otel
 from .quotas import QuotaMonitor
 from .state_backends import BudgetBackend, build_backend
+from .telemetry import get_registry
 
 
 @dataclass
@@ -56,7 +57,7 @@ class BackstopState:
         budget_obj = Budget(budget, backend=backend)
         audit = AuditLog(resolved.audit_sink, resolved.audit_hmac_key) if resolved.audit_enabled else None
         quota = QuotaMonitor() if resolved.quota_aware else None
-        return cls(
+        state = cls(
             config=resolved,
             budget=budget_obj,
             aimd=aimd,
@@ -65,3 +66,8 @@ class BackstopState:
             audit=audit,
             quota=quota,
         )
+        # Registering here (rather than in wrap()) keeps the built-in dashboard
+        # aware of gateway, harness and demo sessions too. The reference it holds
+        # is weak, so a garbage-collected client leaves the registry on its own.
+        get_registry().register(state)
+        return state

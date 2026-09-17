@@ -5,6 +5,17 @@ from typing import Any
 
 _OTEL: Any | None = None
 
+# Optional dependency-free consumer (the built-in dashboard). ``None`` unless a
+# dashboard is running, so an ordinary install pays a single comparison per
+# instrumented event — see ``backstop.telemetry``.
+_TELEMETRY_SINK: Any | None = None
+
+
+def set_telemetry_sink(sink: Any | None) -> None:
+    """Install a callable receiving ``(name, args, method, kwargs)`` per event."""
+    global _TELEMETRY_SINK
+    _TELEMETRY_SINK = sink
+
 
 def enable_otel(meter_name: str = "backstop") -> bool:
     """Initialize the optional OTel mirror. Returns True if it became active."""
@@ -108,6 +119,11 @@ class Metrics:
         )
 
     def call(self, name: str, *args: Any, method: str = "inc", **kwargs: Any) -> None:
+        # Dependency-free consumer first: unlike Prometheus (an optional extra),
+        # the built-in dashboard works in a bare `pip install backstop`.
+        sink = _TELEMETRY_SINK
+        if sink is not None:
+            sink(name, args, method, kwargs)
         if not getattr(self, "enabled", False):
             return
         metric = getattr(self, name)
