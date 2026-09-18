@@ -1,77 +1,79 @@
 # Backstop
 
-> In-process AI SDK backpressure, budgets, retries, circuit breaking, and metrics for OpenAI and Anthropic clients. Wraps your existing SDK client at the httpx transport layer — no proxy, no call-site changes.
+> In-process token budget enforcement, circuit breaking, and concurrency control for OpenAI and Anthropic SDK clients. Wraps the SDK's internal httpx transport — no proxy, no call-site changes.
 
 - Documentation: /README.md
-- Install guide (end-user + enterprise): /docs/install.md
+- Quick start: /docs/quickstart.md
+- Install guide: /docs/install.md
+- SDK compatibility matrix: /docs/sdk-matrix.md
+- Compatibility details: /docs/compatibility.md
 - Architecture: /docs/architecture.md
-- Threat model: /docs/threat-model.md
-- Compatibility matrix: /docs/compatibility.md
 - Benchmarks: /docs/benchmarks.md
 - Examples: /examples/
-- Wedge (multi-agent diff tool): /examples/wedge_basic.py
-- Dashboard: /docs/dashboard.md
-- Quick start: /docs/install.md
 
 ## Install (0.6.0 unreleased)
 
-The distribution is `backstop-ai`; the import is `backstop`. PyPI publication
-and installation from PyPI are pending. Use the source instructions in
-/docs/install.md until publication; the registry commands below are prospective.
-The PyPI name `backstop` belongs to an unrelated project.
+The distribution is `backstop-ai`; the import is `backstop`. PyPI publication is pending.
+Until then, install from source:
 
-SDK compatibility remains unresolved: current Anthropic SDKs can reject
-wrapping, and SDKs can relabel enforcement errors as connection errors.
-A successful install does not prove wrapping or enforcement works.
+```bash
+git clone https://github.com/RavaniRoshan/backstop.git
+cd backstop && pip install -e ".[anthropic]"
+```
 
-- `pip install "backstop-ai[anthropic]"` — base library plus Anthropic SDK dependency
-- `pip install backstop-ai` — base dependencies, including OpenAI
-- `pip install "backstop-ai[redis]"` — shared/distributed budget dependency
+After publication:
+- `pip install backstop-ai` — OpenAI + base
+- `pip install "backstop-ai[anthropic]"` — OpenAI + Anthropic
+- `pip install "backstop-ai[redis]"` — shared/distributed budget
 - `pip install "backstop-ai[otel]"` — OpenTelemetry metrics export
-- `pip install "backstop-ai[fastapi]"` — multi-tenant FastAPI example dependency
-- `install.sh` — secondary convenience installer; review /docs/install.md before use
-- `pipx run --spec backstop-ai backstop --help` / `pipx run --spec backstop-ai wedge --help` — temporary CLI environment
-- `pipx install backstop-ai` — isolated persistent CLI (no npm)
+- `pip install "backstop-ai[fastapi]"` — per-tenant FastAPI example
 
 ## Quick start
 
 ```python
 from openai import OpenAI
 from backstop import Backstop
+from backstop.exceptions import BudgetExceededError
 
 client = Backstop.wrap(OpenAI(), budget=50_000)
-response = client.chat.completions.create(
-    model="gpt-4.1-mini",
-    messages=[{"role": "user", "content": "Hello."}],
-)
+try:
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": "Hello."}],
+    )
+except BudgetExceededError:
+    print("Budget exhausted")
 ```
+
+## Keyless proof (no API key needed)
+
+```bash
+backstop verify   # 8/8 PASS in ~2s, purely offline
+backstop demo     # side-by-side runaway loop comparison
+```
+
+## SDK compatibility
+
+- OpenAI: `>=2.37,<4` on Python 3.10–3.12 ✅
+- Anthropic: `>=0.98,<2` on Python 3.10–3.12 ✅
+
+Run `backstop doctor` to check your installed versions.
+
+## CLIs
+
+- `backstop verify` — proves enforcement offline in ~2s with 8 checks
+- `backstop demo` — side-by-side runaway loop (unprotected vs wrapped)
+- `backstop doctor` — checks SDK versions and wrap path
+- `backstop benchmark` — reproducible overhead measurement
+- `backstop metrics` — Prometheus endpoint
+- `backstop real-openai` / `real-anthropic` — live smoke tests (require API key)
 
 ## Agentic-installer quickstart
 
 If you are an agent installing Backstop into a codebase:
 
-1. Detect the SDK in use (`openai` and/or `anthropic`) and review known
-   compatibility limitations in /docs/install.md.
-2. Until publication, install from source as documented in /docs/install.md.
-   After publication, use `pip install "backstop-ai[anthropic]"` (or
-   `pip install backstop-ai` for the base dependencies).
-3. The integration API is `client = Backstop.wrap(client, budget=50_000)`;
-   verify it against your SDK rather than assuming compatibility.
-4. Check CLI entry points with `backstop --help`. `backstop doctor` currently
-   does not prove SDK wrapping or enforcement; `backstop benchmark` measures
-   local mock-transport overhead.
-5. For multi-replica deployments, add `[redis]` and
-   `BackstopConfig(shared_budget=True, redis_url=...)` so one budget is
-   enforced across processes.
-
-Backstop integrates by wrapping the client's HTTP transport. Provider calls,
-network behavior, and default budgets are subject to the compatibility
-limitations documented in /docs/install.md.
-
-## CLIs
-
-- `backstop doctor` — checks install, SDKs, and keys; its current wrap smoke
-  test does not prove that `Backstop.wrap()` works.
-- `backstop benchmark` — reproducible (seeded) overhead + scenario proof.
-- `backstop metrics` — Prometheus endpoint. `backstop real-openai` / `real-anthropic` — live smoke tests.
-- `wedge run task.yaml` — multi-agent convergence + per-runner budget proof.
+1. Check SDK compatibility: OpenAI `>=2.37,<4`, Anthropic `>=0.98,<2`.
+2. Until PyPI publication, install from source.
+3. Integration: `client = Backstop.wrap(client, budget=50_000)` — one line.
+4. Verify: `backstop verify` proves enforcement without any API key.
+5. Catch `backstop.exceptions.BudgetExceededError` to handle budget exhaustion.

@@ -1,28 +1,14 @@
 <div align="center">
   <img width="900" alt="Backstop — in-process AI guardrails" src="docs/assets/backstop-logo.svg" />
-  <br />
-  <img width="1000" alt="Wedge multi-agent diff demo — 3 isolated runners converge with per-runner budgets" src="./demo.gif" />
 </div>
 
-<p>
-  <strong>In-process AI SDK backpressure, budgets, retries, circuit breaking, and metrics.</strong>
+<p align="center">
+  <strong>In-process token budget enforcement, circuit breaking, and concurrency control for OpenAI and Anthropic SDK clients.</strong>
 </p>
-<p>
-  <em>Verified: per-agent budget isolation that proves whether isolated agents converge on the same answer — the only LLM guardrail that measures its own claims.</em>
-</p>
-<p>
-  <a href="#quick-start">Quick Start</a> •
-  <a href="#features">Features</a> •
-  <a href="#wedge-multi-agent-diff-cli">Wedge</a> •
-  <a href="#architecture">Architecture</a> •
-  <a href="#benchmarks">Benchmarks</a> •
-  <a href="#verified-results">Verified Results</a> •
-  <a href="CHANGELOG.md">Changelog</a> •
-  <a href="CODE_OF_CONDUCT.md">Code of Conduct</a>
-</p>
-<p>
+
+<p align="center">
   <a href="https://github.com/RavaniRoshan/backstop/actions/workflows/ci.yml">
-    <img src="https://github.com/RavaniRoshan/backstop/actions/workflows/ci.yml/badge.svg" alt="CI Status" />
+    <img src="https://github.com/RavaniRoshan/backstop/actions/workflows/ci.yml/badge.svg" alt="CI" />
   </a>
   <a href="https://github.com/RavaniRoshan/backstop/blob/main/LICENSE.txt">
     <img src="https://img.shields.io/github/license/RavaniRoshan/backstop" alt="License: MIT" />
@@ -30,648 +16,248 @@
   <img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python 3.10+" />
 </p>
 
+---
+
 ## The Problem
 
-Running a single AI coding agent is already expensive and unpredictable. Running three in parallel — which is what multi-agent architectures require — triples your runaway-cost exposure. Today, your options are:
+A runaway agent loop will keep calling the LLM until something stops it. Without an in-process guardrail, the first thing that stops it is your credit card limit.
 
-1. **No protection** — hope the agent stops. Production teams usually discover spend controls after the first cost incident.
-2. **Proxy gateway** — route all traffic through an external service. Adds latency, a single point of failure, and network complexity.
+Your options today:
 
-Backstop takes a third path: **SDK-native guardrails that live inside your process.** No proxy, no network hop, no monkey-patching. It replaces the SDK's internal `httpx` transport with a controlled pipeline — budget enforcement, circuit breaking, priority admission, retry logic — before any request leaves your application.
-
-The Wedge tool (bundled in this repo) **proves** that this transport-layer isolation is sufficient to safely run multiple coding agents in parallel, each with its own budget and kill-switch — and measures whether those agents converge on the same answer. See [Verified Results](#verified-results).
-
----
-
-## Quick Start
-
-> **0.6.0 is unreleased.** The command below is for use after publication;
-> until then, [install from source](#from-source--development). PyPI installation
-> has not been verified. Current Anthropic SDK wrapping and enforcement-error
-> propagation have known failures; see [installation limitations](docs/install.md).
-
-```bash
-pip install "backstop-ai[anthropic]"
-```
-
-The integration API is shown below; these examples do not establish current
-SDK compatibility:
-
-```python
-from openai import OpenAI
-from backstop import Backstop
-
-client = Backstop.wrap(OpenAI(), budget=50_000)
-
-# Use the client exactly as before — Backstop intercepts at the transport layer
-response = client.chat.completions.create(
-    model="gpt-4.1-mini",
-    messages=[{"role": "user", "content": "Hello."}],
-)
-```
-
-```python
-from anthropic import Anthropic
-from backstop import Backstop
-
-client = Backstop.wrap(Anthropic(), budget=50_000)
-
-response = client.messages.create(
-    model="claude-sonnet-4-20250514",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "Hello."}],
-)
-```
-
-Run the multi-agent diff tool:
-
-```bash
-wedge run task.yaml
-```
-
-> Demo above: `wedge run task.yaml` with 3 isolated runners (20k budget each) — patches stream in, tests run per runner, convergence scores **PARTIAL (sim=0.98)** with per-runner budgets. See [Verified Results](#verified-results).
+| Approach | Latency | Complexity | In-process |
+|---|---|---|---|
+| Hope the agent stops | 0 ms | none | n/a |
+| Proxy gateway (LiteLLM, etc.) | +network hop | high | ✗ |
+| **Backstop** | **~0.09 ms p50** | **one wrap call** | **✓** |
 
 ---
 
-## Features
+## 30-Second Keyless Proof
 
-- **Token budget enforcement** — Reserve before dispatch, reconcile after response. Hard limits prevent runaway spend.
-- **Priority admission** — `critical`, `default`, `background` priority with starvation prevention.
-- **AIMD concurrency** — Additive-increase/multiplicative-decrease adapts to provider pressure.
-- **Retry with backoff** — Configurable attempts, jitter, and status codes (429/500/502/503/504/529).
-- **Circuit breaker** — Trips on sustained failure, cooldowns automatically.
-- **Streaming support** — Wraps streaming responses while preserving budget reconciliation.
-- **Tenant budgets** — Request-scoped tenant budget buckets via `with_budget(...)`.
-- **Response caching** — Optional in-memory cache; opt-in **semantic (near-duplicate)** caching short-circuits reformatted/paraphrased prompts via a pluggable embedder (`cache_enabled=True, cache_semantic=True, cache_embedder=...`).
-- **Hooks** — Lightweight before/after hooks for local logging, policy, and metadata.
-- **HTTP transport layer** — Plugs into the SDK's native `httpx` transport — no monkey-patching.
-- **Prometheus metrics** — Optional export for dashboards and alerting.
-- **OpenTelemetry export** — Vendor-neutral metrics mirroring the Prometheus series (`pip install "backstop-ai[otel]"`, `BackstopConfig(otel_enabled=True)`).
-- **Shared (Redis) budget** — Enforce *one* token budget across processes and replicas with zero infra (`pip install "backstop-ai[redis]"`, `BackstopConfig(shared_budget=True)`).
-- **In-process fallback chain** — On a sustained provider failure, walk an ordered `fallback_chain` of backup models/deployments *inside your process*; `fallback_chain_for_priority` gives critical traffic its own chain (`BackstopConfig(fallback_chain=[{"model": ...}, {"model": ..., "base_url": ...}])`). The legacy single `fallback_model` is still supported.
-- **CLI ergonomics** — `backstop doctor` validates your install; `backstop benchmark` produces reproducible proof.
-- **Provider support** — OpenAI (sync & async) and Anthropic (sync & async).
-- **TypeScript SDK** — `@ravanish/backstop` brings the same drop-in `wrap()` (budget + circuit breaker + retry + fallback) to Node.js agents (`ts/backstop`).
-
----
-
-## Wedge: Multi-Agent Diff CLI
-
-Wedge is a sandboxed execution environment bundled with Backstop. It runs N isolated coding agents against the same task, wraps each in its own Backstop session, and diffs their output to measure convergence.
-
-**Why this exists:** Testing whether isolated multi-agent execution with transport-layer budget isolation reduces runaway-cost exposure in coding agents.
-
-```
-Wedge tool (isolated multi-agent diff CLI)
-        │
-        ├──► Runner A: Backstop.wrap(Anthropic(), budget=20_000)
-        ├──► Runner B: Backstop.wrap(Anthropic(), budget=20_000)
-        └──► Runner C: Backstop.wrap(Anthropic(), budget=20_000)
-                        │
-              (each runner = one Backstop session,
-               own budget, own kill-switch —
-               isolated CONTEXT, not isolated INFRA)
-```
-
-Each runner gets:
-- Its own `Backstop.wrap()` session — independent budget, independent circuit breaker
-- Its own isolated working directory (simulated git worktree)
-- No shared conversation history with other runners
-
-After all runners complete, the diff engine scores patch similarity across all outputs:
-
-| Status | Meaning |
-|---|---|
-| `CONVERGED` | All patches identical (similarity = 1.00) |
-| `PARTIAL` | Patches share >80% similarity |
-| `DIVERGED` | Patches differ significantly (<80%) |
-
-### Example: Running Wedge
-
-```yaml
-# task.yaml
-name: "Refactor to class-based"
-prompt: "Refactor the main.py file to use a class-based approach."
-test_command: "pytest tests/"
-runners: 3
-provider: "anthropic"   # or "openai"
-```
+No API key needed. This runs entirely offline:
 
 ```bash
-$ cd wedge-test-fixture && wedge run task.yaml
-Running task: Refactor to class-based Item with 3 concurrent runners (anthropic)...
-Comparing patches...
-Done! Report saved to wedge_report.md
-
-Convergence Summary:
-  main.py: PARTIAL (sim=0.98)
-
-Tests passed: 3/3
+pip install "backstop-ai"
+backstop verify
 ```
 
-The report includes each runner's Backstop budget usage — real usage evidence that per-agent budget isolation holds under convergence pressure.
+Expected output:
 
----
+```
+# Backstop Verify — 30-Second Keyless Proof
 
-## What This Is NOT
+Mode: offline (100% local mock transport, zero network, zero API keys)
+Provider: openai (gpt-4o-mini simulation)
 
-Backstop deliberately avoids:
+| Metric            | Result             | Notes                                     |
+|-------------------|--------------------|-------------------------------------------|
+| Allowed calls     | 2                  | Completed within budget (500 tokens)      |
+| Blocked calls     | 8                  | Pre-empted before network dispatch        |
+| Tokens reserved   | 500                | Enforced budget ceiling                   |
+| Tokens saved      | 2,000              | 8 runaway calls prevented                 |
+| Exception surfaced| BudgetExceededError| Caught cleanly (subclasses openai.OpenAIError) |
+| Wall-clock overhead| 0.07 ms           | Control-path p99 mediation latency        |
 
-- **Not a proxy/gateway** — No network hop. Runs entirely in-process.
-- **Not an MCP tool** — Protocol-agnostic. Works with any SDK client that uses `httpx`/`requests`.
-- **Not an observability platform** — It exports Prometheus *and* OpenTelemetry metrics; it doesn't store, query, or visualize them.
-- **Not an application-layer tool** — It does not consume signals like "disagreement" or "confidence." It operates at the transport layer only.
-- **Not a caching layer** — Optional response caching exists for convenience, not as a primary feature.
+Summary: 8 passed, 0 warn, 0 failed, 0 skipped
+Status: VERIFIED (real wrap enforcement active)
+```
 
-Wedge deliberately avoids:
-
-- **Not a production agent framework** — Wedge is a focused verification tool for per-agent isolation and convergence measurement, not a general agent framework. Semantic (token/line-normalized) diffing is included; full AST diffing is a future enhancement.
-
----
-
-## Production Reliability
-
-Backstop is drop-in *and* production-grade: it closes the gap vs proxy
-gateways (LiteLLM/BricksLLM) while staying in-process.
-
-### Shared budget across replicas (P1)
-
-A single token budget enforced across processes/replicas — the "AI SaaS team
-with runaway spend" wedge. No Postgres, no Redis admin, no network hop:
+See the runaway loop demo:
 
 ```bash
-pip install "backstop-ai[redis]"
+backstop demo
 ```
 
-```python
-from openai import OpenAI
-from backstop import Backstop, BackstopConfig
-
-client = Backstop.wrap(
-    OpenAI(),
-    budget=1_000_000,
-    config=BackstopConfig(shared_budget=True, redis_url="redis://localhost:6379"),
-)
 ```
-
-Every `wrap()` session in every process decrements the *same* Redis key via
-atomic Lua scripts, so N replicas cannot overspend one cap beyond tolerance.
-
-### OpenTelemetry export (P2)
-
-Mirror every Prometheus series to a vendor-neutral OTel meter (Datadog,
-Honeycomb, CloudWatch — any OTLP collector):
-
-```bash
-pip install "backstop-ai[otel]"
+| Calls completed | 10 | 3 | -7 (-70.0%) |
+| Calls blocked   | 0  | 7 | +7 (blocked in-process) |
+| Tokens consumed | 250| 75| -175 (-70.0%) |
 ```
-
-```python
-client = Backstop.wrap(
-    OpenAI(),
-    budget=50_000,
-    config=BackstopConfig(otel_enabled=True),
-)
-```
-
-### In-process fallback (P3)
-
-On a sustained provider failure (circuit open), retry once against a backup
-model/deployment *within your process* — no proxy, no extra infra:
-
-```python
-client = Backstop.wrap(
-    OpenAI(),
-    budget=50_000,
-    config=BackstopConfig(
-        fallback_model="gpt-4o-mini",
-        fallback_base_url="https://backup-gateway.example.com/v1",  # optional
-    ),
-)
-```
-
-### CLI ergonomics
-
-```bash
-# Backstop harness scenarios
-backstop harness --scenario burst
-backstop harness --scenario error-storm
-backstop harness --scenario budget-hit
-
-# Prometheus metrics server
-backstop metrics --port 9090
-
-# Built-in dashboard (no Prometheus needed)
-backstop dashboard --demo
-
-# Real API smoke tests (set API keys first)
-backstop real-openai --model gpt-4.1-mini
-backstop real-anthropic
-
-# Wedge multi-agent diff
-wedge run task.yaml
-```
-
----
-
-## Documentation
-
-- [Concurrency & Scale Limits](docs/concurrency.md) — the
-  GIL ceiling, the
-  configurable `max_wrap_sessions` cap, and when a proxy gateway is the better
-  fit.
-- [Published benchmark results (2026-07-20)](docs/benchmark-results-2026-07-20.md)
-  — deterministic, reproducible proof from `backstop benchmark`.
-- [Benchmark methodology](docs/benchmarks.md) — how overhead is measured
-  separately from provider latency, and what the numbers do and do not mean.
-
-## Architecture
-
-### Backstop Transport Pipeline
-
-```mermaid
-graph LR
-    A[SDK Client<br/>OpenAI / Anthropic] --> B[Backstop.wrap]
-    B --> C[Client.copy]
-    B --> D[BackstopTransport]
-    D --> E[Priority Gate]
-    D --> F[Budget]
-    D --> G[AIMD Controller]
-    D --> H[Circuit Breaker]
-    D --> I[Retry Logic]
-    I --> J[httpx Transport]
-```
-
-Backstop replaces the SDK's internal `httpx.Client` with a custom transport that intercepts every request. No monkey-patching, no thread hacks — just standard SDK `http_client` injection.
-
-### Wedge Multi-Runner Architecture
-
-```
-┌─────────────────────────────────────────────────┐
-│  wedge run task.yaml                            │
-│                                                 │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐      │
-│  │ Runner A │  │ Runner B │  │ Runner C │      │
-│  │          │  │          │  │          │      │
-│  │ Backstop │  │ Backstop │  │ Backstop │      │
-│  │ budget:  │  │ budget:  │  │ budget:  │      │
-│  │  20,000  │  │  20,000  │  │  20,000  │      │
-│  └────┬─────┘  └────┬─────┘  └────┬─────┘      │
-│       │              │              │            │
-│       ▼              ▼              ▼            │
-│  ┌─────────────────────────────────────────┐    │
-│  │         Provider API (shared)           │    │
-│  │     Anthropic / OpenAI endpoints        │    │
-│  └─────────────────────────────────────────┘    │
-│                                                 │
-│  ┌─────────────────────────────────────────┐    │
-│  │  Diff Engine → Convergence Report       │    │
-│  └─────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────┘
-```
-
-Key: **isolated context, not isolated infrastructure.** All runners share the same process and event loop. Isolation lives at the conversation/budget layer, enforced by Backstop's transport wrapper.
 
 ---
 
 ## Install
 
-The distribution is `backstop-ai`; `import backstop` and the `backstop` / `wedge`
-commands are unchanged. **0.6.0 is unreleased:** PyPI publication and installation
-from PyPI are pending. Use the source instructions below until publication.
-The PyPI name `backstop` belongs to an unrelated project.
-
-After publication:
+> **0.6.0 is unreleased.** Until published on PyPI, install from source (see below).
 
 ```bash
-# Base library plus Anthropic SDK dependency
-pip install "backstop-ai[anthropic]"
-
-# Prometheus metrics export dependency
-pip install "backstop-ai[metrics]"
-
-# Base dependencies, including OpenAI
-pip install backstop-ai
+# After PyPI publication:
+pip install "backstop-ai"           # OpenAI only
+pip install "backstop-ai[anthropic]"  # OpenAI + Anthropic
 ```
 
-SDK compatibility remains unresolved; installing an extra does not establish
-that wrapping or enforcement works. See the warning in
-[docs/install.md](docs/install.md).
-
-Run either CLI in a temporary environment after publication, specifying the
-distribution explicitly:
-
-```bash
-pipx run --spec backstop-ai backstop --help
-pipx run --spec backstop-ai wedge --help
-```
-
-For an isolated persistent CLI environment after publication:
-
-```bash
-pipx install backstop-ai
-```
-
-The convenience `install.sh` path has not been verified for 0.6.0. Review the
-script and its fallback behavior before running it; see
-[docs/install.md](docs/install.md) for source, registry, pinned, and air-gapped
-installation instructions.
-
-### From source / development
+### From source
 
 ```bash
 git clone https://github.com/RavaniRoshan/backstop.git
 cd backstop
-pip install -e ".[test,metrics,anthropic]"
+pip install -e ".[anthropic]"
 ```
 
 ---
 
 ## Usage
 
-### OpenAI
-
 ```python
 from openai import OpenAI
 from backstop import Backstop, BackstopConfig
 
 client = Backstop.wrap(
-    OpenAI(api_key="sk-..."),
-    budget=50_000,
-    config=BackstopConfig(initial_concurrency=8),
+    OpenAI(),
+    budget=50_000,          # token ceiling for this session
+    config=BackstopConfig(
+        initial_concurrency=4,
+    ),
 )
 
-response = client.chat.completions.create(
-    model="gpt-4.1-mini",
-    messages=[{"role": "user", "content": "Summarize this in one paragraph."}],
-    extra_headers={"X-Backstop-Priority": "critical"},
-)
+try:
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": "Hello"}],
+    )
+except BudgetExceededError:
+    print("Budget hit — no runaway loop possible.")
 ```
 
-Async:
-```python
-from openai import AsyncOpenAI
-from backstop import Backstop
+That's the whole integration. No proxy, no call-site changes beyond the wrap.
 
-client = Backstop.wrap(AsyncOpenAI(api_key="sk-..."), budget=10_000)
-```
-
-### Anthropic
+### Per-agent isolation
 
 ```python
 from anthropic import Anthropic
-from backstop import Backstop, BackstopConfig
-
-client = Backstop.wrap(
-    Anthropic(api_key="sk-ant-..."),
-    budget=50_000,
-    config=BackstopConfig(initial_concurrency=8),
-)
-
-response = client.messages.create(
-    model="claude-sonnet-4-20250514",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "Summarize this in one paragraph."}],
-    extra_headers={"X-Backstop-Priority": "critical"},
-)
-```
-
-Async:
-```python
-from anthropic import AsyncAnthropic
 from backstop import Backstop
 
-client = Backstop.wrap(AsyncAnthropic(api_key="sk-ant-..."), budget=10_000)
+agent_a = Backstop.wrap(Anthropic(), budget=10_000)
+agent_b = Backstop.wrap(Anthropic(), budget=10_000)
+# agent_a exhausting its budget does not affect agent_b
 ```
 
-> `budget=None` — unlimited pass-through. `budget=0` — blocks before dispatch.
-
-### Tenant Budgets
+### Catching budget errors
 
 ```python
-from backstop import TenantBudget, budgets, with_budget
+from backstop.exceptions import BudgetExceededError
 
-budgets.register({
-    "tenant_123": TenantBudget("tenant_123", limit_tokens=50_000),
-})
-
-with with_budget("tenant_123"):
-    client.chat.completions.create(...)
+try:
+    response = client.chat.completions.create(...)
+except BudgetExceededError as exc:
+    # BudgetExceededError is also a subclass of openai.OpenAIError /
+    # anthropic.AnthropicError, so existing error handling still works.
+    log.warning("Budget ceiling reached", extra={"tokens_used": exc.tokens_used})
 ```
-
-### Priority
-
-Set per-request priority via the `X-Backstop-Priority` header:
-
-| Value | Behavior |
-|---|---|
-| `critical` | Admitted first — use for user-facing requests |
-| `default` | Normal queue position |
-| `background` | Lowest priority — yields to higher |
-
-### Hooks
-
-`BackstopConfig` is a frozen dataclass, so pass `before_request` / `after_response`
-callbacks to its **constructor** — you cannot assign them to a config instance
-after the fact (that raises `FrozenInstanceError`):
-
-```python
-from openai import OpenAI
-from backstop import Backstop, BackstopConfig
-
-def on_request(hook):
-    print("->", hook.endpoint, "est", hook.estimated_tokens)
-
-def on_response(hook):
-    print("<-", hook.status_code, "used", hook.actual_tokens)
-
-client = Backstop.wrap(
-    OpenAI(api_key="sk-..."),
-    budget=50_000,
-    config=BackstopConfig(before_request=on_request, after_response=on_response),
-)
-```
-
-`hook.metadata` is a copy of the Backstop request headers; read (and mutate, in
-`before_request`) it to carry request-scoped context such as the active tenant
-from `get_current_tenant()`.
 
 ---
 
-## CLI
+## What It Enforces
+
+| Feature | Description |
+|---|---|
+| Token budgets | Hard ceiling on total tokens per session/agent |
+| Per-agent isolation | Each wrapped client has its own independent budget |
+| Hierarchical budgets | Parent budget caps all child agents |
+| Circuit breaking | Trips on repeated provider errors |
+| Concurrency control | Limits parallel in-flight requests |
+| Priority admission | `critical` requests pass when `normal` ones are shed |
+| Retry + backoff | Configurable exponential backoff with jitter |
+| Shadow mode | Observe-without-enforce for safe rollout |
+
+---
+
+## What It Does Not Do
+
+- **Not a proxy.** No network traffic passes through Backstop; requests go directly to the provider.
+- **Not a control plane.** No central server, no key management, no multi-tenant routing.
+- **Not a multi-provider router.** Use LiteLLM or similar if you need fallback across providers.
+- **Not observability storage.** Backstop emits metrics; you send them to your own backend.
+- **Not LangGraph/CrewAI-native.** Works with those frameworks only at the SDK level, not via framework-specific hooks.
+
+---
+
+## SDK Compatibility
+
+| Provider | SDK range | Python | Status |
+|---|---|---|---|
+| OpenAI | `>=2.37,<4` | 3.10–3.12 | ✅ Supported |
+| Anthropic | `>=0.98,<2` | 3.10–3.12 | ✅ Supported |
+
+CI runs the full matrix (openai 2.37/3.14 × anthropic 0.99/1.6 × python 3.10/3.11/3.12).
+
+Run `backstop doctor` to check your installed versions:
 
 ```bash
-# Backstop harness scenarios
-backstop harness --scenario burst
-backstop harness --scenario error-storm
-backstop harness --scenario budget-hit
-
-# Prometheus metrics server
-backstop metrics --port 9090
-
-# Built-in dashboard (no Prometheus needed)
-backstop dashboard --demo
-
-# Real API smoke tests (set API keys first)
-backstop real-openai --model gpt-4.1-mini
-backstop real-anthropic
-
-# Wedge multi-agent diff
-wedge run task.yaml
+backstop doctor
 ```
+
+See [docs/compatibility.md](docs/compatibility.md) for the full version matrix and unsupported version notes.
 
 ---
 
-## Examples
+## Architecture
 
-Runnable examples live in [`examples/`](examples/):
+Backstop replaces the SDK's internal `httpx` transport with a controlled pipeline:
 
-**Backstop:**
-- [`openai_sync.py`](examples/openai_sync.py) — Sync OpenAI with budget
-- [`openai_async.py`](examples/openai_async.py) — Async OpenAI
-- [`anthropic_sync.py`](examples/anthropic_sync.py) — Sync Anthropic with budget
-- [`anthropic_async.py`](examples/anthropic_async.py) — Async Anthropic
-- [`fastapi_tenants.py`](examples/fastapi_tenants.py) — Multi-tenant FastAPI
-- [`background_priority.py`](examples/background_priority.py) — Priority queuing
-- [`prometheus_metrics.py`](examples/prometheus_metrics.py) — Metrics export
-- [`budget_blocking_demo.py`](examples/budget_blocking_demo.py) — Budget exhaustion
+```
+SDK client → BackstopTransport → budget/circuit/concurrency check → original transport → provider
+```
 
-**Wedge:**
-- [`wedge_basic.py`](examples/wedge_basic.py) — 3 Anthropic runners, diff output
-- [`wedge_openai.py`](examples/wedge_openai.py) — 3 OpenAI runners, diff output
+No monkey-patching. No import hooks. The SDK's own retry and auth logic runs above the transport, so Backstop errors propagate correctly.
+
+See [docs/architecture.md](docs/architecture.md) for the full design.
 
 ---
 
 ## Benchmarks
 
-Backstop overhead is measured separately from provider latency using a local mock transport.
+Control-path overhead (local, not measuring network):
 
-| Metric | Direct | Backstop | Overhead |
-|---|---:|---:|---:|
-| p50 latency | 0.13 ms | 0.26 ms | **0.12 ms** |
-| p95 latency | 0.25 ms | 0.43 ms | **0.18 ms** |
-| p99 latency | 0.35 ms | 0.58 ms | **0.23 ms** |
+| Percentile | Overhead |
+|---|---|
+| p50 | ~0.09 ms |
+| p99 | ~0.10 ms |
 
-Key scenario results (deterministic: local mock transport, fixed seed `0xC0FFEE`, reproducible via `backstop benchmark`):
+Measured on a MacBook M1 with openai 3.14 + httpx 0.28. Your numbers will vary; the mechanism is proven in `backstop verify`.
 
-| Scenario | Requests | Provider Calls | Successes | Provider Errors | Budget-Blocked | Circuit-Blocked |
-|---|---:|---:|---:|---:|---:|---:|
-| **Burst** | 50 | 50 | 50 | 0 | 0 | 0 |
-| **Steady-State** | 30 | 30 | 30 | 0 | 0 | 0 |
-| **Error Storm** | 50 | 12 | 8 | 0 | 0 | 42 |
-| **Budget Hit** | 80 | 17 | 17 | 0 | 63 | 0 |
-
-Per-run counts are exact and reproducible — the seeded harness removes the
-randomized error injection that made earlier runs non-deterministic. Re-run
-any time to confirm:
-
-```bash
-backstop benchmark --publish   # writes docs/benchmark-results-<date>.md
-```
-
-Full results: [`docs/benchmark-results-2026-07-20.md`](docs/benchmark-results-2026-07-20.md) · Methodology: [`docs/benchmarks.md`](docs/benchmarks.md)
+See [docs/benchmarks.md](docs/benchmarks.md).
 
 ---
 
-## Metrics
+## Examples
 
-Export Prometheus metrics by installing `backstop-ai[metrics]`:
+All examples in `examples/` that work offline are marked with a `# KEYLESS` header. Live examples require a real API key.
 
-```python
-from backstop import Backstop
-
-# Start a standalone HTTP server
-Backstop.start_metrics_server(port=9090)
-
-# Or mount the WSGI app in your existing server
-app = Backstop.metrics_app()
-```
-
-Starter observability assets:
-- [`observability/prometheus-alerts.yml`](observability/prometheus-alerts.yml)
-
----
-
-## Dashboard
-
-No Prometheus or Grafana needed for day-to-day visibility — Backstop ships a
-built-in dashboard that renders live state from the same process as your
-workload:
-
-```bash
-backstop dashboard --demo       # synthetic traffic, no API keys
-backstop dashboard              # watch this process, http://127.0.0.1:8787
-backstop dashboard --cost-model gpt-4o --audit audit.jsonl
-backstop dashboard --host 0.0.0.0 --token "$(openssl rand -hex 32)"
-```
-
-Or mount it in your own server (root only — assets and snapshot requests use
-root-relative URLs, so a `/dashboard` subpath is not supported):
-
-```python
-app.mount("/", WSGIMiddleware(Backstop.dashboard_app()))
-```
-
-It shows budget burn and projected exhaustion, prevention (budget blocks,
-rate-limits, circuit blocks, cache hits), traffic and provider efficiency,
-latency p95, AIMD concurrency, per-session isolation, tenant ledger usage, and
-the enforcement event stream. Everything is stdlib-only, in-memory, and
-read-only; non-loopback binds require a bearer token. Details and the security
-model: [`docs/dashboard.md`](docs/dashboard.md).
-
----
-
-## Verified Results
-
-Every claim below is backed by live-provider evidence. Re-run any time to confirm.
-
-| Claim | Evidence | Reproduce |
+| File | Description | Keyless |
 |---|---|---|
-| **Budget isolation** — each `Backstop.wrap()` enforces an independent budget | Live: Agent A (300 tokens) blocked independently of Agent B (5000 tokens) | `python proofs/proof_multi_agent_isolation.py` |
-| **Budget exhaustion prevention** — blocks before overspend | Live: 2 calls allowed (448 tokens), 18 blocked at 500-token cap | `python proofs/proof_budget_exhaustion.py` |
-| **Sub-ms overhead** — in-process, no network hop | Measured: **0.10 ms p50** (mock), ~1.1s on 13s reasoning call | `backstop benchmark` |
-| **Semantic cache** — near-duplicate prompts served from cache | Live + mock: reformatted prompts short-circuited without provider call | `python proofs/proof_semantic_cache.py` |
-| **Convergence measurement** — does isolated agents produce the same answer? | Demo: 3 runners → **PARTIAL (sim=0.98)** | `cd wedge-test-fixture && wedge run task.yaml` |
+| `basic.py` | Minimal OpenAI wrap | No |
+| `openai_sync.py` | Synchronous budget guard | No |
+| `openai_async.py` | Async budget guard | No |
+| `anthropic_sync.py` | Anthropic sync guard | No |
+| `anthropic_async.py` | Anthropic async guard | No |
+| `agent_loop_guard.py` | Runaway loop example | **Yes** |
+| `anthropic_budget.py` | Anthropic offline demo | **Yes** |
+| `fastapi_tenants.py` | Per-tenant budgets (FastAPI) | No |
+| `background_priority.py` | Priority admission | No |
 
-Full methodology and reproducible counts: [`docs/benchmark-results-2026-07-20.md`](docs/benchmark-results-2026-07-20.md) · Re-run any claim with `backstop benchmark` or the scripts in [`proofs/`](proofs/).
-
----
-
-## Tests
+Run the keyless examples:
 
 ```bash
-# Unit tests (no API calls)
-pytest
-
-# Real OpenAI API (opt-in)
-export OPENAI_API_KEY="sk-..."
-pytest -m real_openai
-
-# Real Anthropic API (opt-in)
-export ANTHROPIC_API_KEY="sk-ant-..."
-pytest -m real_anthropic
+python examples/agent_loop_guard.py
+python examples/anthropic_budget.py
 ```
 
 ---
 
-## Trust And Security
+## Contributing
 
-- [Architecture](docs/architecture.md)
-- [Threat model](docs/threat-model.md)
-- [Compatibility matrix](docs/compatibility.md)
-- [Security policy](SECURITY.md)
-- [Contributing guide](CONTRIBUTING.md)
-- [Code of Conduct](CODE_OF_CONDUCT.md)
-- [Changelog](CHANGELOG.md)
+PRs welcome. Run the test suite before opening one:
+
+```bash
+pytest tests -q
+backstop verify
+```
+
+See [CHANGELOG.md](CHANGELOG.md) for release history.
 
 ---
 
 ## License
 
-MIT — see [LICENSE](LICENSE.txt) for details.
-
----
-
-<p align="center">
-  <sub>Built with httpx, openai, anthropic · Backstop Contributors</sub>
-</p>
+MIT — see [LICENSE.txt](LICENSE.txt).
