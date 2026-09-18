@@ -2,29 +2,29 @@
   <img width="900" alt="Backstop — in-process AI guardrails" src="docs/assets/backstop-logo.svg" />
   <br />
   <img width="1000" alt="Wedge multi-agent diff demo — 3 isolated runners converge with per-runner budgets" src="./demo.gif" />
-
-  <p>
-    <strong>In-process AI SDK backpressure, budgets, retries, circuit breaking, and metrics.</strong>
-  </p>
-  <p>
-    <em>Verified: per-agent budget isolation that proves whether isolated agents converge on the same answer — the only LLM guardrail that measures its own claims.</em>
-  </p>
-  <p>
-    <a href="#quick-start">Quick Start</a> •
-    <a href="#features">Features</a> •
-    <a href="#wedge-multi-agent-diff-cli">Wedge</a> •
-    <a href="#architecture">Architecture</a> •
-    <a href="#benchmarks">Benchmarks</a> •
-    <a href="#verified-results">Verified Results</a> •
-    <a href="CHANGELOG.md">Changelog</a> •
-    <a href="CODE_OF_CONDUCT.md">Code of Conduct</a>
-  </p>
-  <p>
-    <img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python 3.10+" />
-    <img src="https://img.shields.io/badge/license-MIT-green" alt="License MIT" />
-    <img src="https://img.shields.io/badge/status-verified-green" alt="Status: verified" />
-  </p>
 </div>
+
+<p>
+  <strong>In-process AI SDK backpressure, budgets, retries, circuit breaking, and metrics.</strong>
+</p>
+<p>
+  <em>Verified: per-agent budget isolation that proves whether isolated agents converge on the same answer — the only LLM guardrail that measures its own claims.</em>
+</p>
+<p>
+  <a href="#quick-start">Quick Start</a> •
+  <a href="#features">Features</a> •
+  <a href="#wedge-multi-agent-diff-cli">Wedge</a> •
+  <a href="#architecture">Architecture</a> •
+  <a href="#benchmarks">Benchmarks</a> •
+  <a href="#verified-results">Verified Results</a> •
+  <a href="CHANGELOG.md">Changelog</a> •
+  <a href="CODE_OF_CONDUCT.md">Code of Conduct</a>
+</p>
+<p>
+  <img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python 3.10+" />
+  <img src="https://img.shields.io/badge/license-MIT-green" alt="License MIT" />
+  <img src="https://img.shields.io/badge/status-verified-green" alt="Status: verified" />
+</p>
 
 ## The Problem
 
@@ -249,15 +249,31 @@ client = Backstop.wrap(
 ### CLI ergonomics
 
 ```bash
-backstop doctor      # validate install, SDKs, keys, wrap smoke test
-backstop benchmark   # deterministic, seeded proof (--publish to commit results)
+# Backstop harness scenarios
+backstop harness --scenario burst
+backstop harness --scenario error-storm
+backstop harness --scenario budget-hit
+
+# Prometheus metrics server
+backstop metrics --port 9090
+
+# Built-in dashboard (no Prometheus needed)
+backstop dashboard --demo
+
+# Real API smoke tests (set API keys first)
+backstop real-openai --model gpt-4.1-mini
+backstop real-anthropic
+
+# Wedge multi-agent diff
+wedge run task.yaml
 ```
 
 ---
 
 ## Documentation
 
-- [Concurrency & Scale Limits](docs/concurrency.md) — the GIL ceiling, the
+- [Concurrency & Scale Limits](docs/concurrency.md) — the
+  GIL ceiling, the
   configurable `max_wrap_sessions` cap, and when a proxy gateway is the better
   fit.
 - [Published benchmark results (2026-07-20)](docs/benchmark-results-2026-07-20.md)
@@ -499,6 +515,8 @@ backstop real-anthropic
 # Wedge multi-agent diff
 wedge run task.yaml
 ```
+
+---
 
 ## Examples
 
