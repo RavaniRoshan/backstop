@@ -21,9 +21,13 @@
   <a href="CODE_OF_CONDUCT.md">Code of Conduct</a>
 </p>
 <p>
+  <a href="https://github.com/RavaniRoshan/backstop/actions/workflows/ci.yml">
+    <img src="https://github.com/RavaniRoshan/backstop/actions/workflows/ci.yml/badge.svg" alt="CI Status" />
+  </a>
+  <a href="https://github.com/RavaniRoshan/backstop/blob/main/LICENSE.txt">
+    <img src="https://img.shields.io/github/license/RavaniRoshan/backstop" alt="License: MIT" />
+  </a>
   <img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python 3.10+" />
-  <img src="https://img.shields.io/badge/license-MIT-green" alt="License MIT" />
-  <img src="https://img.shields.io/badge/status-verified-green" alt="Status: verified" />
 </p>
 
 ## The Problem

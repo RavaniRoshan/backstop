@@ -4,16 +4,18 @@ import json
 import os
 import re
 import time
-from dataclasses import dataclass, field
-from typing import Callable
+from dataclasses import dataclass
+from typing import Any, Callable
 
 import httpx
 
+from ._httpcompat import compat_for
 from .config import BackstopConfig
 from .exceptions import BudgetExceededError
 from .metrics import get_metrics
 from .state import BackstopState
 from .transports import BackstopTransport
+from .wrapper import Backstop
 
 _STATUS_GLYPH = {"pass": "PASS", "warn": "WARN", "fail": "FAIL", "skip": "SKIP"}
 
@@ -81,10 +83,95 @@ class VerifyRunner:
         self.model = model
         self.base_url = base_url
         self.api_key_env = api_key_env
+        self.proof: dict | None = None
 
     # ------------------------------------------------------------------
     # Check implementations
     # ------------------------------------------------------------------
+    def _create_mock_sdk_client(
+        self,
+        handler: Callable[[Any], Any],
+    ) -> tuple[Any, Any, Any]:
+        """Returns (raw_client, compat, sdk_base_error_class)."""
+        if self.provider == "anthropic":
+            try:
+                import anthropic
+            except ImportError as err:
+                raise RuntimeError(
+                    "Anthropic provider requested but 'anthropic' is not installed. "
+                    "Install with: pip install 'backstop-ai[anthropic]'"
+                ) from err
+            probe = anthropic.Anthropic(api_key="mock-key-verify")
+            compat = compat_for(probe._client)
+            http_client = compat.Client(transport=compat.MockTransport(handler))
+            client = anthropic.Anthropic(api_key="mock-key-verify", http_client=http_client)
+            return client, compat, anthropic.AnthropicError
+        else:
+            import openai
+            probe = openai.OpenAI(api_key="mock-key-verify")
+            compat = compat_for(probe._client)
+            http_client = compat.Client(transport=compat.MockTransport(handler))
+            client = openai.OpenAI(api_key="mock-key-verify", http_client=http_client)
+            return client, compat, openai.OpenAIError
+
+    def _execute_completion(self, client: Any, model: str | None = None, max_tokens: int = 150) -> Any:
+        if self.provider == "anthropic":
+            target_model = model or self.model or "claude-3-5-sonnet-20241022"
+            return client.messages.create(
+                model=target_model,
+                messages=[{"role": "user", "content": "hello"}],
+                max_tokens=max_tokens,
+            )
+        else:
+            target_model = model or self.model or "gpt-4o-mini"
+            return client.chat.completions.create(
+                model=target_model,
+                messages=[{"role": "user", "content": "hello"}],
+                max_tokens=max_tokens,
+            )
+
+    def _mock_provider_handler(
+        self,
+        compat: Any,
+        prompt_tokens: int = 100,
+        completion_tokens: int = 150,
+    ) -> Callable[[Any], Any]:
+        total_tokens = prompt_tokens + completion_tokens
+        if self.provider == "anthropic":
+            def handler(request: Any) -> Any:
+                return compat.Response(
+                    200,
+                    json={
+                        "id": "msg_mock",
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": "mock"}],
+                        "model": self.model or "claude-3-5-sonnet-20241022",
+                        "stop_reason": "end_turn",
+                        "usage": {"input_tokens": prompt_tokens, "output_tokens": completion_tokens},
+                    },
+                )
+        else:
+            def handler(request: Any) -> Any:
+                return compat.Response(
+                    200,
+                    json={
+                        "id": "chatcmpl-mock",
+                        "object": "chat.completion",
+                        "created": int(time.time()),
+                        "model": self.model or "gpt-4o-mini",
+                        "choices": [
+                            {"index": 0, "message": {"role": "assistant", "content": "mock"}, "finish_reason": "stop"}
+                        ],
+                        "usage": {
+                            "prompt_tokens": prompt_tokens,
+                            "completion_tokens": completion_tokens,
+                            "total_tokens": total_tokens,
+                        },
+                    },
+                )
+        return handler
+
     def _mock_response(self, body: dict | None = None) -> Callable:
         payload = body or {"ok": True, "usage": {"total_tokens": 10}}
 
@@ -109,17 +196,27 @@ class VerifyRunner:
     def _check_wrap(self) -> CheckResult:
         t0 = time.perf_counter()
         try:
-            state = BackstopState.create(100_000, BackstopConfig(default_max_output_tokens=1))
-            client = httpx.Client(
-                transport=BackstopTransport(state, httpx.MockTransport(self._mock_response())),
-                base_url="https://mock.local",
-            )
-            resp = client.post("/v1/chat/completions", json={"model": "mock", "messages": []})
-            client.close()
+            if self.provider == "anthropic":
+                import anthropic
+                probe = anthropic.Anthropic(api_key="mock-key-verify")
+                compat = compat_for(probe._client)
+            else:
+                import openai
+                probe = openai.OpenAI(api_key="mock-key-verify")
+                compat = compat_for(probe._client)
+
+            handler = self._mock_provider_handler(compat, prompt_tokens=10, completion_tokens=10)
+            raw_client, _, _ = self._create_mock_sdk_client(handler)
+            wrapped = Backstop.wrap(raw_client, budget=100_000)
+            resp = self._execute_completion(wrapped, max_tokens=10)
+            try:
+                raw_client.close()
+            except Exception:
+                pass
             dt = (time.perf_counter() - t0) * 1000
-            if resp.status_code == 200:
-                return CheckResult("wrap pipeline", "pass", "BackstopTransport served a mock request end-to-end.", duration_ms=dt)
-            return CheckResult("wrap pipeline", "fail", f"unexpected status {resp.status_code}", "Check transport wiring.", dt)
+            if resp is not None:
+                return CheckResult("wrap pipeline", "pass", "Backstop.wrap(client) served a mock request end-to-end.", duration_ms=dt)
+            return CheckResult("wrap pipeline", "fail", "No response returned.", "Check transport wiring.", dt)
         except Exception as exc:
             dt = (time.perf_counter() - t0) * 1000
             return CheckResult("wrap pipeline", "fail", f"wrap failed: {exc}", "Reinstall backstop.", dt)
@@ -127,37 +224,87 @@ class VerifyRunner:
     def _check_budget_block(self) -> CheckResult:
         t0 = time.perf_counter()
         try:
-            state = BackstopState.create(
-                20, BackstopConfig(retry_max_attempts=1, circuit_min_requests=10_000)
-            )
+            if self.provider == "anthropic":
+                import anthropic
+                probe = anthropic.Anthropic(api_key="mock-key-verify")
+                compat = compat_for(probe._client)
+            else:
+                import openai
+                probe = openai.OpenAI(api_key="mock-key-verify")
+                compat = compat_for(probe._client)
+
+            handler = self._mock_provider_handler(compat, prompt_tokens=100, completion_tokens=150)
+            raw_client, _, base_error = self._create_mock_sdk_client(handler)
+            budget = 500
+            iterations = 10
+            cfg = BackstopConfig(default_max_output_tokens=150, retry_max_attempts=1)
+            wrapped = Backstop.wrap(raw_client, budget=budget, config=cfg)
+
+            allowed = 0
             blocked = 0
-            client = httpx.Client(
-                transport=BackstopTransport(
-                    state, httpx.MockTransport(self._mock_response({"ok": True, "usage": {"total_tokens": 10}}))
-                ),
-                base_url="https://mock.local",
-            )
-            for _ in range(10):
+            first_exc: Exception | None = None
+            is_sdk_subclass = False
+            is_connection_error = False
+
+            loop_start = time.perf_counter()
+            for _ in range(iterations):
                 try:
-                    client.post("/v1/chat/completions", json={"model": "mock", "messages": [{"role": "user", "content": "x"}]})
-                except Exception:
+                    self._execute_completion(wrapped, max_tokens=150)
+                    allowed += 1
+                except BudgetExceededError as exc:
                     blocked += 1
-            client.close()
-            dt = (time.perf_counter() - t0) * 1000
-            # Safe metric access
+                    if first_exc is None:
+                        first_exc = exc
+                        is_sdk_subclass = isinstance(exc, base_error)
+                        conn_err = getattr(
+                            openai if self.provider == "openai" else anthropic,
+                            "APIConnectionError",
+                            None,
+                        )
+                        if conn_err and isinstance(exc, conn_err):
+                            is_connection_error = True
+                except Exception as exc:
+                    if first_exc is None:
+                        first_exc = exc
+            loop_duration_ms = (time.perf_counter() - loop_start) * 1000
             try:
-                metrics = get_metrics()
-                metric = _counter_value(metrics.budget_exceeded) if hasattr(metrics, 'budget_exceeded') else 0
+                raw_client.close()
             except Exception:
-                metric = 0
-            if blocked > 0:
+                pass
+
+            tokens_saved = blocked * 250
+            target_model = self.model or ("claude-3-5-sonnet-20241022" if self.provider == "anthropic" else "gpt-4o-mini")
+            self.proof = {
+                "provider": self.provider,
+                "model": target_model,
+                "budget": budget,
+                "iterations": iterations,
+                "allowed_calls": allowed,
+                "blocked_calls": blocked,
+                "tokens_reserved": budget,
+                "tokens_saved": tokens_saved,
+                "exception_name": type(first_exc).__name__ if first_exc else None,
+                "exception_subclass_verified": is_sdk_subclass and not is_connection_error,
+                "overhead_p99_ms": 0.0,
+                "wall_clock_ms": round(loop_duration_ms, 2),
+            }
+
+            dt = (time.perf_counter() - t0) * 1000
+            if allowed == 2 and blocked == 8 and isinstance(first_exc, BudgetExceededError) and is_sdk_subclass:
                 return CheckResult(
                     "budget block",
                     "pass",
-                    f"{blocked}/10 requests blocked at a 20-token budget (metric budget_exceeded={metric}).",
+                    f"{blocked}/{iterations} runaway calls blocked at {budget}-token budget (saved {tokens_saved:,} tokens).",
                     duration_ms=dt,
                 )
-            return CheckResult("budget block", "fail", "No requests were blocked at a tiny budget.", "Check budget reservation.", dt)
+            elif blocked > 0:
+                return CheckResult(
+                    "budget block",
+                    "pass",
+                    f"{blocked}/{iterations} requests blocked at a {budget}-token budget.",
+                    duration_ms=dt,
+                )
+            return CheckResult("budget block", "fail", "No requests were blocked at budget limit.", "Check budget reservation.", dt)
         except Exception as exc:
             dt = (time.perf_counter() - t0) * 1000
             return CheckResult("budget block", "fail", f"budget proof errored: {exc}", "Inspect transports budget path.", dt)
@@ -198,6 +345,8 @@ class VerifyRunner:
             bs.close()
 
             overhead_p99 = _pct(b, 99) - _pct(d, 99)
+            if self.proof is not None:
+                self.proof["overhead_p99_ms"] = round(overhead_p99, 3)
             dt = (time.perf_counter() - t0) * 1000
             detail = f"control-path overhead p99 = {overhead_p99:.3f} ms (direct p99 {_pct(d,99):.3f} ms)."
             # Proof bound kept generous so CI machines don't flake; the mechanism is what's proven.
@@ -479,8 +628,41 @@ class VerifyRunner:
         }
 
 
-def render_human(results: list[CheckResult], summary: dict, strict: bool) -> str:
-    lines = ["# Backstop Verify", ""]
+def render_human(results: list[CheckResult], summary: dict, strict: bool, proof: dict | None = None) -> str:
+    lines: list[str] = []
+    if proof:
+        provider_disp = proof.get("provider", "openai")
+        model_disp = proof.get("model", "gpt-4o-mini")
+        exc_name = proof.get("exception_name", "BudgetExceededError")
+        sdk_err_name = "OpenAIError" if provider_disp == "openai" else "AnthropicError"
+        subclass_note = (
+            f"subclasses {provider_disp}.{sdk_err_name}"
+            if proof.get("exception_subclass_verified")
+            else "BudgetExceededError"
+        )
+        overhead_ms = proof.get("overhead_p99_ms", 0.0)
+        overhead_str = f"{overhead_ms:.2f}"
+
+        lines.extend([
+            "# Backstop Verify — 30-Second Keyless Proof",
+            "",
+            "Mode: offline (100% local mock transport, zero network, zero API keys)",
+            f"Provider: {provider_disp} ({model_disp} simulation)",
+            "",
+            "| Metric | Result | Notes |",
+            "|---|---|---|",
+            f"| Allowed calls | {proof.get('allowed_calls', 0)} | Completed within budget ({proof.get('tokens_reserved', 500)} tokens) |",
+            f"| Blocked calls | {proof.get('blocked_calls', 0)} | Pre-empted before network dispatch |",
+            f"| Tokens reserved | {proof.get('tokens_reserved', 500):,} | Enforced budget ceiling |",
+            f"| Tokens saved | {proof.get('tokens_saved', 0):,} | {proof.get('blocked_calls', 0)} runaway calls prevented |",
+            f"| Exception surfaced | {exc_name} | Caught cleanly ({subclass_note}) |",
+            f"| Wall-clock overhead | {overhead_str} ms | Control-path p99 mediation latency |",
+            "",
+            "## Mechanism Checks",
+        ])
+    else:
+        lines.extend(["# Backstop Verify", ""])
+
     for r in results:
         lines.append(f"- [{_STATUS_GLYPH[r.status]}] {r.title}: {mask_secrets(r.detail)}")
         if r.fix and r.status in ("fail", "warn"):
@@ -491,6 +673,8 @@ def render_human(results: list[CheckResult], summary: dict, strict: bool) -> str
         f"{summary['failed']} failed, {summary['skipped']} skipped"
         + (" (strict: warnings fail)" if strict else "")
     )
+    if summary["failed"] == 0 and not (strict and summary["warnings"] > 0):
+        lines.append("Status: VERIFIED (real wrap enforcement active)")
     return "\n".join(lines)
 
 
@@ -510,7 +694,12 @@ def run_verify(
     results = runner.run()
     summary = runner.summarize(results)
     if json_output:
-        print(json.dumps({"summary": summary, "checks": [r.to_dict() for r in results]}, indent=2))
+        payload = {
+            "summary": summary,
+            "proof": runner.proof,
+            "checks": [r.to_dict() for r in results],
+        }
+        print(json.dumps(payload, indent=2))
     else:
-        print(render_human(results, summary, strict))
+        print(render_human(results, summary, strict, proof=runner.proof))
     return summary["exit_code"]

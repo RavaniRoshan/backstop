@@ -369,6 +369,16 @@ def main(argv: list[str] | None = None) -> int:
     verify.add_argument("--api-key-env", default="OPENAI_API_KEY", help="env var holding the provider key")
     verify.add_argument("--timeout", type=float, default=30.0, help="per-check timeout for live probes")
 
+    demo = subparsers.add_parser(
+        "demo", help="run a side-by-side comparison of an unprotected vs wrapped runaway loop"
+    )
+    demo.add_argument("--calls", type=int, default=10, help="number of loop iterations to simulate (default: 10)")
+    demo.add_argument("--budget", type=int, default=75, help="token budget for the wrapped client (default: 75)")
+    demo.add_argument("--provider", choices=["openai", "anthropic"], default="openai", help="client SDK to simulate (default: openai)")
+    demo.add_argument("--model", help="model identifier for pricing and requests")
+    demo.add_argument("--json", action="store_true", help="emit JSON instead of Markdown")
+    demo.add_argument("--strict", action="store_true", help="exit non-zero if the guardrail fails to block")
+
     real = subparsers.add_parser("real-openai", help="run a tiny real OpenAI API smoke test")
     real.add_argument("--model", help="model to use; defaults to OPENAI_MODEL or gpt-4.1-mini")
     real.add_argument("--base-url", help="override API base URL; defaults to OPENAI_BASE_URL")
@@ -476,6 +486,25 @@ def main(argv: list[str] | None = None) -> int:
             base_url=args.base_url,
             api_key_env=args.api_key_env,
         )
+
+    if args.command == "demo":
+        from .demo import run_demo
+
+        result = run_demo(
+            calls=args.calls,
+            budget=args.budget,
+            provider=args.provider,
+            model=args.model,
+            strict=args.strict,
+        )
+        if args.json:
+            print(result.to_json())
+        else:
+            print(result.to_markdown())
+        if result.error_message:
+            print(f"error: {result.error_message}")
+            return 1
+        return 0 if (result.success or not args.strict) else 1
 
     if args.command == "real-openai":
         try:
