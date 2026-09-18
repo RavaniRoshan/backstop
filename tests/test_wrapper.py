@@ -167,3 +167,35 @@ def test_preflight_budget_rejects_before_transport(provider, async_mode):
         _close_http(wrapped, async_mode)
         _close_http(client, async_mode)
 
+
+def test_wrap_warns_on_unsupported_sdk_version_but_proceeds():
+    """PLAN 1.4.1: untested SDK version warns loudly, wrap still proceeds."""
+    from unittest.mock import patch
+
+    openai = pytest.importorskip("openai")
+    client = openai.OpenAI(api_key="sk-test")
+    try:
+        with patch("importlib.metadata.version", return_value="1.0.0"):
+            with pytest.warns(UserWarning, match="outside the tested range"):
+                wrapped = Backstop.wrap(client, budget=100)
+        assert getattr(wrapped, "_backstop_state", None) is not None
+        wrapped._client.close()
+    finally:
+        client._client.close()
+
+
+def test_wrap_silent_on_supported_sdk_version():
+    """PLAN 1.4.1: tested SDK version wraps with no version warning."""
+    import warnings
+
+    openai = pytest.importorskip("openai")
+    client = openai.OpenAI(api_key="sk-test")
+    try:
+        with warnings.catch_warnings(record=True) as rec:
+            warnings.simplefilter("always")
+            wrapped = Backstop.wrap(client, budget=100)
+        assert not [w for w in rec if "outside the tested range" in str(w.message)]
+        wrapped._client.close()
+    finally:
+        client._client.close()
+

@@ -14,6 +14,19 @@ T = TypeVar("T")
 _SUPPORTED_OPENAI = frozenset({"OpenAI", "AsyncOpenAI"})
 _SUPPORTED_ANTHROPIC = frozenset({"Anthropic", "AsyncAnthropic"})  # fmt: skip
 
+# PLAN 1.4.1 — tested SDK ranges (must match .github/workflows/ci.yml).
+# Anything outside these ranges gets a loud warning, never a silent pass.
+#
+# Floors are the first versions that stop relabelling transport exceptions:
+# below openai 2.37 / anthropic 0.98 the SDK's request loop catches any
+# exception from the transport — including Backstop's BudgetExceededError —
+# and re-raises it as APIConnectionError, making the guardrail invisible to
+# user code (bisect 2026-09-18: openai 2.36.0/anthropic 0.97.0 lack the
+# guard, openai 2.37.0/anthropic 0.98.0 have it). Ceilings guard future
+# majors; openai 3.15.0 and anthropic 1.6.0 are current at writing.
+SUPPORTED_OPENAI_RANGE = ">=2.37,<4"
+SUPPORTED_ANTHROPIC_RANGE = ">=0.98,<2"
+
 
 class Backstop:
     @staticmethod
@@ -32,6 +45,7 @@ class Backstop:
                 "Backstop v1 supports openai.OpenAI, openai.AsyncOpenAI, "
                 "anthropic.Anthropic, and anthropic.AsyncAnthropic clients only"
             )
+        _warn_if_unsupported_sdk_version(provider)
 
         state = BackstopState.create(budget, config)
         state.provider = provider
@@ -79,6 +93,67 @@ def _detect_provider(cls: type) -> str:
     if module.startswith("anthropic") and name in _SUPPORTED_ANTHROPIC:
         return "anthropic"
     return ""
+
+
+def _warn_if_unsupported_sdk_version(provider: str) -> None:
+    """PLAN 1.4.1: warn loudly on untested SDK majors, never fail silently.
+
+    The supported ranges mirror the CI matrix in
+    ``.github/workflows/ci.yml``. Wrap still proceeds — the warning names
+    the tested range so the user can pin or upgrade deliberately.
+    """
+    import warnings
+
+    if provider == "openai":
+        package, supported = "openai", SUPPORTED_OPENAI_RANGE
+    elif provider == "anthropic":
+        package, supported = "anthropic", SUPPORTED_ANTHROPIC_RANGE
+    else:
+        return
+    try:
+        from importlib.metadata import version
+
+        installed = version(package)
+    except Exception:
+        return
+    if not _version_in_range(installed, supported):
+        warnings.warn(
+            f"Backstop: {package} {installed} is outside the tested range "
+            f"{supported} (see docs/compatibility.md). Wrap proceeds, but "
+            "budget enforcement on this SDK version is unverified — pin a "
+            "tested version if transport compatibility is critical.",
+            stacklevel=3,
+        )
+
+
+def _version_in_range(installed: str, spec: str) -> bool:
+    """Minimal ``>=x,<y`` range check on numeric release segments."""
+    release: list[int] = []
+    for part in installed.split("+")[0].split("."):
+        digits = "".join(ch for ch in part if ch.isdigit())
+        if not digits and release:
+            break
+        release.append(int(digits) if digits else 0)
+    for bound in spec.split(","):
+        bound = bound.strip()
+        if bound.startswith(">="):
+            if _cmp_release(release, _parse_bound(bound[2:])) < 0:
+                return False
+        elif bound.startswith("<"):
+            if _cmp_release(release, _parse_bound(bound[1:])) >= 0:
+                return False
+    return True
+
+
+def _parse_bound(text: str) -> list[int]:
+    return [int(p) for p in text.strip().split(".") if p.isdigit()]
+
+
+def _cmp_release(left: list[int], right: list[int]) -> int:
+    width = max(len(left), len(right))
+    left = left + [0] * (width - len(left))
+    right = right + [0] * (width - len(right))
+    return (left > right) - (left < right)
 
 
 _active_wraps = 0
