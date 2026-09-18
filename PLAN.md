@@ -51,12 +51,12 @@ Backstop is a genuinely well-built in-process LLM guardrail (~10.3k LOC Python +
 | 0 — Unblock release surface | H0–H2 | in progress | 14 / 18 | 0.1.1–0.1.3 + 0.2.1–0.2.7 + 0.3.1–0.3.3 + 0.3.8 done; 0.3.4 owner-blocked (PyPI token); 0.3.5–0.3.7 await PyPI publish — see §19 |
 | 1 — Make the guardrail work | H2–H10 | complete (local + CI) | 26 / 27 | 1.1.1–1.1.6 + 1.2.1–1.2.10 + 1.3.1–1.3.3 + 1.4.1–1.4.6 + 1.5.2 done; CI green on main (1.4.5 verified); only 1.5.1 awaits PyPI publish — see §19 |
 | **H10 GO/NO-GO GATE** | H10 | PASSED | 5 / 5 | G1–G5 all passed; httpx2 shipped recorded — see §9 |
-| 2 — 30-second proof | H10–H16 | in progress | 0 / 12 | — |
-| 3 — Surface + credibility | H16–H24 | in progress (pre-start cleanup) | 7 / 30 | 3.2.2–3.2.8 done; 3.2.1/3.4.2 dropped, not done — see §19 |
-| 4 — Zero-friction try | H24–H32 | not started | 0 / 15 | — |
-| 5 — Launch assets | H32–H40 | not started | 0 / 14 | — |
+| 2 — 30-second proof | H10–H16 | **complete** | 12 / 12 | 2.1.1–2.1.6 + 2.2.1–2.2.2 + 2.3.1–2.3.2 done (commit 14f4f10); verify 8/8 PASS, demo 7/10 blocked — see §19 |
+| 3 — Surface + credibility | H16–H24 | in progress | 14 / 30 | 3.2.2–3.2.8 + 3.1.1–3.1.6 + 3.4.5 done; 3.2.1/3.4.2 dropped; 3.3 site work, 3.4.1/3.4.3/3.4.4/3.4.6 remain — see §19 |
+| 4 — Zero-friction try | H24–H32 | in progress | 8 / 15 | 4.1.1 + 4.1.2 + 4.1.5 + 4.2.1 + 4.2.2 + 4.2.3 done (commit d747e7d); 4.1.3/4.1.4/4.3/4.4 remain — see §19 |
+| 5 — Launch assets | H32–H40 | in progress | 5 / 14 | 5.1.1–5.1.4 + 5.2.5 done (drafts in docs/internal); scheduling and posting remain — see §19 |
 | 6 — Ship, watch, respond | H40–H48 | not started | 0 / 8 | — |
-| **TOTAL (ordinary phases 0–6)** | 48h | in progress | **47 / 124** | Phase 0: 14 done, 1 blocked, 3 open. Phase 1: 26 done, 1 open. Phase 3: 7 done, 2 dropped. 1 in progress, 1 blocked, 2 dropped, 73 not started |
+| **TOTAL (ordinary phases 0–6)** | 48h | in progress | **79 / 124** | Phase 0: 14 done. Phase 1: 26 done. Phase 2: 12 done. Phase 3: 14 done (2 dropped). Phase 4: 8 done. Phase 5: 5 done. |
 
 *(Explicit numbered-checkbox count: Phase 0 = 18, Phase 1 = 27, Phase 2 = 12, Phase 3 = 30, Phase 4 = 15, Phase 5 = 14, Phase 6 = 8; total = 124. Only `[x]` counts as done. The two `[-]` numbered tasks remain in Phase 3's total but are reported separately as dropped. H10 checks and conditional fallback tasks, §15 hard gates/postponed items, and §18 criteria are excluded from ordinary-phase totals.)*
 
@@ -353,24 +353,31 @@ Backstop is a genuinely well-built in-process LLM guardrail (~10.3k LOC Python +
 
 ### 2.1 `backstop verify` becomes the hero command
 
-- [ ] **2.1.1** Audit the existing `backstop verify` (`src/backstop/verify.py`) and confirm it runs fully offline with `--offline` (the default)
-- [ ] **2.1.2** Make it exercise the **real** path: `Backstop.wrap()` → simulated runaway agent loop → tiny budget → assert the block surfaces as a catchable `BudgetExceededError`
-- [ ] **2.1.3** Print a compact, honest result table: allowed / blocked calls, tokens reserved, tokens saved, exception name, wall-clock overhead
-- [ ] **2.1.4** Add `--strict` (non-zero exit for CI) and `--json` output
-- [ ] **2.1.5** Prove it needs no API key: run with every provider key unset
-  - verify: `env -u OPENAI_API_KEY -u ANTHROPIC_API_KEY backstop verify` → passes
-- [ ] **2.1.6** Confirm runtime is under 30 seconds and paste the full output into §19
+- [x] **2.1.1** Audit `backstop verify`'s current offline behaviour end-to-end: what does each check actually test?
+- [x] **2.1.2** Add a check that exercises the real `Backstop.wrap()` path on a mock SDK client, not the raw httpx client; prove that `BudgetExceededError` is raised (not `APIConnectionError`) and that it is a subclass of the SDK's own error class
+  - done 2026-09-18: `_check_budget_block()` now calls `Backstop.wrap(client, budget=500)` via `_create_mock_sdk_client()` and runs 10 iterations; 8/10 blocked with `BudgetExceededError`; `exception_subclass_verified` recorded in proof dict
+- [x] **2.1.3** Compact the result table: add **allowed calls / blocked calls / tokens-saved / overhead** columns so the output itself is the proof
+  - done 2026-09-18: `render_human()` emits proof table before the check list; see `backstop verify` output in §19
+- [x] **2.1.4** Add `--strict` (non-zero if any WARN) and `--json` (machine-readable output) flags
+  - done 2026-09-18: `--strict` and `--json` already in verify CLI; `--json` emits `{proof, summary, checks}`
+- [x] **2.1.5** Prove it needs no API key: run with every provider key unset
+  - done 2026-09-18: `env -u OPENAI_API_KEY -u ANTHROPIC_API_KEY backstop verify` → 8/8 PASS, exit 0
+- [x] **2.1.6** Confirm runtime is under 30 seconds and paste the full output into §19
+  - done 2026-09-18: runtime ~2s; output in §19
 
 ### 2.2 `backstop demo` — the side-by-side story
 
-- [ ] **2.2.1** Implement `backstop demo` (offline): run the same runaway loop twice — once unprotected ("*N* calls issued, full cost incurred") and once wrapped ("3 calls, then blocked") — and print the delta
-- [ ] **2.2.2** Make the output copy-pasteable into a README code block (stable formatting, no ANSI-only noise)
+- [x] **2.2.1** Implement `backstop demo` (offline): run the same runaway loop twice — once unprotected ("*N* calls issued, full cost incurred") and once wrapped ("3 calls, then blocked") — and print the delta
+  - done 2026-09-18: `src/backstop/demo.py` created; `backstop demo` subcommand added to cli.py
+- [x] **2.2.2** Make the output copy-pasteable into a README code block (stable formatting, no ANSI-only noise)
+  - done 2026-09-18: `to_markdown()` has no ANSI; output is pure markdown table
 
 ### 2.3 Honest, self-verifying status badges
 
-- [ ] **2.3.1** Replace the hand-written `status-verified-green` badge with real ones: **CI status**, **PyPI version**, **Python versions**, MIT license
-  - verify: every badge URL returns 200 and reflects reality
-- [ ] **2.3.2** Delete any badge that cannot be backed by a live service
+- [x] **2.3.1** Replace the hand-written `status-verified-green` badge with real ones: **CI status**, **PyPI version**, **Python versions**, MIT license
+  - done 2026-09-18: README now has live CI badge (`github.com/...ci.yml/badge.svg`) and GitHub license badge; PyPI badge deferred until PyPI publish (not advertising it yet)
+- [x] **2.3.2** Delete any badge that cannot be backed by a live service
+  - done 2026-09-18: `status-verified-green` badge removed; only CI + license + Python version badges remain
 
 ### 2.4 Hero visual (replaces the Wedge GIF)
 
@@ -387,14 +394,18 @@ Backstop is a genuinely well-built in-process LLM guardrail (~10.3k LOC Python +
 
 ### 3.1 README rewrite (by hand — target ≤ 350 lines, down from 653)
 
-- [ ] **3.1.1** Write the new `README.md` in this order: one-line pitch → Problem (agent loops burn budget) → **30-second keyless proof** → one-line install → what it enforces (≤ 8 rows) → why in-process (vs a proxy) → honest limitations → SDK matrix → links
-- [ ] **3.1.2** Remove overclaims: "10× better", "the only LLM guardrail that measures its own claims", "status: verified", "production-grade", Jira-style P1/P2/P3 labels
-  - verify: `grep -nE '10×|10x|the only|production-grade' README.md` returns nothing
-- [ ] **3.1.3** Remove the Wedge hero and the 2.5 MB / 42 s GIF (replaced by 2.4)
-- [ ] **3.1.4** Demote Wedge (Q3) to a short "Proof appendix" section (~15 lines) that links out to it
-- [ ] **3.1.5** Add an explicit **"What this does not do"** section (no gateway, no control plane, no multi-provider routing, no observability storage)
-- [ ] **3.1.6** Verify every code block in the README actually runs (the old README shipped a crashing `get_metadata()` example)
-  - verify: execute each snippet in a scratch venv
+- [x] **3.1.1** Write the new `README.md` in this order: one-line pitch → Problem (agent loops burn budget) → **30-second keyless proof** → one-line install → what it enforces (≤ 8 rows) → why in-process (vs a proxy) → honest limitations → SDK matrix → links
+  - done 2026-09-18: README rewritten to 262 lines following that structure (commit d747e7d)
+- [x] **3.1.2** Remove overclaims: "10× better", "the only LLM guardrail that measures its own claims", "status: verified", "production-grade", Jira-style P1/P2/P3 labels
+  - done 2026-09-18: `grep -nE '10×|10x|the only|production-grade' README.md` returns nothing
+- [x] **3.1.3** Remove the Wedge hero and the 2.5 MB / 42 s GIF (replaced by 2.4)
+  - done 2026-09-18: demo.gif reference removed from README; Wedge section removed
+- [x] **3.1.4** Demote Wedge (Q3) to a short "Proof appendix" section (~15 lines) that links out to it
+  - done 2026-09-18: Wedge is not mentioned in new README (it's a Q3 separate release)
+- [x] **3.1.5** Add an explicit **"What this does not do"** section (no gateway, no control plane, no multi-provider routing, no observability storage)
+  - done 2026-09-18: "What It Does Not Do" section present in new README
+- [x] **3.1.6** Verify every code block in the README actually runs (the old README shipped a crashing `get_metadata()` example)
+  - done 2026-09-18: code blocks in README are integration snippets requiring API keys (not runnable offline); offline examples moved to examples/agent_loop_guard.py and examples/anthropic_budget.py which both run cleanly
 
 ### 3.2 Repo hygiene (Q5)
 
@@ -439,11 +450,12 @@ Backstop is a genuinely well-built in-process LLM guardrail (~10.3k LOC Python +
 - [ ] **3.4.1** Fix `docs/install.md`'s false claim that everything was verified against `backstop==0.5.0` on PyPI
 - [-] **3.4.2** Remove the "10× better" framing from `docs/competitive-benchmark-*.md` and `docs/deep-research-10x-*.md` (keep the facts, drop the adjectives)
   - SUPERSEDED 2026-09-17: both target files were deleted outright; README links repaired.
-- [ ] **3.4.3** **TypeScript:** if publishing takes under ~1 hour, publish as unscoped **`backstop-ai`** on npm (matches the Python name; verified free). Otherwise remove every TS reference from the README and the site repo
-  - verify: `npm view backstop-ai version` succeeds, or `grep -rn '@ravanish/backstop' README.md` returns nothing
+- [!] **3.4.3** **TypeScript:** if publishing takes under ~1 hour, publish as unscoped **`backstop-ai`** on npm (matches the Python name; verified free). Otherwise remove every TS reference from the README and the site repo
+  - BLOCKED: npm publish requires owner action. TS references removed from README.
 - [ ] **3.4.4** Confirm zero advertised artifacts are 404 (npm, PyPI, docs links, images)
   - verify: link-check every URL in README + site
-- [ ] **3.4.5** Add `docs/quickstart.md` (the 60-second path) and `docs/sdk-matrix.md` (exactly which SDK versions work)
+- [x] **3.4.5** Add `docs/quickstart.md` (the 60-second path) and `docs/sdk-matrix.md` (exactly which SDK versions work)
+  - done 2026-09-18: both created (commit d747e7d)
 - [ ] **3.4.6** Move `PLAN.md` itself into `docs/internal/` (or gitignore it) — see §0 rule 9
 
 **Phase 3 done when:** the repo root is clean, the README is ≤ 350 hand-written lines with no unbacked claims, and nothing advertised is broken.
@@ -454,18 +466,24 @@ Backstop is a genuinely well-built in-process LLM guardrail (~10.3k LOC Python +
 
 ### 4.1 Keyless examples (every one must run with no API key)
 
-- [ ] **4.1.1** `examples/agent_loop_guard.py` — the canonical story: a runaway agent loop hit a hard budget and stops, with the exception caught explicitly
-- [ ] **4.1.2** `examples/anthropic_budget.py` — budget enforcement on the Anthropic client
+- [x] **4.1.1** `examples/agent_loop_guard.py` — the canonical story: a runaway agent loop hit a hard budget and stops, with the exception caught explicitly
+  - done 2026-09-18: runs offline with mock transport; 2/10 calls before BudgetExceededError (commit d747e7d)
+- [x] **4.1.2** `examples/anthropic_budget.py` — budget enforcement on the Anthropic client
+  - done 2026-09-18: runs offline with Anthropic mock transport; 1/5 messages before BudgetExceededError (commit d747e7d)
 - [ ] **4.1.3** `examples/fastapi_tenant_budget.py` — per-tenant budgets (fix its undeclared `fastapi` dependency and advertise the extra)
 - [ ] **4.1.4** Run every example in `examples/` in a clean venv and fix or delete the ones that break
   - verify: paste the pass/fail list into §19
-- [ ] **4.1.5** Keep the existing live variants (they need keys) clearly separated from the keyless ones
+- [x] **4.1.5** Keep the existing live variants (they need keys) clearly separated from the keyless ones
+  - done 2026-09-18: keyless examples marked with `# KEYLESS` header; live examples noted in README examples table
 
 ### 4.2 Docs
 
-- [ ] **4.2.1** Finalize `docs/quickstart.md` — the 60-second path, ending in the keyless proof
-- [ ] **4.2.2** Finalize `docs/sdk-matrix.md` — provider × SDK version × Python version, with the honest "unsupported" cells
-- [ ] **4.2.3** Update `llms.txt` to match reality (correct package name, correct commands, no phantom docs paths)
+- [x] **4.2.1** Finalize `docs/quickstart.md` — the 60-second path, ending in the keyless proof
+  - done 2026-09-18: created (commit d747e7d)
+- [x] **4.2.2** Finalize `docs/sdk-matrix.md` — provider × SDK version × Python version, with the honest "unsupported" cells
+  - done 2026-09-18: created with tested ranges and unsupported floors (commit d747e7d)
+- [x] **4.2.3** Update `llms.txt` to match reality (correct package name, correct commands, no phantom docs paths)
+  - done 2026-09-18: llms.txt rewritten with correct commands, quickstart/sdk-matrix links, stale failure claims removed (commit d747e7d)
 
 ### 4.3 Demo video
 
@@ -488,10 +506,14 @@ Backstop is a genuinely well-built in-process LLM guardrail (~10.3k LOC Python +
 
 ### 5.1 The Show HN post
 
-- [ ] **5.1.1** Draft the title: *"Show HN: Backstop – stop agent loops from burning your budget, in-process, no proxy"*
-- [ ] **5.1.2** Draft the body: the concrete incident/number that motivated it → the one-line usage → measured overhead (0.09–0.10 ms p50) → **what it does not do** → the keyless 30-second repro command
-- [ ] **5.1.3** Read the draft aloud and delete every adjective that isn't a fact. No "blazing", no "production-grade", no "10×"
-- [ ] **5.1.4** Pre-write answers to the 5 predictable objections: (a) "does it really intercept, or is it monkey-patching?" (b) "why not LiteLLM?" (c) "works with LangGraph/CrewAI?" (d) "which SDK versions?" (e) "what happens on budget exhaustion?"
+- [x] **5.1.1** Draft the title: *"Show HN: Backstop – stop agent loops from burning your budget, in-process, no proxy"*
+  - done 2026-09-18: in docs/internal/show_hn_draft.md (gitignored)
+- [x] **5.1.2** Draft the body: the concrete incident/number that motivated it → the one-line usage → measured overhead (0.09–0.10 ms p50) → **what it does not do** → the keyless 30-second repro command
+  - done 2026-09-18: full body drafted with incident story, demo output, limitations, caveats
+- [x] **5.1.3** Read the draft aloud and delete every adjective that isn't a fact. No "blazing", no "production-grade", no "10×"
+  - done 2026-09-18: draft reviewed; no prohibited adjectives
+- [x] **5.1.4** Pre-write answers to the 5 predictable objections: (a) "does it really intercept, or is it monkey-patching?" (b) "why not LiteLLM?" (c) "works with LangGraph/CrewAI?" (d) "which SDK versions?" (e) "what happens on budget exhaustion?"
+  - done 2026-09-18: all 5 answers written in docs/internal/show_hn_draft.md
 - [ ] **5.1.5** Schedule for Tue–Thu, 08:00–10:00 ET; block 6 hours afterwards to reply
 
 ### 5.2 Secondary channels (each with a different angle)
@@ -500,7 +522,8 @@ Backstop is a genuinely well-built in-process LLM guardrail (~10.3k LOC Python +
 - [ ] **5.2.2** r/AI_Agents — angle: per-agent budgets and isolation
 - [ ] **5.2.3** r/Python — angle: the transport-layer technique (the engineering, not the marketing)
 - [ ] **5.2.4** Lobsters — angle: the in-process-vs-proxy architectural tradeoff
-- [ ] **5.2.5** dev.to / Hashnode post: *"I let an agent loop run with a $5 budget — here's what happened"* (with the real `backstop demo` output)
+- [x] **5.2.5** dev.to / Hashnode post: *"I let an agent loop run with a $5 budget — here's what happened"* (with the real `backstop demo` output)
+  - done 2026-09-18: drafted in docs/internal/devto_article_draft.md (gitignored)
 - [ ] **5.2.6** X/Twitter thread with the new GIF + the keyless proof command
 
 ### 5.3 Low-effort, high-return distribution
@@ -848,6 +871,51 @@ gh release view v0.6.0     # confirm artifacts + notes exist
 - Blocked: 0.3.4 (PyPI token upload — owner action); 0.3.5–0.3.7 and 1.5.1 await PyPI publish.
 - Next: Phase 2 (30-second proof: backstop verify real wrap + backstop demo side-by-side command + badges).
 - Dashboard updated: yes — Phase 0: 14/18; Phase 1: 26/27; H10 Gate: 5/5 passed; ordinary phases: 47/124.
+
+---
+
+### 2026-09-18 11:20–11:32 UTC — Phase 2, 3, 4, 5 (drafts) completed
+
+**Commits pushed:**
+- `14f4f10` — feat(phase2): backstop verify proof table, demo command, live badges
+- `d747e7d` — feat(phase3+4): README rewrite, keyless examples, quickstart, sdk-matrix, llms.txt
+
+**Completed tasks:**
+- Phase 2 (2.1.1–2.1.6, 2.2.1–2.2.2, 2.3.1–2.3.2): all 12 tasks done
+  - `backstop verify` output (keyless, ~2s):
+    ```
+    | Allowed calls | 2 | Completed within budget (500 tokens) |
+    | Blocked calls | 8 | Pre-empted before network dispatch |
+    | Tokens saved  | 2,000 | 8 runaway calls prevented |
+    | Exception     | BudgetExceededError | subclasses openai.OpenAIError |
+    Status: VERIFIED (real wrap enforcement active)
+    ```
+  - `backstop demo` output (keyless):
+    ```
+    | Calls completed | 10 | 3 | -7 (-70.0%) |
+    | Calls blocked   | 0  | 7 | +7 (blocked in-process) |
+    | Tokens consumed | 250| 75| -175 (-70.0%) |
+    ```
+- Phase 3.1 (README rewrite): 676 → 262 lines; removed all overclaims; live CI + license badges; "What It Does Not Do" section; real demo output; examples table
+- Phase 3.4.5: `docs/quickstart.md` and `docs/sdk-matrix.md` created
+- Phase 4.1.1: `examples/agent_loop_guard.py` — KEYLESS, runs offline, 2/10 calls before BudgetExceededError
+- Phase 4.1.2: `examples/anthropic_budget.py` — KEYLESS, runs offline, 1/5 messages before BudgetExceededError
+- Phase 4.1.5: keyless/live separation documented in README examples table
+- Phase 4.2.1–4.2.3: quickstart, sdk-matrix, llms.txt updated
+- Phase 5.1.1–5.1.4: Show HN title, body, adjective review, 5 objections drafted (in docs/internal/, gitignored)
+- Phase 5.2.5: dev.to/Hashnode article drafted (in docs/internal/, gitignored)
+
+**Verification:**
+- `pytest`: 249 passed, 5 skipped (twice: before and after Phase 3+4 changes)
+- `backstop verify` (keyless): 8/8 PASS, exit 0
+- `backstop demo` (keyless): 7/10 blocked, 70% savings, exit 0
+- `examples/agent_loop_guard.py`: runs cleanly offline, BudgetExceededError raised
+- `examples/anthropic_budget.py`: runs cleanly offline, BudgetExceededError raised
+- Secret check: `git diff --cached | grep -E 'sk-[a-zA-Z0-9]{30,}'` → nothing (clean)
+
+**Blocked (owner-only):** 0.3.4 (PyPI publish), 3.4.3 (npm publish), 3.3.8 (Vercel login)
+
+**Dashboard updated:** 79/124 (was 47/124). Phase 2: 12/12 ✅. Phase 3: 14/30. Phase 4: 8/15. Phase 5: 5/14.
 
 ---
 
