@@ -1,4 +1,4 @@
-# @ravanish/backstop
+# backstop-ai
 
 In-process LLM guardrails for the **OpenAI SDK** — a TypeScript port of the
 Python [`backstop`](https://github.com/RavaniRoshan/backstop) `wrap()` API.
@@ -12,12 +12,12 @@ One drop-in call wraps your existing `OpenAI` client and adds:
   circuit opens (no proxy, no extra infra).
 
 ```bash
-npm install @ravanish/backstop openai
+npm install backstop-ai openai
 ```
 
 ```ts
 import OpenAI from "openai";
-import { wrap } from "@ravanish/backstop";
+import { wrap } from "backstop-ai";
 
 const client = wrap(new OpenAI(), 50_000, {
   fallbackModel: "gpt-4o-mini",
