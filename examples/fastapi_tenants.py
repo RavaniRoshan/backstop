@@ -1,16 +1,34 @@
+"""
+Per-tenant budget enforcement with FastAPI.
+
+Requires:
+  pip install "backstop-ai[fastapi]"
+  OPENAI_API_KEY must be set.
+"""
 from __future__ import annotations
 
-# Requires the optional `fastapi` dependency:
-#   pip install "backstop[fastapi]"
-from fastapi import FastAPI, Header, HTTPException
+import os
+import sys
+
+# Guard: fastapi is an optional dependency
+try:
+    from fastapi import FastAPI, Header, HTTPException
+except ImportError:
+    print("Install fastapi to run this example: pip install 'backstop-ai[fastapi]'")
+    sys.exit(0)
+
 from openai import OpenAI
 
 from backstop import Backstop, TenantBudget, budgets, with_budget
 from backstop.exceptions import BudgetExceededError
 
+if not os.environ.get("OPENAI_API_KEY"):
+    print("Set OPENAI_API_KEY to run this example.")
+    sys.exit(0)
+
 app = FastAPI()
 
-client = Backstop.wrap(OpenAI(api_key="sk-your-key-here"), budget=None)
+client = Backstop.wrap(OpenAI(), budget=None)
 
 budgets.register(
     {

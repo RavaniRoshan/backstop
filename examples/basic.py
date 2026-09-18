@@ -1,7 +1,16 @@
+"""
+Minimal OpenAI integration example. Requires OPENAI_API_KEY to be set.
+For a keyless offline example, see examples/agent_loop_guard.py.
+"""
+import os
+
 from openai import OpenAI
 
 from backstop import Backstop, BackstopConfig
 
+if not os.environ.get("OPENAI_API_KEY"):
+    print("Set OPENAI_API_KEY to run this example.")
+    raise SystemExit(0)
 
 client = Backstop.wrap(
     OpenAI(),
@@ -10,10 +19,9 @@ client = Backstop.wrap(
 )
 
 response = client.chat.completions.create(
-    model="gpt-4.1-mini",
+    model="gpt-4o-mini",
     messages=[{"role": "user", "content": "Say hello in five words."}],
     extra_headers={"X-Backstop-Priority": "critical"},
 )
 
 print(response)
-
