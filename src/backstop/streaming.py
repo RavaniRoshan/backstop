@@ -4,11 +4,14 @@ import json
 import time
 from typing import TYPE_CHECKING, Any
 
-if TYPE_CHECKING:
-    import httpx
+from ._httpcompat import _HttpCompat, compat_for
 
+if TYPE_CHECKING:
     from .budget import Reservation
     from .state import BackstopState
+    from ._httpcompat import _HttpCompat
+    # httpx is imported conditionally below to avoid runtime dependency on httpx2 vs httpx
+    # The actual response type is ensured via _ensure_response_family at runtime.
 
 
 def is_streaming(body: Any) -> bool:
@@ -36,6 +39,14 @@ def _int_or_zero(*values: Any) -> int | None:
     return None
 
 
+def _ensure_response_family(response: Any, compat: _HttpCompat | None) -> None:
+    selected = compat or compat_for(response)
+    if not isinstance(response, selected.Response):
+        raise TypeError(
+            f"streaming response does not belong to the selected {selected.name} family"
+        )
+
+
 def _reconcile_usage(
     state: BackstopState,
     reservation: Reservation,
@@ -61,7 +72,7 @@ def _reconcile_usage(
 
 
 def setup_streaming(
-    response: httpx.Response,
+    response: Any,
     state: BackstopState,
     reservation: Reservation,
     *,
@@ -78,6 +89,8 @@ def setup_streaming(
     (which would starve the consumer) while still reconciling to actual tokens.
     """
     from .ledger import ReservationTicket as LedgerReservation
+    compat = compat_for(response)
+    _ensure_response_family(response, compat)
 
     original_close = response.close
     original_iter_raw = response.iter_raw
@@ -127,7 +140,7 @@ def setup_streaming(
 
 
 async def async_setup_streaming(
-    response: httpx.Response,
+    response: Any,
     state: BackstopState,
     reservation: Reservation,
     *,
@@ -136,6 +149,9 @@ async def async_setup_streaming(
     created_at: float | None = None,
 ) -> None:
     """Async twin of :func:`setup_streaming`."""
+    compat = compat_for(response)
+    _ensure_response_family(response, compat)
+
     original_aclose = response.aclose
     original_aiter_raw = response.aiter_raw
     accumulated: list[bytes] = []

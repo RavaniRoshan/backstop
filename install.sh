@@ -1,9 +1,10 @@
 #!/bin/sh
 # Backstop — one-command installer (convenience / secondary path).
 #
-# Canonical install remains:   pip install "backstop[anthropic]"
-# This script is for users who don't have pip/Python knowledge: it detects
-# Python and runs the pip install for you.
+# Canonical install remains:   pip install "backstop-ai[anthropic]"
+# 0.6.0 is unreleased: PyPI publication and SDK compatibility verification
+# are pending. Review this script and /docs/install.md before running it.
+# The Git fallback below installs current source, not a pinned release.
 #
 #   curl -fsSL https://raw.githubusercontent.com/RavaniRoshan/backstop/main/install.sh | sh
 #
@@ -72,7 +73,7 @@ case "$OS" in
   *)
     warn "This curl installer supports macOS and Linux only."
     warn "On Windows, install Python from https://www.python.org, then run:"
-    warn '    pip install "backstop[anthropic]"'
+    warn '    pip install "backstop-ai[anthropic]"'
     exit 1
     ;;
 esac
@@ -107,10 +108,11 @@ if ! python3 -m pip --version >/dev/null 2>&1; then
 fi
 
 EXTRAS="${BACKSTOP_EXTRAS:-anthropic}"
-SPEC="backstop[$EXTRAS]"
-BACKSTOP_VERSION="0.5.0"
+BACKSTOP_VERSION="0.6.0"
+SPEC="backstop-ai[$EXTRAS]==${BACKSTOP_VERSION}"
 
-info "Installing $SPEC @ v${BACKSTOP_VERSION} (user scheme)..."
+warn "0.6.0 is unreleased; PyPI publication and SDK compatibility verification are pending."
+info "Installing $SPEC (user scheme)..."
 if python3 -m pip install --user --upgrade "$SPEC"; then
   :
 elif [ "${BACKSTOP_NO_GITFALLBACK:-0}" = "1" ]; then
@@ -118,8 +120,8 @@ elif [ "${BACKSTOP_NO_GITFALLBACK:-0}" = "1" ]; then
   exit 1
 else
   warn "PyPI install failed; falling back to the GitHub repository."
-  warn "(This is expected before Backstop is published to PyPI.)"
-  python3 -m pip install --user --upgrade "git+https://github.com/RavaniRoshan/backstop.git#egg=backstop[$EXTRAS]"
+  warn "The fallback installs current source, not a pinned or verified release."
+  python3 -m pip install --user --upgrade "backstop-ai[$EXTRAS] @ git+https://github.com/RavaniRoshan/backstop.git"
 fi
 
 info "Backstop installed."

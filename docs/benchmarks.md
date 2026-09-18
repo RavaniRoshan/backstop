@@ -43,4 +43,4 @@ These scenarios exercise budget blocking, provider pressure, retry behavior, AIM
 
 ## Latest Snapshot
 
-See [`benchmark-results-2026-07-04.md`](benchmark-results-2026-07-04.md) for the first committed local benchmark snapshot.
+See [`benchmark-results-2026-07-20.md`](benchmark-results-2026-07-20.md) for the current committed local benchmark snapshot. Regenerate it with `backstop benchmark --publish`.

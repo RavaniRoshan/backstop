@@ -39,11 +39,17 @@ The Wedge tool (bundled in this repo) **proves** that this transport-layer isola
 
 ## Quick Start
 
+> **0.6.0 is unreleased.** The command below is for use after publication;
+> until then, [install from source](#from-source--development). PyPI installation
+> has not been verified. Current Anthropic SDK wrapping and enforcement-error
+> propagation have known failures; see [installation limitations](docs/install.md).
+
 ```bash
-pip install "backstop[anthropic]"
+pip install "backstop-ai[anthropic]"
 ```
 
-Wrap any OpenAI or Anthropic client in one line:
+The integration API is shown below; these examples do not establish current
+SDK compatibility:
 
 ```python
 from openai import OpenAI
@@ -94,8 +100,8 @@ wedge run task.yaml
 - **Hooks** — Lightweight before/after hooks for local logging, policy, and metadata.
 - **HTTP transport layer** — Plugs into the SDK's native `httpx` transport — no monkey-patching.
 - **Prometheus metrics** — Optional export for dashboards and alerting.
-- **OpenTelemetry export** — Vendor-neutral metrics mirroring the Prometheus series (`pip install "backstop[otel]"`, `BackstopConfig(otel_enabled=True)`).
-- **Shared (Redis) budget** — Enforce *one* token budget across processes and replicas with zero infra (`pip install "backstop[redis]"`, `BackstopConfig(shared_budget=True)`).
+- **OpenTelemetry export** — Vendor-neutral metrics mirroring the Prometheus series (`pip install "backstop-ai[otel]"`, `BackstopConfig(otel_enabled=True)`).
+- **Shared (Redis) budget** — Enforce *one* token budget across processes and replicas with zero infra (`pip install "backstop-ai[redis]"`, `BackstopConfig(shared_budget=True)`).
 - **In-process fallback chain** — On a sustained provider failure, walk an ordered `fallback_chain` of backup models/deployments *inside your process*; `fallback_chain_for_priority` gives critical traffic its own chain (`BackstopConfig(fallback_chain=[{"model": ...}, {"model": ..., "base_url": ...}])`). The legacy single `fallback_model` is still supported.
 - **CLI ergonomics** — `backstop doctor` validates your install; `backstop benchmark` produces reproducible proof.
 - **Provider support** — OpenAI (sync & async) and Anthropic (sync & async).
@@ -188,7 +194,7 @@ A single token budget enforced across processes/replicas — the "AI SaaS team
 with runaway spend" wedge. No Postgres, no Redis admin, no network hop:
 
 ```bash
-pip install "backstop[redis]"
+pip install "backstop-ai[redis]"
 ```
 
 ```python
@@ -211,7 +217,7 @@ Mirror every Prometheus series to a vendor-neutral OTel meter (Datadog,
 Honeycomb, CloudWatch — any OTLP collector):
 
 ```bash
-pip install "backstop[otel]"
+pip install "backstop-ai[otel]"
 ```
 
 ```python
@@ -252,14 +258,10 @@ backstop benchmark   # deterministic, seeded proof (--publish to commit results)
 - [Concurrency & Scale Limits](docs/concurrency.md) — the GIL ceiling, the
   configurable `max_wrap_sessions` cap, and when a proxy gateway is the better
   fit.
-- [Competitive benchmark: Backstop vs. LiteLLM/BricksLLM (2026-07-20)](docs/competitive-benchmark-2026-07-20.md)
-  — Firecrawl-sourced feature matrix and the "10× better" wedge.
-- [Deep Research: Making Backstop a 10× Better LLM Guardrail (2026-07-20)](docs/deep-research-10x-better-2026-07-20.md)
-  — exhaustive, 6-agent Firecrawl synthesis across gateways, observability,
-  frameworks, clouds, in-process techniques, and contrarian risks, with a
-  prioritized 10× roadmap.
 - [Published benchmark results (2026-07-20)](docs/benchmark-results-2026-07-20.md)
   — deterministic, reproducible proof from `backstop benchmark`.
+- [Benchmark methodology](docs/benchmarks.md) — how overhead is measured
+  separately from provider latency, and what the numbers do and do not mean.
 
 ## Architecture
 
@@ -312,48 +314,46 @@ Key: **isolated context, not isolated infrastructure.** All runners share the sa
 
 ## Install
 
-Backstop is published on PyPI. Pick the install that matches how you'll use it.
+The distribution is `backstop-ai`; `import backstop` and the `backstop` / `wedge`
+commands are unchanged. **0.6.0 is unreleased:** PyPI publication and installation
+from PyPI are pending. Use the source instructions below until publication.
+The PyPI name `backstop` belongs to an unrelated project.
+
+After publication:
 
 ```bash
-# Most users — OpenAI + Anthropic support in one line
-pip install "backstop[anthropic]"
+# Base library plus Anthropic SDK dependency
+pip install "backstop-ai[anthropic]"
 
-# Metrics (Prometheus export) only
-pip install "backstop[metrics]"
+# Prometheus metrics export dependency
+pip install "backstop-ai[metrics]"
 
-# Base library (OpenAI only) — add [anthropic] for Claude support
-pip install backstop
+# Base dependencies, including OpenAI
+pip install backstop-ai
 ```
 
-Run either CLI **without a permanent install** (great for a quick try or CI) —
-`pipx` fetches Backstop into a throwaway environment and runs it:
+SDK compatibility remains unresolved; installing an extra does not establish
+that wrapping or enforcement works. See the warning in
+[docs/install.md](docs/install.md).
+
+Run either CLI in a temporary environment after publication, specifying the
+distribution explicitly:
 
 ```bash
-pipx run backstop --help      # Backstop harness / metrics server
-pipx run wedge --help         # Wedge multi-agent diff tool
+pipx run --spec backstop-ai backstop --help
+pipx run --spec backstop-ai wedge --help
 ```
 
-If you don't have pip set up at all, the one-command installer detects Python
-and installs Backstop for you (secondary / convenience path):
+For an isolated persistent CLI environment after publication:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/RavaniRoshan/backstop/main/install.sh | sh
+pipx install backstop-ai
 ```
 
-Canonical install remains `pip install "backstop[anthropic]"` (see
-[docs/install.md](docs/install.md) for the full matrix).
-
-Isolated, persistent installs (recommended for the `backstop` / `wedge` commands):
-
-```bash
-pipx install backstop
-```
-
-Every path here is `pip`/`pipx` or the curl convenience installer above — no npm.
-`pip install "backstop[anthropic]"` is the canonical install; the curl one-liner is
-a secondary option for users without pip/Python knowledge.
-See [docs/install.md](docs/install.md) for the full end-user + enterprise matrix
-(internal-mirror, pinned, air-gapped, and container paths).
+The convenience `install.sh` path has not been verified for 0.6.0. Review the
+script and its fallback behavior before running it; see
+[docs/install.md](docs/install.md) for source, registry, pinned, and air-gapped
+installation instructions.
 
 ### From source / development
 
@@ -487,6 +487,9 @@ backstop harness --scenario budget-hit
 # Prometheus metrics server
 backstop metrics --port 9090
 
+# Built-in dashboard (no Prometheus needed)
+backstop dashboard --demo
+
 # Real API smoke tests (set API keys first)
 backstop real-openai --model gpt-4.1-mini
 backstop real-anthropic
@@ -548,7 +551,7 @@ Full results: [`docs/benchmark-results-2026-07-20.md`](docs/benchmark-results-20
 
 ## Metrics
 
-Export Prometheus metrics by installing `backstop[metrics]`:
+Export Prometheus metrics by installing `backstop-ai[metrics]`:
 
 ```python
 from backstop import Backstop
@@ -561,8 +564,36 @@ app = Backstop.metrics_app()
 ```
 
 Starter observability assets:
-- [`observability/grafana/backstop-dashboard.json`](observability/grafana/backstop-dashboard.json)
 - [`observability/prometheus-alerts.yml`](observability/prometheus-alerts.yml)
+
+---
+
+## Dashboard
+
+No Prometheus or Grafana needed for day-to-day visibility — Backstop ships a
+built-in dashboard that renders live state from the same process as your
+workload:
+
+```bash
+backstop dashboard --demo       # synthetic traffic, no API keys
+backstop dashboard              # watch this process, http://127.0.0.1:8787
+backstop dashboard --cost-model gpt-4o --audit audit.jsonl
+backstop dashboard --host 0.0.0.0 --token "$(openssl rand -hex 32)"
+```
+
+Or mount it in your own server (root only — assets and snapshot requests use
+root-relative URLs, so a `/dashboard` subpath is not supported):
+
+```python
+app.mount("/", WSGIMiddleware(Backstop.dashboard_app()))
+```
+
+It shows budget burn and projected exhaustion, prevention (budget blocks,
+rate-limits, circuit blocks, cache hits), traffic and provider efficiency,
+latency p95, AIMD concurrency, per-session isolation, tenant ledger usage, and
+the enforcement event stream. Everything is stdlib-only, in-memory, and
+read-only; non-loopback binds require a bearer token. Details and the security
+model: [`docs/dashboard.md`](docs/dashboard.md).
 
 ---
 
@@ -578,7 +609,7 @@ Every claim below is backed by live-provider evidence. Re-run any time to confir
 | **Semantic cache** — near-duplicate prompts served from cache | Live + mock: reformatted prompts short-circuited without provider call | `python proofs/proof_semantic_cache.py` |
 | **Convergence measurement** — does isolated agents produce the same answer? | Demo: 3 runners → **PARTIAL (sim=0.98)** | `cd wedge-test-fixture && wedge run task.yaml` |
 
-Full evidence data: [`docs/proof-evidence-2026-08-10.md`](docs/proof-evidence-2026-08-10.md) · Marketing-safe claims: [`docs/marketing-evidence-2026-08-10.md`](docs/marketing-evidence-2026-08-10.md)
+Full methodology and reproducible counts: [`docs/benchmark-results-2026-07-20.md`](docs/benchmark-results-2026-07-20.md) · Re-run any claim with `backstop benchmark` or the scripts in [`proofs/`](proofs/).
 
 ---
 

@@ -6,15 +6,21 @@ backup deployment). The roadmap's P0#2 promotes this to an ordered
 """
 from __future__ import annotations
 
+import asyncio
 import json
+import time
 from types import SimpleNamespace
 
 import httpx
+import pytest
 
 from backstop.config import BackstopConfig, Priority
+from backstop.circuit import CircuitState
 from backstop.latency import _LatencyTracker
+from backstop.ledger import TenantBudget, get_ledger, reset_ledger, with_budget
+from backstop.notifications import BudgetAlertManager
 from backstop.state import BackstopState
-from backstop.transports import BackstopTransport, _build_fallback_request
+from backstop.transports import AsyncBackstopTransport, BackstopTransport, _build_fallback_request
 
 
 def _meta(priority: Priority = Priority.DEFAULT) -> SimpleNamespace:
@@ -29,12 +35,17 @@ def _tracker() -> _LatencyTracker:
     return _LatencyTracker()
 
 
-def _request(model: str = "primary") -> httpx.Request:
+def _request(model: str = "primary", headers: dict | None = None) -> httpx.Request:
     return httpx.Request(
         "POST",
         "https://example.local/v1/chat/completions",
         json={"model": model, "messages": [{"role": "user", "content": "hi"}]},
+        headers=headers or {},
     )
+
+
+def _sink(captured: list) -> SimpleNamespace:
+    return SimpleNamespace(send=lambda et, p: captured.append((et, p)))
 
 
 # --- config resolution -----------------------------------------------------
@@ -141,3 +152,140 @@ def test_try_fallback_priority_routing_end_to_end() -> None:
     resp = transport._try_fallback(_request("primary"), _meta(Priority.CRITICAL), None, None, _tracker(), {})
     assert resp is not None
     assert tried == ["prio1", "prio2"]
+
+
+# --- fallback budget alerts (regression) ------------------------------------
+def _budget_crossed(captured: list, timeout: float = 2.0) -> dict | None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        for event_type, payload in captured:
+            if event_type == "budget_crossed":
+                return payload
+        time.sleep(0.05)
+    return None
+
+
+def _alert_handler() -> httpx.MockTransport:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if json.loads(request.content)["model"] != "b1":
+            raise httpx.ConnectError("down")
+        return httpx.Response(
+            200, content=json.dumps({"ok": True, "usage": {"total_tokens": 1000}}).encode()
+        )
+
+    return httpx.MockTransport(handler)
+
+
+def _drain_circuit(transport, request: httpx.Request) -> httpx.Response:
+    # Probe until the circuit actually opens: failures are counted both in
+    # _send_with_retries and by the outer handler, so the exact call count
+    # that trips the breaker is an implementation detail. Once OPEN, the next
+    # request is short-circuited into the fallback chain.
+    circuit = transport.state.circuit
+    for _ in range(20):
+        if circuit.state is CircuitState.OPEN:
+            break
+        with pytest.raises(httpx.ConnectError):
+            transport.handle_request(request)
+    assert circuit.state is CircuitState.OPEN
+    return transport.handle_request(request)
+
+
+def test_fallback_success_fires_tenant_budget_alert() -> None:
+    cfg = BackstopConfig(fallback_chain=[{"model": "b1"}], retry_max_attempts=1, default_max_output_tokens=1)
+    state = BackstopState.create(1000, cfg)
+    get_ledger().register({"tenant-a": TenantBudget("tenant-a", 1000)})
+    captured: list = []
+
+    transport = BackstopTransport(state, _alert_handler())
+    transport._alerts = BudgetAlertManager(endpoints=[], sink=_sink(captured))
+    try:
+        with with_budget("tenant-a"):
+            resp = _drain_circuit(transport, _request("primary"))
+        assert json.loads(resp.content)["ok"] is True
+
+        payload = _budget_crossed(captured)
+        assert payload is not None, "fallback success must fire a budget_crossed alert"
+        assert payload["tenant_id"] == "tenant-a"
+        assert payload["used"] == 1000
+        assert payload["limit"] == 1000
+    finally:
+        reset_ledger()
+
+
+def test_fallback_success_fires_tenant_budget_alert_async() -> None:
+    cfg = BackstopConfig(fallback_chain=[{"model": "b1"}], retry_max_attempts=1, default_max_output_tokens=1)
+    state = BackstopState.create(1000, cfg)
+    get_ledger().register({"tenant-a": TenantBudget("tenant-a", 1000)})
+    captured: list = []
+
+    transport = AsyncBackstopTransport(state, _alert_handler())
+    transport._alerts = BudgetAlertManager(endpoints=[], sink=_sink(captured))
+
+    async def scenario() -> httpx.Response:
+        circuit = transport.state.circuit
+        with with_budget("tenant-a"):
+            for _ in range(20):
+                if circuit.state is CircuitState.OPEN:
+                    break
+                with pytest.raises(httpx.ConnectError):
+                    await transport.handle_async_request(_request("primary"))
+            assert circuit.state is CircuitState.OPEN
+            return await transport.handle_async_request(_request("primary"))
+
+    try:
+        resp = asyncio.run(scenario())
+        assert json.loads(resp.content)["ok"] is True
+
+        payload = _budget_crossed(captured)
+        assert payload is not None, "async fallback success must fire a budget_crossed alert"
+        assert payload["tenant_id"] == "tenant-a"
+        assert payload["used"] == 1000
+        assert payload["limit"] == 1000
+    finally:
+        reset_ledger()
+
+
+def test_fallback_success_fires_global_budget_alert() -> None:
+    cfg = BackstopConfig(fallback_chain=[{"model": "b1"}], retry_max_attempts=1, default_max_output_tokens=1)
+    state = BackstopState.create(1000, cfg)
+    captured: list = []
+
+    transport = BackstopTransport(state, _alert_handler())
+    transport._alerts = BudgetAlertManager(endpoints=[], sink=_sink(captured))
+
+    resp = _drain_circuit(transport, _request("primary"))
+    assert json.loads(resp.content)["ok"] is True
+
+    payload = _budget_crossed(captured)
+    assert payload is not None, "global-budget fallback success must fire a budget_crossed alert"
+    assert payload["tenant_id"] == ""
+    assert payload["used"] >= payload["limit"] == 1000
+    assert state.budget.spent == 1000
+    assert state.budget.remaining == 0
+
+
+def test_fallback_alert_uses_virtual_key_tenant() -> None:
+    cfg = BackstopConfig(
+        fallback_chain=[{"model": "b1"}],
+        retry_max_attempts=1,
+        default_max_output_tokens=1,
+        virtual_keys={"sk-vk-1": "tenant-vk"},
+    )
+    state = BackstopState.create(1000, cfg)
+    get_ledger().register({"tenant-vk": TenantBudget("tenant-vk", 1000)})
+    captured: list = []
+
+    transport = BackstopTransport(state, _alert_handler())
+    transport._alerts = BudgetAlertManager(endpoints=[], sink=_sink(captured))
+    try:
+        with with_budget("ctx-tenant"):
+            req_headers = {"X-Backstop-Key": "sk-vk-1"}
+            resp = _drain_circuit(transport, _request("primary", headers=req_headers))
+        assert json.loads(resp.content)["ok"] is True
+
+        payload = _budget_crossed(captured)
+        assert payload is not None, "fallback success must fire a budget_crossed alert"
+        assert payload["tenant_id"] == "tenant-vk"
+    finally:
+        reset_ledger()

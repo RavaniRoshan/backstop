@@ -9,6 +9,19 @@
 
 All notable changes to Backstop should be documented in this file.
 
+## 0.6.0 — Unreleased
+
+- Renamed the Python distribution to `backstop-ai`; `import backstop` and the
+  `backstop` / `wedge` console commands are unchanged.
+- Added repository metadata, Python classifiers, and package keywords; aligned
+  package and installer versions at `0.6.0`.
+- Corrected install examples and removed unsupported PyPI verification claims.
+  Historical install strings below are retained as history, not current guidance;
+  see [the install guide](docs/install.md).
+- Release preparation only: PyPI publication and clean-environment installation
+  from PyPI are pending. Provider SDK compatibility and enforcement-error
+  propagation remain unresolved; SDK dependency bounds are unchanged.
+
 ## Unreleased
 
 - **Custom dashboard hardened (visual audit follow-up).** Fixed the topbar

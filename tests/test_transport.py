@@ -1,4 +1,3 @@
-import asyncio
 import threading
 import time
 
@@ -6,9 +5,10 @@ import httpx
 import pytest
 
 from backstop import BackstopConfig
+from backstop._httpcompat import HTTPX2, module_root
 from backstop.exceptions import BudgetExceededError
 from backstop.state import BackstopState
-from backstop.transports import AsyncBackstopTransport, BackstopTransport
+from backstop.transports import AsyncBackstopTransport, BackstopTransport, _build_fallback_request
 
 
 def test_sync_transport_reconciles_usage_and_blocks_over_budget():
@@ -175,4 +175,61 @@ def test_sync_transport_retries_anthropic_529():
     assert client.post("/v1/messages", json={"model": "mock", "max_tokens": 1, "messages": []}).status_code == 200
     assert len(sleeps) == 1
     client.close()
+
+
+
+def test_httpx2_cached_response_replay_is_httpx2():
+    if HTTPX2 is None:
+        pytest.skip("httpx2 not installed")
+    calls = 0
+
+    def handler(request):
+        nonlocal calls
+        calls += 1
+        return HTTPX2.Response(200, json={"usage": {"total_tokens": 5}, "ok": True})
+
+    state = BackstopState.create(10, BackstopConfig(default_max_output_tokens=1, cache_enabled=True))
+    transport = BackstopTransport(state, HTTPX2.MockTransport(handler), compat=HTTPX2)
+    first = transport.handle_request(
+        HTTPX2.Request("POST", "https://mock.local/v1/responses", json={"input": "hello", "max_output_tokens": 1})
+    )
+    second = transport.handle_request(
+        HTTPX2.Request("POST", "https://mock.local/v1/responses", json={"input": "hello", "max_output_tokens": 1})
+    )
+    assert calls == 1
+    assert module_root(first) == "httpx2"
+    assert module_root(second) == "httpx2"
+
+
+def test_httpx2_fallback_request_is_httpx2():
+    if HTTPX2 is None:
+        pytest.skip("httpx2 not installed")
+    req = httpx.Request("POST", "https://example.local/v1/chat/completions", json={"model": "primary", "messages": []})
+    fb = _build_fallback_request(req, "alt", "https://fb.local", compat=HTTPX2)
+    assert fb is not None
+    assert module_root(fb) == "httpx2"
+
+
+def test_httpx2_readtimeout_is_retried():
+    if HTTPX2 is None:
+        pytest.skip("httpx2 not installed")
+    calls = 0
+
+    def handler(request):
+        nonlocal calls
+        calls += 1
+        raise HTTPX2.ReadTimeout("boom")
+
+    sleeps: list[float] = []
+    state = BackstopState.create(
+        100,
+        BackstopConfig(default_max_output_tokens=1, retry_max_attempts=2, aimd_adjustment_interval=0),
+    )
+    transport = BackstopTransport(state, HTTPX2.MockTransport(handler), sleep=sleeps.append, compat=HTTPX2)
+    with pytest.raises(HTTPX2.ReadTimeout):
+        transport.handle_request(
+            HTTPX2.Request("POST", "https://mock.local/v1/responses", json={"input": "x", "max_output_tokens": 1})
+        )
+    assert calls == 2
+    assert len(sleeps) == 1
 

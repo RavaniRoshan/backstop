@@ -10,18 +10,28 @@
 - Benchmarks: /docs/benchmarks.md
 - Examples: /examples/
 - Wedge (multi-agent diff tool): /examples/wedge_basic.py
-- Research: /docs/research/backstop-deep-research-2026-07-18.md
+- Dashboard: /docs/dashboard.md
+- Quick start: /docs/install.md
 
-## Install (verified)
+## Install (0.6.0 unreleased)
 
-- `pip install "backstop[anthropic]"` — one line, OpenAI + Anthropic (canonical)
-- `pip install backstop` — OpenAI only (add `[anthropic]` for Claude)
-- `pip install "backstop[redis]"` — shared/distributed budget across replicas
-- `pip install "backstop[otel]"` — OpenTelemetry metrics export
-- `pip install "backstop[fastapi]"` — multi-tenant FastAPI example dependency
-- `curl -fsSL https://raw.githubusercontent.com/RavaniRoshan/backstop/main/install.sh | sh` — one-command installer for users without pip/Python knowledge (secondary)
-- `pipx run backstop --help` / `pipx run wedge --help` — run without a permanent install
-- `pipx install backstop` — isolated persistent CLI (no npm)
+The distribution is `backstop-ai`; the import is `backstop`. PyPI publication
+and installation from PyPI are pending. Use the source instructions in
+/docs/install.md until publication; the registry commands below are prospective.
+The PyPI name `backstop` belongs to an unrelated project.
+
+SDK compatibility remains unresolved: current Anthropic SDKs can reject
+wrapping, and SDKs can relabel enforcement errors as connection errors.
+A successful install does not prove wrapping or enforcement works.
+
+- `pip install "backstop-ai[anthropic]"` — base library plus Anthropic SDK dependency
+- `pip install backstop-ai` — base dependencies, including OpenAI
+- `pip install "backstop-ai[redis]"` — shared/distributed budget dependency
+- `pip install "backstop-ai[otel]"` — OpenTelemetry metrics export
+- `pip install "backstop-ai[fastapi]"` — multi-tenant FastAPI example dependency
+- `install.sh` — secondary convenience installer; review /docs/install.md before use
+- `pipx run --spec backstop-ai backstop --help` / `pipx run --spec backstop-ai wedge --help` — temporary CLI environment
+- `pipx install backstop-ai` — isolated persistent CLI (no npm)
 
 ## Quick start
 
@@ -40,21 +50,28 @@ response = client.chat.completions.create(
 
 If you are an agent installing Backstop into a codebase:
 
-1. Detect the SDK in use (`openai` and/or `anthropic`).
-2. `pip install "backstop[anthropic]"` (or just `backstop` for OpenAI-only).
-3. Wrap the existing client with one line — **no call-site changes**:
-   `client = Backstop.wrap(client, budget=50_000)`.
-4. Validate with `backstop doctor` and prove overhead with `backstop benchmark`.
+1. Detect the SDK in use (`openai` and/or `anthropic`) and review known
+   compatibility limitations in /docs/install.md.
+2. Until publication, install from source as documented in /docs/install.md.
+   After publication, use `pip install "backstop-ai[anthropic]"` (or
+   `pip install backstop-ai` for the base dependencies).
+3. The integration API is `client = Backstop.wrap(client, budget=50_000)`;
+   verify it against your SDK rather than assuming compatibility.
+4. Check CLI entry points with `backstop --help`. `backstop doctor` currently
+   does not prove SDK wrapping or enforcement; `backstop benchmark` measures
+   local mock-transport overhead.
 5. For multi-replica deployments, add `[redis]` and
    `BackstopConfig(shared_budget=True, redis_url=...)` so one budget is
    enforced across processes.
 
-Backstop never changes your provider calls, adds no network hop, and
-exposes a safe default budget so a single `wrap()` line protects out of the box.
+Backstop integrates by wrapping the client's HTTP transport. Provider calls,
+network behavior, and default budgets are subject to the compatibility
+limitations documented in /docs/install.md.
 
 ## CLIs
 
-- `backstop doctor` — validate install, SDKs, keys, and a wrap smoke test.
+- `backstop doctor` — checks install, SDKs, and keys; its current wrap smoke
+  test does not prove that `Backstop.wrap()` works.
 - `backstop benchmark` — reproducible (seeded) overhead + scenario proof.
 - `backstop metrics` — Prometheus endpoint. `backstop real-openai` / `real-anthropic` — live smoke tests.
 - `wedge run task.yaml` — multi-agent convergence + per-runner budget proof.

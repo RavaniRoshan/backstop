@@ -1,81 +1,88 @@
 # Installing Backstop
 
-Backstop is a Python package (library + `backstop` / `wedge` CLIs). This page
-covers every supported install path, from a one-line end-user command to
-air-gapped enterprise deployment.
+Backstop's Python distribution is `backstop-ai`. The import remains
+`backstop`, and the console commands remain `backstop` and `wedge`.
+Python 3.10 or newer is required.
 
-> All commands below were verified against `backstop==0.5.0` by building the
-> wheel and installing it into a clean virtual environment.
+> **0.6.0 is unreleased.** PyPI publication and installation from PyPI have
+> not been verified. The registry commands below are for use after publication;
+> until then, use the source instructions. The PyPI name `backstop` belongs to
+> an unrelated project.
+>
+> SDK compatibility is unresolved: current Anthropic SDKs can reject wrapping,
+> and SDKs can relabel Backstop enforcement errors as connection errors.
+> Dependency bounds have not yet been changed. Installing successfully does
+> not prove provider compatibility or budget enforcement.
 
 ## End users
 
-### One line (recommended)
+### One line (after publication)
 
 ```bash
-pip install "backstop[anthropic]"
+pip install "backstop-ai[anthropic]"
 ```
 
-This installs the library plus Anthropic support in a single command. Use
-`pip install backstop` if you only need OpenAI.
+This installs the library plus the Anthropic SDK dependency. Use
+`pip install backstop-ai` for the base dependencies, including OpenAI.
 
-### One command (curl) — for users without pip/Python knowledge
+### Convenience installer (after publication)
 
-If you don't have pip set up (or would rather not think about it), this single
-command detects Python and installs Backstop for you:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/RavaniRoshan/backstop/main/install.sh | sh
-```
-
-It runs `pip install --user "backstop[anthropic]"` on your behalf. If Backstop
-isn't on PyPI yet, it falls back to installing from the GitHub repo and tells
-you so. Prefer to review the script before running it?
+The installer detects Python and invokes pip. It is not a substitute for
+resolving the compatibility limitations above. Review it before running:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/RavaniRoshan/backstop/main/install.sh -o install.sh
 sh install.sh
 ```
 
-> This is a **convenience** path. The canonical, reproducible install is still
-> `pip install "backstop[anthropic]"`. The script supports macOS and Linux;
-> on Windows use Python's official installer + `pip`.
+It runs `python3 -m pip install --user --upgrade "backstop-ai[anthropic]==0.6.0"`.
+If the PyPI install fails, it falls back to the GitHub repository's current
+source, which is not a pinned release. Set `BACKSTOP_NO_GITFALLBACK=1` to
+fail instead. This installer has not been run as part of 0.6.0 verification.
+
+> The script supports macOS and Linux; on Windows use Python's official
+> installer and `pip`. Prefer a virtual environment and the pip commands above
+> over the convenience installer.
 
 ### Per-feature extras
 
 ```bash
-pip install "backstop[metrics]"     # Prometheus metrics export
-pip install "backstop[anthropic]"   # Claude / Anthropic clients
-pip install "backstop[tokenizers]"  # tiktoken-based token estimation
-pip install "backstop[fastapi]"     # FastAPI metrics app mount
+pip install "backstop-ai[metrics]"     # Prometheus metrics export
+pip install "backstop-ai[anthropic]"   # Anthropic SDK dependency
+pip install "backstop-ai[tokenizers]"  # tiktoken-based token estimation
+pip install "backstop-ai[fastapi]"     # FastAPI dependency
+pip install "backstop-ai[redis]"       # Redis dependency
+pip install "backstop-ai[otel]"        # OpenTelemetry metrics export
 ```
 
-Extras are combinable: `pip install "backstop[anthropic,metrics]"`.
+Extras are combinable: `pip install "backstop-ai[anthropic,metrics]"`.
 
 ### Run without a permanent install (pipx run)
 
-If you have [pipx](https://pipx.pypa.io) installed, run either CLI without
-permanently installing anything — ideal for a quick try or for CI:
+After publication, if you have [pipx](https://pipx.pypa.io) installed, run
+either CLI in an ephemeral virtual environment. Specify the distribution
+explicitly because it differs from the console command names:
 
 ```bash
-pipx run backstop --help
-pipx run wedge --help
-pipx run wedge run task.yaml
+pipx run --spec backstop-ai backstop --help
+pipx run --spec backstop-ai wedge --help
+pipx run --spec "backstop-ai[anthropic]" wedge run task.yaml
 ```
 
-`pipx run` fetches the wheel from PyPI, runs it in an ephemeral virtualenv, and
-cleans up afterwards — no `curl | sh` bootstrap required.
+`pipx run` downloads the distribution from PyPI and uses a temporary environment
+(which pipx may cache) rather than installing the CLI permanently.
 
 ### Isolated persistent CLI (pipx)
 
 For the `backstop` and `wedge` commands specifically, install into an isolated
-environment so they never conflict with your project dependencies:
+environment so they do not share your project dependencies:
 
 ```bash
-pipx install backstop          # https://pipx.pypa.io
+pipx install backstop-ai          # https://pipx.pypa.io
 ```
 
 This exposes `backstop` and `wedge` on your `PATH`. Upgrade with
-`pipx upgrade backstop`; remove with `pipx uninstall backstop`.
+`pipx upgrade backstop-ai`; remove with `pipx uninstall backstop-ai`.
 
 > `pipx` is itself a Python package (`pip install --user pipx`), so this path
 > stays entirely within pip/PyPI — no external install script, no npm.
@@ -85,47 +92,54 @@ This exposes `backstop` and `wedge` on your `PATH`. Upgrade with
 ```bash
 git clone https://github.com/RavaniRoshan/backstop.git
 cd backstop
-pip install -e ".[test,metrics,anthropic]"
+python -m venv .venv
+# macOS/Linux; on Windows use .venv\Scripts\activate
+. .venv/bin/activate
+python -m pip install -e ".[test,metrics,anthropic]"
 ```
+
+Source installation does not resolve the SDK compatibility limitations above.
 
 ## Enterprises
 
 ### Internal PyPI mirror (Artifactory / DevPi / internal registry)
 
-Point pip at your mirror and install the same way:
+Once your mirror contains `backstop-ai` and its dependencies, point pip at it:
 
 ```bash
-pip install --index-url https://pypi.internal/simple "backstop[anthropic]"
+pip install --index-url https://pypi.internal/simple "backstop-ai[anthropic]"
 # or, for the isolated CLI
-pipx install --index-url https://pypi.internal/simple backstop
+pipx install --index-url https://pypi.internal/simple backstop-ai
 ```
 
 (`pypi.internal` stands in for Artifactory, DevPi, or any internal registry.)
 
-Add `--extra-index-url https://pypi.org/simple` only if your mirror proxies
-upstream.
+Configure upstream access through your mirror according to your organization's
+package-source policy.
 
-### Pinned, reproducible installs
+### Pinned installs (after publication)
 
 ```bash
-pip install "backstop[anthropic]==0.5.0"
+pip install "backstop-ai[anthropic]==0.6.0"
 # or, for the isolated CLI
-pipx install "backstop==0.5.0"
+pipx install "backstop-ai==0.6.0"
 ```
 
-For applications, commit a lockfile so every environment resolves identical
-versions (e.g. `pip-compile` from `pip-tools`, or your org's lock workflow).
+Pinning Backstop alone does not pin dependencies. For applications, commit a
+lockfile so environments resolve identical versions (e.g. `pip-compile` from
+`pip-tools`, or your organization's lock workflow).
 
 ### Air-gapped / vendor supply chain
 
-1. Build the wheel on a connected machine:
+1. Build the wheel from this source checkout on a connected machine with
+   the `build` package installed:
    ```bash
-   python -m build --wheel   # produces dist/backstop-0.5.0-py3-none-any.whl
-```
-2. Transfer `backstop-0.5.0-py3-none-any.whl` (plus its dependency wheels) to
-   the target and install:
-```bash
-   pip install ./backstop-0.5.0-py3-none-any.whl
+   python -m build --wheel   # expected: dist/backstop_ai-0.6.0-py3-none-any.whl
+   ```
+2. Transfer `backstop_ai-0.6.0-py3-none-any.whl` plus its dependency wheels to
+   a `wheelhouse` directory on the target and install without index access:
+   ```bash
+   pip install --no-index --find-links ./wheelhouse "backstop-ai==0.6.0"
    ```
 
 ### Server surface (metrics / Wedge harness)
@@ -137,16 +151,20 @@ platform teams, containerize the image and run:
 docker run -p 9090:9090 <your-registry>/backstop metrics
 ```
 
-This mirrors how gateway tools (BricksLLM, LiteLLM) are consumed in production.
+This is an example for an image you build, not a published Backstop image.
 
-## Verifying your install
+## Checking your install
 
 ```bash
-backstop --help     # lists: harness, metrics, real-openai, real-anthropic
-wedge --help        # lists: run
+backstop --help
+wedge --help
 python -c "import backstop; print(backstop.__version__)"
 ```
 
-> Note: `wedge` with `provider: anthropic` requires the `anthropic` extra.
-> On a base install you'll get a clear message:
-> `pip install "backstop[anthropic]"`. OpenAI-provider Wedge works without it.
+These commands check CLI entry points and the import version, not provider
+compatibility. The current `backstop doctor` smoke test is not sufficient to
+prove SDK wrapping or enforcement works.
+
+> `wedge` with `provider: anthropic` requires the `anthropic` extra:
+> `pip install "backstop-ai[anthropic]"`. The extra installs the SDK; it does
+> not resolve the known wrapping incompatibility.

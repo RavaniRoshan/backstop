@@ -15,8 +15,9 @@ jobs:
         # SDK versions tested must be compatible with httpx>=0.28 (which
         # removed the `proxies` kwarg). openai<1.90 and anthropic<0.40 pass
         # `proxies=None` internally and crash — so we test compatible majors.
-        openai-version: ["latest"]
-        anthropic-version: ["latest"]
+        openai-version: ["2.9.x", "3.14.x"]
+        anthropic-version: ["0.99", "1.6"]
+        # Include current tests for cross-compat checks
         include:
           - python-version: "3.12"
             openai-version: "1.90.0"
@@ -67,17 +68,21 @@ jobs:
       - name: Generate SBOM
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
-          cyclonedx-py environment -o sbom.json
-          echo "SBOM generated: $(wc -c < sbom.json) bytes"
+          cyclonedx-py environment -o dist/sbom.json
+          echo "SBOM generated: $(wc -c < dist/sbom.json) bytes"
       - name: Sign release artifacts (cosign)
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           COSIGN_EXPERIMENTAL: 1
         run: |
-          echo "${{ secrets.COSIGN_PRIVATE_KEY }}" > /tmp/cosign.key
-          cosign sign-blob --key /tmp/cosign.key dist/* --output signature.json
-          rm -f /tmp/cosign.key
-          echo "Artifact signatures written to signature.json"
+          if [[ -n "${{ secrets.COSIGN_PRIVATE_KEY }}" ]]; then
+            echo "${{ secrets.COSIGN_PRIVATE_KEY }}" > /tmp/cosign.key
+            cosign sign-blob --key /tmp/cosign.key dist/* --output dist/signature.json
+            rm -f /tmp/cosign.key
+            echo "Artifact signatures written to dist/signature.json"
+          else
+            echo "COSIGN_PRIVATE_KEY not set — skipping cosign signing with warning"
+          fi
       - name: Attest SLSA provenance
         if: startsWith(github.ref, 'refs/tags/v')
         uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.0.0
@@ -95,7 +100,7 @@ jobs:
           gh release create "${{ github.ref_name }}" \
             --repo "${{ github.repository }}" \
             --notes "Backstop ${{ github.ref_name }}" \
-            sbom.json signature.json
+            dist/sbom.json dist/signature.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Publish to PyPI

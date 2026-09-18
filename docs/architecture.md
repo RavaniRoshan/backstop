@@ -61,7 +61,7 @@ Backstop detects streaming requests and wraps response streams so budget reconci
 
 ## Metrics
 
-Prometheus metrics are optional through `backstop[metrics]`.
+Prometheus metrics are optional through `backstop-ai[metrics]`.
 
 Metrics cover:
 

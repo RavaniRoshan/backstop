@@ -1,5 +1,0 @@
-name: "Hello World OpenAI"
-prompt: "Refactor the main.py file to use a class-based approach."
-test_command: "pytest tests/"
-runners: 3
-provider: "openai"

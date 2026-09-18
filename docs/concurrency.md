@@ -45,7 +45,7 @@ For multi-replica / multi-process deployments, don't scale threads — scale
 processes and share **one** budget via Redis (Tier 1 / P1):
 
 ```bash
-pip install "backstop[redis]"
+pip install "backstop-ai[redis]"
 ```
 
 ```python

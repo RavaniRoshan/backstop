@@ -3,22 +3,39 @@ requires = ["hatchling>=1.24"]
 build-backend = "hatchling.build"
 
 [project]
-name = "backstop"
-version = "0.5.0"
+name = "backstop-ai"
+version = "0.6.0"
 description = "In-process OpenAI SDK backpressure, budgets, retries, circuit breaking, and metrics."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "Backstop Contributors" }]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development :: Libraries",
+]
+keywords = ["llm", "openai", "anthropic", "budgets", "guardrails", "backpressure", "retries", "circuit-breaker"]
 dependencies = [
   "httpx>=0.27",
   "openai>=1.0",
   "pyyaml>=6.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/RavaniRoshan/backstop"
+Repository = "https://github.com/RavaniRoshan/backstop"
+Issues = "https://github.com/RavaniRoshan/backstop/issues"
+Changelog = "https://github.com/RavaniRoshan/backstop/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/RavaniRoshan/backstop/blob/main/docs/install.md"
+
 [project.optional-dependencies]
 metrics = ["prometheus-client>=0.20"]
-anthropic = ["anthropic>=0.40"]
+anthropic = ["anthropic>=0.99,<1.7"]
 tokenizers = ["tiktoken>=0.7"]
 fastapi = ["fastapi>=0.110"]
 redis = ["redis>=5"]
@@ -33,6 +50,9 @@ test = [
 [project.scripts]
 backstop = "backstop.cli:main"
 wedge = "wedge.cli:main"
+
+[tool.hatch.build.targets.sdist]
+exclude = ["/PLAN.md", "/.agents", "/docs/internal"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/backstop", "src/wedge"]

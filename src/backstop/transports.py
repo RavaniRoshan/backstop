@@ -7,9 +7,10 @@ from collections.abc import Awaitable, Callable
 
 import httpx
 
+from ._httpcompat import HTTPX, _HttpCompat
 from .budget import Reservation
 from .cache import ResponseCache
-from .circuit import CircuitState
+from .circuit import CircuitBreaker, CircuitState
 from .config import BackstopConfig, Priority
 from .exceptions import (
     BudgetExceededError,
@@ -61,12 +62,15 @@ def _build_fallback_request(
     request: httpx.Request,
     model: str,
     base_url: str | None,
+    *,
+    compat: _HttpCompat | None = None,
 ) -> httpx.Request | None:
     """Clone ``request`` pointing at a fallback target.
 
     Rewrites the request body's ``model`` to ``model`` and, when ``base_url`` is
     set, repoints the URL. Returns ``None`` when the request body isn't JSON.
     """
+    compat = compat or HTTPX
     body = _json_body(request)
     if not isinstance(body, dict):
         return None
@@ -80,25 +84,28 @@ def _build_fallback_request(
         base = base_url.rstrip("/")
         path = request.url.raw_path.decode("ascii", "replace")
         try:
-            url = httpx.URL(base + path)
+            url = compat.URL(base + path)
         except Exception:
             return None
     else:
         url = request.url
-    return httpx.Request(request.method, url, content=new_content, headers=headers)
+    return compat.Request(request.method, url, content=new_content, headers=headers)
 
 
 def _build_cached_response(
     content: bytes,
     usage: int,
     headers: dict[str, str] | None,
+    *,
+    compat: _HttpCompat | None = None,
 ) -> httpx.Response:
+    compat = compat or HTTPX
     clean_headers = {
         k: v
         for k, v in (headers or {}).items()
         if k.lower() not in _REPLAY_STRIP_HEADERS
     }
-    return httpx.Response(
+    return compat.Response(
         200,
         content=content,
         headers=clean_headers,
@@ -160,9 +167,11 @@ class BackstopTransport(httpx.BaseTransport):
         transport: httpx.BaseTransport | None = None,
         *,
         sleep: RetrySleep | None = None,
+        compat: _HttpCompat | None = None,
     ) -> None:
         self.state = state
-        self._transport = transport or httpx.HTTPTransport()
+        self._compat = compat or HTTPX
+        self._transport = transport or self._compat.HTTPTransport()
         self._sleep = sleep or time.sleep
         self._metrics = get_metrics()
         from .rollout import ShadowCollector
@@ -197,7 +206,7 @@ class BackstopTransport(httpx.BaseTransport):
                 if semantic:
                     self._metrics.call("cache_semantic_hits")
                 tracker.completed_at = time.monotonic()
-                response = _build_cached_response(content, usage, headers)
+                response = _build_cached_response(content, usage, headers, compat=self._compat)
                 backstop_meta = tracker.build_meta(
                     estimated_tokens=meta.estimated_tokens,
                     actual_tokens=usage,
@@ -360,7 +369,8 @@ class BackstopTransport(httpx.BaseTransport):
             return response
         except CircuitBreakerOpenError:
             fallback = self._try_fallback(
-                request, meta, reservation, tenant_budget, tracker, hook_metadata, circuit
+                request, meta, reservation, tenant_budget, tracker, hook_metadata, circuit,
+                tenant_id=tenant_id,
             )
             if fallback is not None:
                 self._audit("fallback", "circuit_open", meta, tenant_id=tenant_id)
@@ -406,6 +416,7 @@ class BackstopTransport(httpx.BaseTransport):
         tracker: object,
         hook_metadata: dict,
         circuit: CircuitBreaker | None = None,
+        tenant_id: str | None = None,
     ) -> httpx.Response | None:
         """Attempt the configured fallback chain when the circuit is open.
 
@@ -418,7 +429,9 @@ class BackstopTransport(httpx.BaseTransport):
         if not targets:
             return None
         for target in targets:
-            fb_request = _build_fallback_request(request, target["model"], target.get("base_url"))
+            fb_request = _build_fallback_request(
+                request, target["model"], target.get("base_url"), compat=self._compat
+            )
             if fb_request is None:
                 continue
             try:
@@ -433,7 +446,9 @@ class BackstopTransport(httpx.BaseTransport):
             self._record_outcome(response.status_code, success=success, circuit=circuit)
             if self._alerts is not None:
                 _b = tenant_budget if tenant_budget is not None else self.state.budget
-                _dispatch_alert(self._alerts, tenant_id, getattr(_b, "used", 0), getattr(_b, "limit", 0))
+                _used = getattr(_b, "spent", None) or getattr(_b, "used", 0)
+                _lim = getattr(_b, "total", None) or getattr(_b, "limit_tokens", None) or getattr(_b, "limit", 0)
+                _dispatch_alert(self._alerts, tenant_id, _used, _lim)
             tracker.completed_at = time.monotonic()
             self._observe_request(meta.endpoint, meta.priority, tracker.created_at, "fallback")
             backstop_meta = tracker.build_meta(
@@ -504,7 +519,7 @@ class BackstopTransport(httpx.BaseTransport):
 
             try:
                 response = self._transport.handle_request(request)
-            except (httpx.TimeoutException, httpx.TransportError):
+            except (self._compat.TimeoutException, self._compat.TransportError):
                 self._retry_count += 1
                 self._after_attempt(success=False, pressure=True, circuit=circuit)
                 if attempt >= self.state.config.retry_max_attempts - 1:
@@ -624,9 +639,11 @@ class AsyncBackstopTransport(httpx.AsyncBaseTransport):
         transport: httpx.AsyncBaseTransport | None = None,
         *,
         sleep: AsyncRetrySleep | None = None,
+        compat: _HttpCompat | None = None,
     ) -> None:
         self.state = state
-        self._transport = transport or httpx.AsyncHTTPTransport()
+        self._compat = compat or HTTPX
+        self._transport = transport or self._compat.AsyncHTTPTransport()
         self._sleep = sleep or asyncio.sleep
         self._metrics = get_metrics()
         from .rollout import ShadowCollector
@@ -659,7 +676,7 @@ class AsyncBackstopTransport(httpx.AsyncBaseTransport):
                 if semantic:
                     self._metrics.call("cache_semantic_hits")
                 tracker.completed_at = time.monotonic()
-                response = _build_cached_response(content, usage, headers)
+                response = _build_cached_response(content, usage, headers, compat=self._compat)
                 backstop_meta = tracker.build_meta(
                     estimated_tokens=meta.estimated_tokens,
                     actual_tokens=usage,
@@ -821,7 +838,8 @@ class AsyncBackstopTransport(httpx.AsyncBaseTransport):
             return response
         except CircuitBreakerOpenError:
             fallback = await self._try_fallback(
-                request, meta, reservation, tenant_budget, tracker, hook_metadata, circuit
+                request, meta, reservation, tenant_budget, tracker, hook_metadata, circuit,
+                tenant_id=tenant_id,
             )
             if fallback is not None:
                 return fallback
@@ -852,13 +870,16 @@ class AsyncBackstopTransport(httpx.AsyncBaseTransport):
         tracker: object,
         hook_metadata: dict,
         circuit: CircuitBreaker | None = None,
+        tenant_id: str | None = None,
     ) -> httpx.Response | None:
         config = self.state.config
         targets = config.fallback_targets(getattr(meta, "priority", None))
         if not targets:
             return None
         for target in targets:
-            fb_request = _build_fallback_request(request, target["model"], target.get("base_url"))
+            fb_request = _build_fallback_request(
+                request, target["model"], target.get("base_url"), compat=self._compat
+            )
             if fb_request is None:
                 continue
             try:
@@ -873,7 +894,9 @@ class AsyncBackstopTransport(httpx.AsyncBaseTransport):
             self._record_outcome(response.status_code, success=success, circuit=circuit)
             if self._alerts is not None:
                 _b = tenant_budget if tenant_budget is not None else self.state.budget
-                _dispatch_alert(self._alerts, tenant_id, getattr(_b, "used", 0), getattr(_b, "limit", 0))
+                _used = getattr(_b, "spent", None) or getattr(_b, "used", 0)
+                _lim = getattr(_b, "total", None) or getattr(_b, "limit_tokens", None) or getattr(_b, "limit", 0)
+                _dispatch_alert(self._alerts, tenant_id, _used, _lim)
             tracker.completed_at = time.monotonic()
             self._observe_request(meta.endpoint, meta.priority, tracker.created_at, "fallback")
             backstop_meta = tracker.build_meta(
@@ -957,7 +980,7 @@ class AsyncBackstopTransport(httpx.AsyncBaseTransport):
 
             try:
                 response = await self._transport.handle_async_request(request)
-            except (httpx.TimeoutException, httpx.TransportError):
+            except (self._compat.TimeoutException, self._compat.TransportError):
                 self._retry_count += 1
                 self._after_attempt(success=False, pressure=True, circuit=circuit)
                 if attempt >= self.state.config.retry_max_attempts - 1:

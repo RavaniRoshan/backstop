@@ -21,3 +21,11 @@ wedge_report.md
 benchmarks/competitive/compose/
 benchmarks/competitive/*.json
 benchmarks/competitive/__pycache__/
+
+# Internal working artifacts — never publish (see PLAN.md §0 rule 9)
+artifacts/
+agent/
+.claude/
+.agents/skills/
+skills-lock.json
+docs/internal/

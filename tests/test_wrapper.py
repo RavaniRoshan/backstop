@@ -1,7 +1,10 @@
+import asyncio
+
 import pytest
 
 from backstop import Backstop
-from backstop.exceptions import UnsupportedClientError
+from backstop._httpcompat import compat_for, module_root
+from backstop.exceptions import BudgetExceededError, UnsupportedClientError
 
 
 def test_wrap_rejects_unsupported_client():
@@ -45,4 +48,122 @@ def test_wrap_anthropic_sets_backstop_state():
 def test_wrap_anthropic_rejects_invalid():
     with pytest.raises(UnsupportedClientError):
         Backstop.wrap("not-a-client")
+
+
+def _provider_spec(provider):
+    if provider == "openai":
+        return {
+            "module": "openai",
+            "sync_cls": "OpenAI",
+            "async_cls": "AsyncOpenAI",
+            "call": lambda client: client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": "hi"}],
+            ),
+            "preflight_budget": 1000,
+            "base_error": "OpenAIError",
+        }
+    return {
+        "module": "anthropic",
+        "sync_cls": "Anthropic",
+        "async_cls": "AsyncAnthropic",
+        "call": lambda client: client.messages.create(
+            model="claude-sonnet-4-5",
+            max_tokens=10,
+            messages=[{"role": "user", "content": "hi"}],
+        ),
+        "preflight_budget": 1,
+        "base_error": "AnthropicError",
+    }
+
+
+def _sentinel_transport(compat, async_mode):
+    calls = []
+
+    if async_mode:
+
+        class SentinelTransport(compat.AsyncBaseTransport):
+            async def handle_async_request(self, request):
+                calls.append(request)
+                raise BudgetExceededError("transport raised")
+
+    else:
+
+        class SentinelTransport(compat.BaseTransport):
+            def handle_request(self, request):
+                calls.append(request)
+                raise BudgetExceededError("transport raised")
+
+    return SentinelTransport(), calls
+
+
+def _make_client(sdk, spec, async_mode, http_client=None):
+    kwargs = {"api_key": "sk-test"}
+    if http_client is not None:
+        kwargs["http_client"] = http_client
+    name = spec["async_cls"] if async_mode else spec["sync_cls"]
+    return getattr(sdk, name)(**kwargs)
+
+
+def _close_http(client, async_mode):
+    if async_mode:
+        asyncio.run(client._client.aclose())
+    else:
+        client._client.close()
+
+
+def _invoke(client, spec, async_mode):
+    result = spec["call"](client)
+    if async_mode:
+        asyncio.run(result)
+
+
+@pytest.mark.parametrize("provider", ["openai", "anthropic"])
+@pytest.mark.parametrize("async_mode", [False, True])
+def test_budget_error_from_wrapped_transport_propagates(provider, async_mode):
+    spec = _provider_spec(provider)
+    sdk = pytest.importorskip(spec["module"])
+    probe = _make_client(sdk, spec, async_mode)
+    compat = compat_for(probe._client)
+    expected_root = module_root(probe._client)
+    _close_http(probe, async_mode)
+
+    sentinel, calls = _sentinel_transport(compat, async_mode)
+    http_cls = compat.AsyncClient if async_mode else compat.Client
+    client = _make_client(sdk, spec, async_mode, http_cls(transport=sentinel))
+    wrapped = Backstop.wrap(client, budget=1_000_000)
+    try:
+        assert module_root(wrapped._client) == expected_root
+        assert wrapped._client._transport._transport is sentinel
+        with pytest.raises(BudgetExceededError, match="transport raised") as excinfo:
+            _invoke(wrapped, spec, async_mode)
+        assert isinstance(excinfo.value, getattr(sdk, spec["base_error"]))
+        assert len(calls) == 1
+    finally:
+        _close_http(wrapped, async_mode)
+        _close_http(client, async_mode)
+
+
+@pytest.mark.parametrize("provider", ["openai", "anthropic"])
+@pytest.mark.parametrize("async_mode", [False, True])
+def test_preflight_budget_rejects_before_transport(provider, async_mode):
+    spec = _provider_spec(provider)
+    sdk = pytest.importorskip(spec["module"])
+    probe = _make_client(sdk, spec, async_mode)
+    compat = compat_for(probe._client)
+    expected_root = module_root(probe._client)
+    _close_http(probe, async_mode)
+
+    sentinel, calls = _sentinel_transport(compat, async_mode)
+    http_cls = compat.AsyncClient if async_mode else compat.Client
+    client = _make_client(sdk, spec, async_mode, http_cls(transport=sentinel))
+    wrapped = Backstop.wrap(client, budget=spec["preflight_budget"])
+    try:
+        assert module_root(wrapped._client) == expected_root
+        with pytest.raises(BudgetExceededError, match="exceeds remaining budget"):
+            _invoke(wrapped, spec, async_mode)
+        assert calls == []
+    finally:
+        _close_http(wrapped, async_mode)
+        _close_http(client, async_mode)
 

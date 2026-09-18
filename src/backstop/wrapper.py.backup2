@@ -103,19 +103,21 @@ def _clone_openai_client(client: Any, http_client: Any) -> Any:
     if hasattr(client, "with_options"):
         for kwargs in (
             {"http_client": http_client, "max_retries": 0},
+            {"http_client": http_client},
         ):
             try:
                 return client.with_options(**kwargs)
             except TypeError:
                 continue
 
-    kwargs: dict[str, Any] = {"http_client": http_client, "max_retries": 0}
+    kwargs: dict[str, Any] = {"http_client": http_client}
     for attr in (
         "api_key",
         "organization",
         "project",
         "base_url",
         "timeout",
+        "max_retries",
         "default_headers",
         "default_query",
     ):
@@ -133,17 +135,19 @@ def _clone_anthropic_client(client: Any, http_client: Any) -> Any:
     if hasattr(client, "copy"):
         for kwargs in (
             {"http_client": http_client, "max_retries": 0},
+            {"http_client": http_client},
         ):
             try:
                 return client.copy(**kwargs)
             except TypeError:
                 continue
 
-    kwargs: dict[str, Any] = {"http_client": http_client, "max_retries": 0}
+    kwargs: dict[str, Any] = {"http_client": http_client}
     for attr in (
         "api_key",
         "base_url",
         "timeout",
+        "max_retries",
         "default_headers",
         "default_query",
     ):
@@ -161,8 +165,9 @@ def _build_sync_anthropic_http_client(client: Any, state: BackstopState) -> Any:
     base = getattr(client, "_client", None)
     compat = compat_for(base)
     underlying = _sync_transport_from(base)
-    # The Anthropic SDK accepts http_client and max_retries.
-    # BackstopTransport handles retries internally; we don't pass max_retries to the HTTP client.
+    # The Anthropic SDK only accepts http_client as a constructor argument.
+    # max_retries is not supported by the Client constructor, so we rely on the
+    # BackstopTransport's own retry logic.
     return compat.Client(
         transport=BackstopTransport(state, underlying, compat=compat),
         timeout=_timeout_from(base, compat),
@@ -174,8 +179,9 @@ def _build_async_anthropic_http_client(client: Any, state: BackstopState) -> Any
     base = getattr(client, "_client", None)
     compat = compat_for(base)
     underlying = _async_transport_from(base)
-    # The Anthropic SDK accepts http_client and max_retries.
-    # BackstopTransport handles retries internally; we don't pass max_retries to the HTTP client.
+    # The Anthropic SDK only accepts http_client as a constructor argument.
+    # max_retries is not supported by the AsyncClient constructor, so we rely on
+    # the AsyncBackstopTransport's own retry logic.
     return compat.AsyncClient(
         transport=AsyncBackstopTransport(state, underlying, compat=compat),
         timeout=_timeout_from(base, compat),
@@ -190,9 +196,13 @@ def _build_sync_http_client(client: Any, state: BackstopState) -> Any:
     # OpenAI Client accepts max_retries, so we use it for Backstop's retry logic.
     # httpx/httpx2 Client does NOT accept max_retries, so we do not pass it here.
     return compat.Client(
+
         transport=BackstopTransport(state, underlying, compat=compat),
+
         timeout=_timeout_from(base, compat),
+
         base_url=_base_url_from(base),
+
     )
 
 
@@ -203,9 +213,13 @@ def _build_async_http_client(client: Any, state: BackstopState) -> Any:
     # OpenAI AsyncClient accepts max_retries, so we use it for Backstop's retry logic.
     # httpx/httpx2 AsyncClient does NOT accept max_retries, so we do not pass it here.
     return compat.AsyncClient(
+
         transport=AsyncBackstopTransport(state, underlying, compat=compat),
+
         timeout=_timeout_from(base, compat),
+
         base_url=_base_url_from(base),
+
     )
 
 

@@ -66,7 +66,7 @@ screenshot cannot be mistaken for more than it is.
 The dashboard renders state the process already holds. `Metrics.call()` — the
 single choke point every instrumented code path already goes through — feeds a
 telemetry sink (`backstop.telemetry`) *before* the optional Prometheus path, so
-the built-in dashboard works in a bare `pip install backstop` with nothing
+the built-in dashboard works in a bare `pip install backstop-ai` with nothing
 installed beyond the stdlib.
 
 Deliberate constraints:

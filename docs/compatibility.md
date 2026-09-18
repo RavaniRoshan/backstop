@@ -2,6 +2,11 @@
 
 Backstop is early-stage. This matrix documents the intended support surface and should be updated whenever provider SDK behavior changes.
 
+> 0.6.0 is unreleased. The intended support below is not a verified SDK-version
+> matrix. Current Anthropic SDK wrapping and enforcement-error propagation have
+> known failures; see [installation limitations](install.md). SDK dependency
+> bounds remain unchanged pending the compatibility decision.
+
 ## Python
 
 | Python | Status |
@@ -16,20 +21,20 @@ Backstop is early-stage. This matrix documents the intended support surface and 
 | --- | --- | --- | --- |
 | OpenAI | `openai.OpenAI` | Supported | Sync client wrapping through `httpx` transport injection |
 | OpenAI | `openai.AsyncOpenAI` | Supported | Async client wrapping through `httpx` transport injection |
-| Anthropic | `anthropic.Anthropic` | Supported | Optional dependency via `backstop[anthropic]` |
-| Anthropic | `anthropic.AsyncAnthropic` | Supported | Optional dependency via `backstop[anthropic]` |
+| Anthropic | `anthropic.Anthropic` | Supported | Optional dependency via `backstop-ai[anthropic]` |
+| Anthropic | `anthropic.AsyncAnthropic` | Supported | Optional dependency via `backstop-ai[anthropic]` |
 
 ## Optional Extras
 
 | Extra | Purpose |
 | --- | --- |
-| `backstop[metrics]` | Prometheus metrics export |
-| `backstop[anthropic]` | Anthropic SDK support |
-| `backstop[redis]` | Shared/distributed budget across replicas |
-| `backstop[otel]` | OpenTelemetry metrics export |
-| `backstop[fastapi]` | Gateway/sidecar mode |
-| `backstop[tokenizers]` | Optional token counting support |
-| `backstop[test]` | Test dependencies |
+| `backstop-ai[metrics]` | Prometheus metrics export |
+| `backstop-ai[anthropic]` | Anthropic SDK support |
+| `backstop-ai[redis]` | Shared/distributed budget across replicas |
+| `backstop-ai[otel]` | OpenTelemetry metrics export |
+| `backstop-ai[fastapi]` | Gateway/sidecar mode |
+| `backstop-ai[tokenizers]` | Optional token counting support |
+| `backstop-ai[test]` | Test dependencies |
 
 ## Supported Behavior
 
