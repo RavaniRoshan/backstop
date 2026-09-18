@@ -52,11 +52,11 @@ Backstop is a genuinely well-built in-process LLM guardrail (~10.3k LOC Python +
 | 1 — Make the guardrail work | H2–H10 | complete (local + CI + PyPI) | 27 / 27 | 1.5.1 clean-PyPI install verified 2026-09-18 — see §19 |
 | **H10 GO/NO-GO GATE** | H10 | PASSED | 5 / 5 | G1–G5 all passed; httpx2 shipped recorded — see §9 |
 | 2 — 30-second proof | H10–H16 | **complete** | 12 / 12 | 2.1.1–2.1.6 + 2.2.1–2.2.2 + 2.3.1–2.3.2 done (commit 14f4f10); verify 8/8 PASS, demo 7/10 blocked — see §19 |
-| 3 — Surface + credibility | H16–H24 | in progress | 15 / 30 | +3.4.4 done; 3.3 site work, 3.4.1/3.4.6 remain — see §19 |
+| 3 — Surface + credibility | H16–H24 | in progress | 16 / 30 | +3.4.4 done; 3.3 site work, 3.4.1/3.4.6 remain — see §19 |
 | 4 — Zero-friction try | H24–H32 | in progress | 10 / 15 | +4.1.3/4.1.4 done (commit fba1e65); 4.3/4.4 remain — see §19 |
 | 5 — Launch assets | H32–H40 | in progress | 5 / 14 | 5.1.1–5.1.4 + 5.2.5 done (drafts in docs/internal); scheduling and posting remain — see §19 |
 | 6 — Ship, watch, respond | H40–H48 | not started | 0 / 8 | — |
-| **TOTAL (ordinary phases 0–6)** | 48h | in progress | **87 / 124** | Phase 0: 18 done. Phase 1: 27 done. Phase 2: 12 done. Phase 3: 15 done. Phase 4: 10 done. Phase 5: 5 done. |
+| **TOTAL (ordinary phases 0–6)** | 48h | in progress | **88 / 124** | Phase 0: 18 done. Phase 1: 27 done. Phase 2: 12 done. Phase 3: 16 done. Phase 4: 10 done. Phase 5: 5 done. |
 
 *(Explicit numbered-checkbox count: Phase 0 = 18, Phase 1 = 27, Phase 2 = 12, Phase 3 = 30, Phase 4 = 15, Phase 5 = 14, Phase 6 = 8; total = 124. Only `[x]` counts as done. The two `[-]` numbered tasks remain in Phase 3's total but are reported separately as dropped. H10 checks and conditional fallback tasks, §15 hard gates/postponed items, and §18 criteria are excluded from ordinary-phase totals.)*
 
@@ -454,8 +454,8 @@ Backstop is a genuinely well-built in-process LLM guardrail (~10.3k LOC Python +
 - [ ] **3.4.1** Fix `docs/install.md`'s false claim that everything was verified against `backstop==0.5.0` on PyPI
 - [-] **3.4.2** Remove the "10× better" framing from `docs/competitive-benchmark-*.md` and `docs/deep-research-10x-*.md` (keep the facts, drop the adjectives)
   - SUPERSEDED 2026-09-17: both target files were deleted outright; README links repaired.
-- [!] **3.4.3** **TypeScript:** if publishing takes under ~1 hour, publish as unscoped **`backstop-ai`** on npm (matches the Python name; verified free). Otherwise remove every TS reference from the README and the site repo
-  - BLOCKED: npm publish requires owner action. TS references removed from README.
+- [x] **3.4.3** **TypeScript:** if publishing takes under ~1 hour, publish as unscoped **`backstop-ai`** on npm (matches the Python name; verified free). Otherwise remove every TS reference from the README and the site repo
+  - done 2026-09-18: renamed `ts/backstop` to `backstop-ai@0.6.0` (commit 67edb5d, build + 17/17 tests green); first two publishes 403'd (token without 2FA-bypass); published with owner-supplied bypass token → `+ backstop-ai@0.6.0`; clean `npm install backstop-ai` in /tmp/npm-verify imports with real exports. Site TS column already hides npm honestly (points at `ts/backstop` source).
 - [x] **3.4.4** Confirm zero advertised artifacts are 404 (npm, PyPI, docs links, images)
   - done 2026-09-18: all 5 README URLs checked with curl → all 200 OK. PyPI/npm not yet published (not advertised in README). No 404s.
 - [x] **3.4.5** Add `docs/quickstart.md` (the 60-second path) and `docs/sdk-matrix.md` (exactly which SDK versions work)
@@ -957,4 +957,10 @@ gh release view v0.6.0     # confirm artifacts + notes exist
 - Found + fixed: tag push ran NO workflow — `ci.yml` only listened on `branches: [main]`, so the `refs/tags/v` release steps were dead code. Fixed in bfa58c0 (`tags: ['v*']`); v0.6.0 Release created manually. Next version tag exercises the fixed path.
 - Blocked: npm `backstop-ai` publish → 403 "You may not perform that action with these credentials" (token lacks publish rights or 2FA enforced). TS rename to `backstop-ai@0.6.0` committed (67edb5d, tests 17/17) — publish needs owner `npm login` refresh / automation token / OTP.
 - Next: owner Vercel deploy; HN/Reddit/dev.to (human-only); rotate/revoke the pasted PyPI token if desired (also stored as `PYPI_API_TOKEN` repo secret for CI).
+- Dashboard updated: yes.
+
+### 2026-09-18 12:22 UTC — 3.4.3 NPM PUBLISH
+- Completed: 3.4.3. Phase 3 now 16/30, total 88/124.
+- Verified: `npm publish --access public` → `+ backstop-ai@0.6.0`; after ~60s registry lag `npm view backstop-ai version` → `0.6.0`; clean `npm install backstop-ai` in /tmp/npm-verify → imports with exports `AIMDController,AgentGuard,AuditLog,Budget,BudgetExceededError,...`
+- Note: first token 403'd twice (no 2FA-bypass); owner-supplied granular bypass token succeeded. Token lives in ~/.npmrc as the npm login (standard).
 - Dashboard updated: yes.
