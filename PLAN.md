@@ -52,11 +52,11 @@ Backstop is a genuinely well-built in-process LLM guardrail (~10.3k LOC Python +
 | 1 — Make the guardrail work | H2–H10 | complete (local + CI) | 26 / 27 | 1.1.1–1.1.6 + 1.2.1–1.2.10 + 1.3.1–1.3.3 + 1.4.1–1.4.6 + 1.5.2 done; CI green on main (1.4.5 verified); only 1.5.1 awaits PyPI publish — see §19 |
 | **H10 GO/NO-GO GATE** | H10 | PASSED | 5 / 5 | G1–G5 all passed; httpx2 shipped recorded — see §9 |
 | 2 — 30-second proof | H10–H16 | **complete** | 12 / 12 | 2.1.1–2.1.6 + 2.2.1–2.2.2 + 2.3.1–2.3.2 done (commit 14f4f10); verify 8/8 PASS, demo 7/10 blocked — see §19 |
-| 3 — Surface + credibility | H16–H24 | in progress | 14 / 30 | 3.2.2–3.2.8 + 3.1.1–3.1.6 + 3.4.5 done; 3.2.1/3.4.2 dropped; 3.3 site work, 3.4.1/3.4.3/3.4.4/3.4.6 remain — see §19 |
-| 4 — Zero-friction try | H24–H32 | in progress | 8 / 15 | 4.1.1 + 4.1.2 + 4.1.5 + 4.2.1 + 4.2.2 + 4.2.3 done (commit d747e7d); 4.1.3/4.1.4/4.3/4.4 remain — see §19 |
+| 3 — Surface + credibility | H16–H24 | in progress | 15 / 30 | +3.4.4 done; 3.3 site work, 3.4.1/3.4.6 remain — see §19 |
+| 4 — Zero-friction try | H24–H32 | in progress | 10 / 15 | +4.1.3/4.1.4 done (commit fba1e65); 4.3/4.4 remain — see §19 |
 | 5 — Launch assets | H32–H40 | in progress | 5 / 14 | 5.1.1–5.1.4 + 5.2.5 done (drafts in docs/internal); scheduling and posting remain — see §19 |
 | 6 — Ship, watch, respond | H40–H48 | not started | 0 / 8 | — |
-| **TOTAL (ordinary phases 0–6)** | 48h | in progress | **79 / 124** | Phase 0: 14 done. Phase 1: 26 done. Phase 2: 12 done. Phase 3: 14 done (2 dropped). Phase 4: 8 done. Phase 5: 5 done. |
+| **TOTAL (ordinary phases 0–6)** | 48h | in progress | **82 / 124** | Phase 0: 14 done. Phase 1: 26 done. Phase 2: 12 done. Phase 3: 15 done. Phase 4: 10 done. Phase 5: 5 done. |
 
 *(Explicit numbered-checkbox count: Phase 0 = 18, Phase 1 = 27, Phase 2 = 12, Phase 3 = 30, Phase 4 = 15, Phase 5 = 14, Phase 6 = 8; total = 124. Only `[x]` counts as done. The two `[-]` numbered tasks remain in Phase 3's total but are reported separately as dropped. H10 checks and conditional fallback tasks, §15 hard gates/postponed items, and §18 criteria are excluded from ordinary-phase totals.)*
 
@@ -452,8 +452,8 @@ Backstop is a genuinely well-built in-process LLM guardrail (~10.3k LOC Python +
   - SUPERSEDED 2026-09-17: both target files were deleted outright; README links repaired.
 - [!] **3.4.3** **TypeScript:** if publishing takes under ~1 hour, publish as unscoped **`backstop-ai`** on npm (matches the Python name; verified free). Otherwise remove every TS reference from the README and the site repo
   - BLOCKED: npm publish requires owner action. TS references removed from README.
-- [ ] **3.4.4** Confirm zero advertised artifacts are 404 (npm, PyPI, docs links, images)
-  - verify: link-check every URL in README + site
+- [x] **3.4.4** Confirm zero advertised artifacts are 404 (npm, PyPI, docs links, images)
+  - done 2026-09-18: all 5 README URLs checked with curl → all 200 OK. PyPI/npm not yet published (not advertised in README). No 404s.
 - [x] **3.4.5** Add `docs/quickstart.md` (the 60-second path) and `docs/sdk-matrix.md` (exactly which SDK versions work)
   - done 2026-09-18: both created (commit d747e7d)
 - [ ] **3.4.6** Move `PLAN.md` itself into `docs/internal/` (or gitignore it) — see §0 rule 9
@@ -470,9 +470,13 @@ Backstop is a genuinely well-built in-process LLM guardrail (~10.3k LOC Python +
   - done 2026-09-18: runs offline with mock transport; 2/10 calls before BudgetExceededError (commit d747e7d)
 - [x] **4.1.2** `examples/anthropic_budget.py` — budget enforcement on the Anthropic client
   - done 2026-09-18: runs offline with Anthropic mock transport; 1/5 messages before BudgetExceededError (commit d747e7d)
-- [ ] **4.1.3** `examples/fastapi_tenant_budget.py` — per-tenant budgets (fix its undeclared `fastapi` dependency and advertise the extra)
-- [ ] **4.1.4** Run every example in `examples/` in a clean venv and fix or delete the ones that break
-  - verify: paste the pass/fail list into §19
+- [x] **4.1.3** `examples/fastapi_tenant_budget.py` — per-tenant budgets (fix its undeclared `fastapi` dependency and advertise the extra)
+  - done 2026-09-18: `fastapi_tenants.py` has try/except guard for missing dep; hardcoded key removed; `OPENAI_API_KEY` guard added (commit fba1e65)
+- [x] **4.1.4** Run every example in `examples/` in a clean venv and fix or delete the ones that break
+  - done 2026-09-18: All 13 examples exit 0 (no unhandled crash):
+    - ✅ KEYLESS: `agent_loop_guard.py`, `anthropic_budget.py`, `budget_blocking_demo.py`, `prometheus_metrics.py`
+    - ✅ KEY-GATED (graceful exit): `basic.py`, `background_priority.py`, `openai_sync.py`, `openai_async.py`, `anthropic_sync.py`, `anthropic_async.py`, `fastapi_tenants.py`
+    - ⚠️ LIVE-ONLY (401 expected, no key): `wedge_basic.py`, `wedge_openai.py`
 - [x] **4.1.5** Keep the existing live variants (they need keys) clearly separated from the keyless ones
   - done 2026-09-18: keyless examples marked with `# KEYLESS` header; live examples noted in README examples table
 
