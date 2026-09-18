@@ -302,11 +302,11 @@ Backstop is a genuinely well-built in-process LLM guardrail (~10.3k LOC Python +
 
 ### 1.4 Version guard + CI green (blocker #4)
 
-- [ ] **1.4.1** Add a runtime guard: if an unsupported SDK version is detected, emit a clear, actionable warning naming the supported range (never fail silently)
-- [ ] **1.4.2** Update the CI test matrix to `openai {2.9.x, 3.14.x}` × `anthropic {0.99, 1.6}` × `python {3.10, 3.11, 3.12}` in `.github/workflows/ci.yml`
+- [x] **1.4.1** Add a runtime guard: if an unsupported SDK version is detected, emit a clear, actionable warning naming the supported range (never fail silently)
+- [x] **1.4.2** Update the CI test matrix to `openai {2.9.x, 3.14.x}` × `anthropic {0.99, 1.6}` × `python {3.10, 3.11, 3.12}` in `.github/workflows/ci.yml`
 - [x] **1.4.3** Run the full suite locally on the **current** SDKs and confirm zero failures
   - verify: `pytest -q` → `N passed, 0 failed` (paste the count into §19)
-  - done: `pytest tests -q -o addopts=''` → `218 passed, 5 skipped in 46.01s` on the current SDK set; count recorded in §19
+  - done: `pytest tests -q -o addopts=''` → `225 passed, 5 skipped in 44.81s` on the current SDK set; count recorded in §19
 - [ ] **1.4.4** Run the full suite locally against the **pinned legacy** SDKs in a throwaway venv (`/tmp/legacy-venv`) and confirm zero failures
 - [ ] **1.4.5** Push and confirm **CI is green on `main`**
   - verify: `gh run list --branch main --limit 3` shows `completed success`
@@ -315,7 +315,7 @@ Backstop is a genuinely well-built in-process LLM guardrail (~10.3k LOC Python +
 ### 1.5 Phase 1 exit
 
 - [ ] **1.5.1** Re-run `pip install "backstop-ai[anthropic]"` in a clean venv **from PyPI** and confirm both providers wrap and enforce
-- [ ] **1.5.2** Record the verified evidence in §19
+- [x] **1.5.2** Record the verified evidence in §19
 
 ---
 

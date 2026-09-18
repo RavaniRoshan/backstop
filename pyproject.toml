@@ -26,13 +26,6 @@ dependencies = [
   "pyyaml>=6.0",
 ]
 
-[project.urls]
-Homepage = "https://github.com/RavaniRoshan/backstop"
-Repository = "https://github.com/RavaniRoshan/backstop"
-Issues = "https://github.com/RavaniRoshan/backstop/issues"
-Changelog = "https://github.com/RavaniRoshan/backstop/blob/main/CHANGELOG.md"
-Documentation = "https://github.com/RavaniRoshan/backstop/blob/main/docs/install.md"
-
 [project.optional-dependencies]
 metrics = ["prometheus-client>=0.20"]
 anthropic = ["anthropic>=0.99,<1.7"]
@@ -45,7 +38,15 @@ test = [
   "pytest>=8",
   "pytest-cov>=5",
   "anthropic>=0.40",
+  "prometheus-client>=0.20,<0.27",
 ]
+
+[project.urls]
+Homepage = "https://github.com/RavaniRoshan/backstop"
+Repository = "https://github.com/RavaniRoshan/backstop"
+Issues = "https://github.com/RavaniRoshan/backstop/issues"
+Changelog = "https://github.com/RavaniRoshan/backstop/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/RavaniRoshan/backstop/blob/main/docs/install.md"
 
 [project.scripts]
 backstop = "backstop.cli:main"
