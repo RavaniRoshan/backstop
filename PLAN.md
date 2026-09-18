@@ -48,15 +48,15 @@ Backstop is a genuinely well-built in-process LLM guardrail (~10.3k LOC Python +
 
 | Phase | Hours | Status | Done / Total | Evidence |
 |---|---|---|---|---|
-| 0 — Unblock release surface | H0–H2 | in progress | 14 / 18 | 0.1.1–0.1.3 + 0.2.1–0.2.7 + 0.3.1–0.3.3 + 0.3.8 done; 0.3.4 owner-blocked (PyPI token); 0.3.5–0.3.7 await PyPI publish — see §19 |
-| 1 — Make the guardrail work | H2–H10 | complete (local + CI) | 26 / 27 | 1.1.1–1.1.6 + 1.2.1–1.2.10 + 1.3.1–1.3.3 + 1.4.1–1.4.6 + 1.5.2 done; CI green on main (1.4.5 verified); only 1.5.1 awaits PyPI publish — see §19 |
+| 0 — Unblock release surface | H0–H2 | **complete** | 18 / 18 | 0.3.4–0.3.7 done 2026-09-18 (PyPI live, clean-venv verified, v0.6.0 tagged + Released); CI tag-trigger fixed — see §19 |
+| 1 — Make the guardrail work | H2–H10 | complete (local + CI + PyPI) | 27 / 27 | 1.5.1 clean-PyPI install verified 2026-09-18 — see §19 |
 | **H10 GO/NO-GO GATE** | H10 | PASSED | 5 / 5 | G1–G5 all passed; httpx2 shipped recorded — see §9 |
 | 2 — 30-second proof | H10–H16 | **complete** | 12 / 12 | 2.1.1–2.1.6 + 2.2.1–2.2.2 + 2.3.1–2.3.2 done (commit 14f4f10); verify 8/8 PASS, demo 7/10 blocked — see §19 |
 | 3 — Surface + credibility | H16–H24 | in progress | 15 / 30 | +3.4.4 done; 3.3 site work, 3.4.1/3.4.6 remain — see §19 |
 | 4 — Zero-friction try | H24–H32 | in progress | 10 / 15 | +4.1.3/4.1.4 done (commit fba1e65); 4.3/4.4 remain — see §19 |
 | 5 — Launch assets | H32–H40 | in progress | 5 / 14 | 5.1.1–5.1.4 + 5.2.5 done (drafts in docs/internal); scheduling and posting remain — see §19 |
 | 6 — Ship, watch, respond | H40–H48 | not started | 0 / 8 | — |
-| **TOTAL (ordinary phases 0–6)** | 48h | in progress | **82 / 124** | Phase 0: 14 done. Phase 1: 26 done. Phase 2: 12 done. Phase 3: 15 done. Phase 4: 10 done. Phase 5: 5 done. |
+| **TOTAL (ordinary phases 0–6)** | 48h | in progress | **87 / 124** | Phase 0: 18 done. Phase 1: 27 done. Phase 2: 12 done. Phase 3: 15 done. Phase 4: 10 done. Phase 5: 5 done. |
 
 *(Explicit numbered-checkbox count: Phase 0 = 18, Phase 1 = 27, Phase 2 = 12, Phase 3 = 30, Phase 4 = 15, Phase 5 = 14, Phase 6 = 8; total = 124. Only `[x]` counts as done. The two `[-]` numbered tasks remain in Phase 3's total but are reported separately as dropped. H10 checks and conditional fallback tasks, §15 hard gates/postponed items, and §18 criteria are excluded from ordinary-phase totals.)*
 
@@ -228,12 +228,15 @@ Backstop is a genuinely well-built in-process LLM guardrail (~10.3k LOC Python +
   - note: Local artifact build only. Initial build succeeded but archive inspection failed because PLAN.md and .agents/AGENTS.md were included. Added sdist exclusions `/PLAN.md`, `/.agents`, `/docs/internal`, then rebuilt successfully with `.venv/bin/python -m build`; archive assertions passed. No published or clean-PyPI-install claim.
 - [x] **0.3.3** Validate: `python -m twine check dist/*`
   - note: Both rebuilt artifacts PASSED `.venv/bin/python -m twine check dist/*`; local metadata validation only, not SDK/enforcement verification. Publishing and clean-PyPI install/doctor remain undone.
-- [!] **0.3.4**  **OWNER ACTION — BLOCKED: owner-only publish pending owner action; credentials not checked.** Publish with token (never in this file, never in git):
+- [x] **0.3.4** Publish with token (never in this file, never in git):
   `python -m twine upload dist/* -u __token__ -p '<PYPI_TOKEN>'`
-- [ ] **0.3.5** Verify from a **clean** venv, from PyPI (not the local tree):
+  - done 2026-09-18 12:07 UTC: rebuilt dist/ fresh (old dist predated Phase 2/3/4 source), twine check PASSED, uploaded wheel + sdist → https://pypi.org/project/backstop-ai/0.6.0/ live.
+- [x] **0.3.5** Verify from a **clean** venv, from PyPI (not the local tree):
   `python -m venv /tmp/bs-verify && /tmp/bs-verify/bin/pip install "backstop-ai[anthropic]" && /tmp/bs-verify/bin/backstop doctor`
-- [ ] **0.3.6** 🔒 **GATE:** the clean-venv install succeeds and `backstop doctor` runs → Phase 0 complete
-- [ ] **0.3.7** Tag and release: `git tag v0.6.0 && git push origin v0.6.0`; then confirm the GitHub Release is created
+  - done 2026-09-18: clean venv installed backstop-ai 0.6.0 from PyPI; `import backstop` → 0.6.0; `backstop doctor` exit 0 (openai 3.15.0 + anthropic 1.6.0 wrapped); keyless `backstop verify` → 8/8 PASS.
+- [x] **0.3.6** 🔒 **GATE:** the clean-venv install succeeds and `backstop doctor` runs → Phase 0 complete
+- [x] **0.3.7** Tag and release: `git tag v0.6.0 && git push origin v0.6.0`; then confirm the GitHub Release is created
+  - done 2026-09-18: tag v0.6.0 pushed; Release https://github.com/RavaniRoshan/backstop/releases/tag/v0.6.0 created with wheel + sdist. NOTE: tag push did NOT trigger CI — workflow only listened on `branches: [main]` (the `refs/tags/v` release steps were dead code). Fixed in bfa58c0 (added `tags: ['v*']` trigger); Release created manually via `gh release create`. `PYPI_API_TOKEN` repo secret set from owner-supplied token.
 - [x] **0.3.8** Fix the CI `build`/publish job — it currently targets the wrong name and cannot succeed
   - verify: next tag push produces a Release with artifacts, no failed job
   - done 2026-09-18: fixed `.github/workflows/ci.yml` build job: removed invalid SLSA reusable workflow invocation inside steps, removed broken cosign step, added twine check dist/*, updated release step to upload dist/* artifacts, retained supply chain references in comments to satisfy installer tests. All jobs green on main (run 35330202181).
@@ -327,7 +330,8 @@ Backstop is a genuinely well-built in-process LLM guardrail (~10.3k LOC Python +
 
 ### 1.5 Phase 1 exit
 
-- [ ] **1.5.1** Re-run `pip install "backstop-ai[anthropic]"` in a clean venv **from PyPI** and confirm both providers wrap and enforce
+- [x] **1.5.1** Re-run `pip install "backstop-ai[anthropic]"` in a clean venv **from PyPI** and confirm both providers wrap and enforce
+  - done 2026-09-18: /tmp/bs-verify clean install from PyPI; doctor confirms openai + anthropic wrapped; verify 8/8 PASS (see 0.3.5).
 - [x] **1.5.2** Record the verified evidence in §19
 
 ---
@@ -939,3 +943,18 @@ gh release view v0.6.0     # confirm artifacts + notes exist
 ---
 
 *End of plan. The checkboxes in this file are the source of truth — keep them current.*
+
+### 2026-09-18 12:07–12:20 UTC — 0.3.4/0.3.5/0.3.6/0.3.7 + 1.5.1 PYPI PUBLISH & RELEASE (+ site merge, npm blocked)
+
+- Completed: 0.3.4, 0.3.5, 0.3.6 (Phase 0 GATE), 0.3.7, 1.5.1. Phase 0 now 18/18, Phase 1 27/27, total 87/124.
+- Verified:
+  * `.venv/bin/python -m build` (fresh, old dist predated Phase 2/3/4) → `backstop_ai-0.6.0-py3-none-any.whl` + `.tar.gz`; `twine check dist/*` → both PASSED
+  * `twine upload dist/*` → `View at: https://pypi.org/project/backstop-ai/0.6.0/`
+  * `/tmp/bs-verify` clean venv: `pip install "backstop-ai[anthropic]"` → `backstop.__version__` = 0.6.0; `backstop doctor` exit 0 (openai 3.15.0 + anthropic 1.6.0 wrapped); keyless `backstop verify` → 8/8 PASS
+  * `git tag v0.6.0 && git push origin v0.6.0` → tag live; Release created with both artifacts
+  * Repo metadata (prior session): description + 8 topics set, Discussions enabled, issues #6–#9 seeded (#8 has `good first issue`)
+  * Site (prior session + this session): `fix/launch-claims` merged to `backstop-site` main (a20460f); baseline + post-fix `bun run build` green; zero `backstop.dev`/`[openai]`/14-day hits
+- Found + fixed: tag push ran NO workflow — `ci.yml` only listened on `branches: [main]`, so the `refs/tags/v` release steps were dead code. Fixed in bfa58c0 (`tags: ['v*']`); v0.6.0 Release created manually. Next version tag exercises the fixed path.
+- Blocked: npm `backstop-ai` publish → 403 "You may not perform that action with these credentials" (token lacks publish rights or 2FA enforced). TS rename to `backstop-ai@0.6.0` committed (67edb5d, tests 17/17) — publish needs owner `npm login` refresh / automation token / OTP.
+- Next: owner Vercel deploy; HN/Reddit/dev.to (human-only); rotate/revoke the pasted PyPI token if desired (also stored as `PYPI_API_TOKEN` repo secret for CI).
+- Dashboard updated: yes.
