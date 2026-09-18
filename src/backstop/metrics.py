@@ -53,13 +53,13 @@ class Metrics:
             "Backstop request duration.",
             ["endpoint", "priority"],
         )
-        self.budget_remaining = Gauge(
-            "backstop_budget_remaining_tokens",
-            "Remaining token budget.",
-        )
         self.budget_exceeded = Counter(
             "backstop_budget_exceeded_total",
             "Requests blocked by token budget.",
+        )
+        self.budget_remaining = Gauge(
+            "backstop_budget_remaining_tokens",
+            "Remaining token budget.",
         )
         self.queue_depth = Gauge(
             "backstop_queue_depth",
