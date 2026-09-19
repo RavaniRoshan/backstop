@@ -1,0 +1,30 @@
+{
+  "provider": "heygen",
+  "speed": 1,
+  "lines": [
+    {
+      "id": "01",
+      "text": "Your agent loop just burned two hundred fifty tokens. In ten seconds."
+    },
+    {
+      "id": "02",
+      "text": "One wrap call stops it. Backstop dot wrap — in-process budget, no proxy."
+    },
+    {
+      "id": "03",
+      "text": "Run it. Three calls pass. Seven blocked. Seventy percent saved."
+    },
+    {
+      "id": "04",
+      "text": "Backstop verify. Zero keys. Zero network. Verified offline."
+    },
+    {
+      "id": "05",
+      "text": "Pip install backstop dash A.I. Stop the loop."
+    }
+  ],
+  "bgm": {
+    "mode": "none"
+  },
+  "voice": "0e2ff5b962084420879e076a2345d13f"
+}

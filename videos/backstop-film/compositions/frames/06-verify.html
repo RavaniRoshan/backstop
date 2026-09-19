@@ -1,0 +1,297 @@
+<template>
+  <style>
+    @font-face {
+      font-family: 'Inter';
+      font-weight: 400;
+      src: url('assets/fonts/Inter-400.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'Inter';
+      font-weight: 700;
+      src: url('assets/fonts/Inter-700.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'JetBrains Mono';
+      font-weight: 400;
+      src: url('assets/fonts/JetBrainsMono-400.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'JetBrains Mono';
+      font-weight: 700;
+      src: url('assets/fonts/JetBrainsMono-700.woff2') format('woff2');
+    }
+
+    #root {
+      position: absolute;
+      inset: 0;
+      width: 1920px;
+      height: 1080px;
+      overflow: hidden;
+      background: transparent;
+      font-family: 'Inter', sans-serif;
+      color: #E8E4DF;
+    }
+
+    .d6-bg {
+      position: absolute;
+      inset: 0;
+      width: 1920px;
+      height: 1080px;
+      background: radial-gradient(circle at 50% 40%, #16161B 0%, #0C0C0E 65%, #060608 100%);
+    }
+
+    .d6-grid {
+      position: absolute;
+      inset: 0;
+      background-size: 80px 80px;
+      background-image: 
+        linear-gradient(to right, rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+      pointer-events: none;
+    }
+
+    .d6-window {
+      position: absolute;
+      left: 360px;
+      top: 130px;
+      width: 1200px;
+      height: 590px;
+      background: #18181D;
+      border-radius: 10px;
+      box-shadow: 0 28px 56px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .d6-titlebar {
+      height: 38px;
+      background: #141418;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      position: relative;
+    }
+
+    .d6-traffic-lights { display: flex; gap: 8px; }
+    .d6-dot { width: 12px; height: 12px; border-radius: 50%; }
+    .d6-dot-red { background: #FF5F57; }
+    .d6-dot-yellow { background: #FEBC2E; }
+    .d6-dot-green { background: #28C840; }
+
+    .d6-title {
+      position: absolute;
+      left: 0;
+      right: 0;
+      text-align: center;
+      font-size: 13px;
+      color: #8A8690;
+      font-family: 'JetBrains Mono', monospace;
+      pointer-events: none;
+    }
+
+    .d6-term-body {
+      flex: 1;
+      background: #101014;
+      padding: 24px 32px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 15px;
+      line-height: 1.65;
+      overflow: hidden;
+    }
+
+    .d6-prompt { color: #22D67A; font-weight: 700; margin-right: 12px; }
+    .d6-cmd { color: #E8E4DF; }
+    .d6-caret {
+      display: inline-block;
+      width: 8px;
+      height: 16px;
+      background: #E8E4DF;
+      margin-left: 4px;
+      vertical-align: middle;
+      animation: d6-blink 0.9s step-end infinite;
+    }
+    @keyframes d6-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+
+    .d6-header-block {
+      margin: 12px 0;
+      padding: 10px 14px;
+      background: rgba(255, 255, 255, 0.03);
+      border-left: 3px solid #22D67A;
+      border-radius: 4px;
+      opacity: 0;
+    }
+
+    .d6-row {
+      opacity: 0;
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+    }
+
+    .d6-pass-badge { color: #22D67A; font-weight: 700; width: 100px; }
+    .d6-block-badge { color: #F04438; font-weight: 700; width: 100px; }
+
+    .d6-metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+      margin-top: 18px;
+      opacity: 0;
+    }
+
+    .d6-metric-card {
+      background: #181820;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 6px;
+      padding: 14px 18px;
+      text-align: center;
+    }
+
+    .d6-metric-val {
+      font-size: 32px;
+      font-weight: 800;
+      font-family: 'Inter', sans-serif;
+      margin-bottom: 4px;
+    }
+
+    .d6-metric-lbl {
+      font-size: 12px;
+      color: #8A8690;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    .d6-status-bar {
+      margin-top: 20px;
+      background: rgba(34, 214, 122, 0.12);
+      border: 1.5px solid #22D67A;
+      color: #22D67A;
+      padding: 10px;
+      text-align: center;
+      border-radius: 6px;
+      font-size: 15px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      opacity: 0;
+      transform: translateY(8px);
+    }
+  </style>
+
+  <div id="root" data-composition-id="06-verify" data-width="1920" data-height="1080" data-duration="13.274">
+    <div id="d6-bg-clip" class="clip d6-bg" data-start="0" data-duration="13.274" data-track-index="0">
+      <div class="d6-grid"></div>
+    </div>
+
+    <div id="d6-content-clip" class="clip d6-content-layer" data-start="0" data-duration="13.274" data-track-index="1" style="position: absolute; inset: 0; width: 1920px; height: 1080px;">
+      <div class="d6-window" id="d6-win">
+        <div class="d6-titlebar">
+          <div class="d6-traffic-lights">
+            <div class="d6-dot d6-dot-red"></div>
+            <div class="d6-dot d6-dot-yellow"></div>
+            <div class="d6-dot d6-dot-green"></div>
+          </div>
+          <div class="d6-title">backstop verify — 30-Second Keyless Proof</div>
+        </div>
+
+        <div class="d6-term-body">
+          <div>
+            <span class="d6-prompt">➜ $</span>
+            <span class="d6-cmd" id="d6-cmd-text"></span><span class="d6-caret" id="d6-caret"></span>
+          </div>
+
+          <div class="d6-header-block" id="d6-hdr">
+            <div style="font-weight: 700; color: #E8E4DF;"># Backstop Verify — 30-Second Keyless Proof</div>
+            <div style="font-size: 13px; color: #8A8690;">Mode: offline (100% local mock transport, zero network, zero API keys)</div>
+          </div>
+
+          <div class="d6-row" id="d6-r1">
+            <span class="d6-pass-badge">[allowed]</span>
+            <span>Step 0: prompt dispatched (250 tokens consumed, 250 remaining)</span>
+          </div>
+          <div class="d6-row" id="d6-r2">
+            <span class="d6-pass-badge">[allowed]</span>
+            <span>Step 1: prompt dispatched (250 tokens consumed, 0 remaining)</span>
+          </div>
+          <div class="d6-row" id="d6-r3">
+            <span class="d6-block-badge">[blocked]</span>
+            <span style="color: #22D67A; font-weight: 700;">Steps 2..9: 8 calls blocked by Backstop before dispatch</span>
+          </div>
+
+          <div class="d6-metrics-grid" id="d6-metrics">
+            <div class="d6-metric-card">
+              <div class="d6-metric-val" style="color: #E8E4DF;">2</div>
+              <div class="d6-metric-lbl">Allowed Calls</div>
+            </div>
+            <div class="d6-metric-card">
+              <div class="d6-metric-val" style="color: #F04438;">8</div>
+              <div class="d6-metric-lbl">Blocked Calls</div>
+            </div>
+            <div class="d6-metric-card" style="border-color: rgba(34, 214, 122, 0.4);">
+              <div class="d6-metric-val" id="d6-tokens-saved" style="color: #22D67A;">0</div>
+              <div class="d6-metric-lbl">Tokens Saved</div>
+            </div>
+          </div>
+
+          <div class="d6-status-bar" id="d6-status">
+            STATUS: VERIFIED (OFFLINE MOCK · ZERO NETWORK · PASS)
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+    <script>
+      (function() {
+        const tl = gsap.timeline({ paused: true });
+        window.__timelines = window.__timelines || {};
+        window.__timelines["06-verify"] = tl;
+
+        const cmdText = document.getElementById("d6-cmd-text");
+        const fullCmd = "backstop verify";
+
+        // Initial setup
+        gsap.set("#d6-win", { opacity: 0, y: 15 });
+        tl.to("#d6-win", { opacity: 1, y: 0, duration: 0.5, ease: "power2.out" }, 0.2);
+
+        // Command typing
+        const typing = { val: 0 };
+        tl.to(typing, {
+          val: fullCmd.length,
+          duration: 0.8,
+          ease: "none",
+          onUpdate: function() {
+            cmdText.textContent = fullCmd.slice(0, Math.round(typing.val));
+          }
+        }, 0.7);
+
+        // Header reveals
+        tl.to("#d6-hdr", { opacity: 1, duration: 0.2 }, 1.8);
+
+        // Output rows
+        tl.to("#d6-r1", { opacity: 1, duration: 0.15 }, 2.5);
+        tl.to("#d6-r2", { opacity: 1, duration: 0.15 }, 3.0);
+        tl.to("#d6-r3", { opacity: 1, duration: 0.2 }, 3.5);
+
+        // Metrics grid
+        tl.to("#d6-metrics", { opacity: 1, duration: 0.4 }, 4.5);
+
+        // Count-up on 2,000 tokens saved
+        const countObj = { count: 0 };
+        const tokensEl = document.getElementById("d6-tokens-saved");
+        tl.to(countObj, {
+          count: 2000,
+          duration: 2.0,
+          ease: "power2.out",
+          onUpdate: function() {
+            tokensEl.textContent = Math.round(countObj.count).toLocaleString();
+          }
+        }, 5.5);
+
+        // Status verified bar
+        tl.to("#d6-status", { opacity: 1, y: 0, duration: 0.5, ease: "back.out(1.5)" }, 8.0);
+      })();
+    </script>
+  </div>
+</template>

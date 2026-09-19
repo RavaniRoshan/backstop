@@ -1,0 +1,505 @@
+{
+  "total_duration_s": 24.633,
+  "width": 1080,
+  "height": 1920,
+  "groups": [
+    {
+      "id": "caption-group-0",
+      "frame": 1,
+      "start": 0.18,
+      "end": 0.6,
+      "text": "Your agent",
+      "words": [
+        {
+          "id": "caption-word-0-0",
+          "text": "Your",
+          "start": 0.18,
+          "end": 0.26
+        },
+        {
+          "id": "caption-word-0-1",
+          "text": "agent",
+          "start": 0.32,
+          "end": 0.56
+        }
+      ]
+    },
+    {
+      "id": "caption-group-1",
+      "frame": 1,
+      "start": 0.6,
+      "end": 1.04,
+      "text": "loop just",
+      "words": [
+        {
+          "id": "caption-word-1-0",
+          "text": "loop",
+          "start": 0.6,
+          "end": 0.78
+        },
+        {
+          "id": "caption-word-1-1",
+          "text": "just",
+          "start": 0.82,
+          "end": 1
+        }
+      ]
+    },
+    {
+      "id": "caption-group-2",
+      "frame": 1,
+      "start": 1.04,
+      "end": 1.48,
+      "text": "burned two",
+      "words": [
+        {
+          "id": "caption-word-2-0",
+          "text": "burned",
+          "start": 1.04,
+          "end": 1.28
+        },
+        {
+          "id": "caption-word-2-1",
+          "text": "two",
+          "start": 1.32,
+          "end": 1.44
+        }
+      ]
+    },
+    {
+      "id": "caption-group-3",
+      "frame": 1,
+      "start": 1.48,
+      "end": 2.68,
+      "text": "hundred fifty tokens.",
+      "words": [
+        {
+          "id": "caption-word-3-0",
+          "text": "hundred",
+          "start": 1.48,
+          "end": 1.7
+        },
+        {
+          "id": "caption-word-3-1",
+          "text": "fifty",
+          "start": 1.78,
+          "end": 1.98
+        },
+        {
+          "id": "caption-word-3-2",
+          "text": "tokens.",
+          "start": 2.06,
+          "end": 2.56
+        }
+      ]
+    },
+    {
+      "id": "caption-group-4",
+      "frame": 1,
+      "start": 3.18,
+      "end": 4.139,
+      "text": "In ten seconds.",
+      "words": [
+        {
+          "id": "caption-word-4-0",
+          "text": "In",
+          "start": 3.18,
+          "end": 3.26
+        },
+        {
+          "id": "caption-word-4-1",
+          "text": "ten",
+          "start": 3.32,
+          "end": 3.46
+        },
+        {
+          "id": "caption-word-4-2",
+          "text": "seconds.",
+          "start": 3.56,
+          "end": 4.019
+        }
+      ]
+    },
+    {
+      "id": "caption-group-5",
+      "frame": 2,
+      "start": 4.675,
+      "end": 5.095,
+      "text": "One wrap",
+      "words": [
+        {
+          "id": "caption-word-5-0",
+          "text": "One",
+          "start": 4.675,
+          "end": 4.775
+        },
+        {
+          "id": "caption-word-5-1",
+          "text": "wrap",
+          "start": 4.815,
+          "end": 4.995
+        }
+      ]
+    },
+    {
+      "id": "caption-group-6",
+      "frame": 2,
+      "start": 5.095,
+      "end": 5.995,
+      "text": "call stops it.",
+      "words": [
+        {
+          "id": "caption-word-6-0",
+          "text": "call",
+          "start": 5.095,
+          "end": 5.235
+        },
+        {
+          "id": "caption-word-6-1",
+          "text": "stops",
+          "start": 5.375,
+          "end": 5.655
+        },
+        {
+          "id": "caption-word-6-2",
+          "text": "it.",
+          "start": 5.715,
+          "end": 5.875
+        }
+      ]
+    },
+    {
+      "id": "caption-group-7",
+      "frame": 2,
+      "start": 6.375,
+      "end": 7.395,
+      "text": "Backstop dot wrap",
+      "words": [
+        {
+          "id": "caption-word-7-0",
+          "text": "Backstop",
+          "start": 6.375,
+          "end": 6.795
+        },
+        {
+          "id": "caption-word-7-1",
+          "text": "dot",
+          "start": 6.875,
+          "end": 7.015
+        },
+        {
+          "id": "caption-word-7-2",
+          "text": "wrap",
+          "start": 7.075,
+          "end": 7.315
+        }
+      ]
+    },
+    {
+      "id": "caption-group-8",
+      "frame": 2,
+      "start": 7.395,
+      "end": 8.415,
+      "text": "in-process budget,",
+      "words": [
+        {
+          "id": "caption-word-8-0",
+          "text": "in-process",
+          "start": 7.395,
+          "end": 7.915
+        },
+        {
+          "id": "caption-word-8-1",
+          "text": "budget,",
+          "start": 8.015,
+          "end": 8.295
+        }
+      ]
+    },
+    {
+      "id": "caption-group-9",
+      "frame": 2,
+      "start": 8.715,
+      "end": 9.435,
+      "text": "no proxy.",
+      "words": [
+        {
+          "id": "caption-word-9-0",
+          "text": "no",
+          "start": 8.715,
+          "end": 8.795
+        },
+        {
+          "id": "caption-word-9-1",
+          "text": "proxy.",
+          "start": 8.895,
+          "end": 9.315
+        }
+      ]
+    },
+    {
+      "id": "caption-group-10",
+      "frame": 3,
+      "start": 9.839,
+      "end": 10.239,
+      "text": "Run it.",
+      "words": [
+        {
+          "id": "caption-word-10-0",
+          "text": "Run",
+          "start": 9.839,
+          "end": 9.959
+        },
+        {
+          "id": "caption-word-10-1",
+          "text": "it.",
+          "start": 9.999,
+          "end": 10.119
+        }
+      ]
+    },
+    {
+      "id": "caption-group-11",
+      "frame": 3,
+      "start": 10.579,
+      "end": 11.599,
+      "text": "Three calls pass.",
+      "words": [
+        {
+          "id": "caption-word-11-0",
+          "text": "Three",
+          "start": 10.579,
+          "end": 10.719
+        },
+        {
+          "id": "caption-word-11-1",
+          "text": "calls",
+          "start": 10.819,
+          "end": 11.079
+        },
+        {
+          "id": "caption-word-11-2",
+          "text": "pass.",
+          "start": 11.119,
+          "end": 11.479
+        }
+      ]
+    },
+    {
+      "id": "caption-group-12",
+      "frame": 3,
+      "start": 11.899,
+      "end": 12.659,
+      "text": "Seven blocked.",
+      "words": [
+        {
+          "id": "caption-word-12-0",
+          "text": "Seven",
+          "start": 11.899,
+          "end": 12.119
+        },
+        {
+          "id": "caption-word-12-1",
+          "text": "blocked.",
+          "start": 12.179,
+          "end": 12.539
+        }
+      ]
+    },
+    {
+      "id": "caption-group-13",
+      "frame": 3,
+      "start": 12.959,
+      "end": 14.179,
+      "text": "Seventy percent saved.",
+      "words": [
+        {
+          "id": "caption-word-13-0",
+          "text": "Seventy",
+          "start": 12.959,
+          "end": 13.219
+        },
+        {
+          "id": "caption-word-13-1",
+          "text": "percent",
+          "start": 13.299,
+          "end": 13.599
+        },
+        {
+          "id": "caption-word-13-2",
+          "text": "saved.",
+          "start": 13.698,
+          "end": 14.059
+        }
+      ]
+    },
+    {
+      "id": "caption-group-14",
+      "frame": 4,
+      "start": 14.573,
+      "end": 15.793,
+      "text": "Backstop verify.",
+      "words": [
+        {
+          "id": "caption-word-14-0",
+          "text": "Backstop",
+          "start": 14.573,
+          "end": 15.073
+        },
+        {
+          "id": "caption-word-14-1",
+          "text": "verify.",
+          "start": 15.153,
+          "end": 15.673
+        }
+      ]
+    },
+    {
+      "id": "caption-group-15",
+      "frame": 4,
+      "start": 16.233,
+      "end": 17.193,
+      "text": "Zero keys.",
+      "words": [
+        {
+          "id": "caption-word-15-0",
+          "text": "Zero",
+          "start": 16.233,
+          "end": 16.513
+        },
+        {
+          "id": "caption-word-15-1",
+          "text": "keys.",
+          "start": 16.653,
+          "end": 17.073
+        }
+      ]
+    },
+    {
+      "id": "caption-group-16",
+      "frame": 4,
+      "start": 17.593,
+      "end": 18.493,
+      "text": "Zero network.",
+      "words": [
+        {
+          "id": "caption-word-16-0",
+          "text": "Zero",
+          "start": 17.593,
+          "end": 17.853
+        },
+        {
+          "id": "caption-word-16-1",
+          "text": "network.",
+          "start": 17.953,
+          "end": 18.373
+        }
+      ]
+    },
+    {
+      "id": "caption-group-17",
+      "frame": 4,
+      "start": 18.893,
+      "end": 20.033,
+      "text": "Verified offline.",
+      "words": [
+        {
+          "id": "caption-word-17-0",
+          "text": "Verified",
+          "start": 18.893,
+          "end": 19.353
+        },
+        {
+          "id": "caption-word-17-1",
+          "text": "offline.",
+          "start": 19.433,
+          "end": 19.913
+        }
+      ]
+    },
+    {
+      "id": "caption-group-18",
+      "frame": 5,
+      "start": 20.398,
+      "end": 21.758,
+      "text": "Pip install backstop",
+      "words": [
+        {
+          "id": "caption-word-18-0",
+          "text": "Pip",
+          "start": 20.398,
+          "end": 20.558
+        },
+        {
+          "id": "caption-word-18-1",
+          "text": "install",
+          "start": 20.598,
+          "end": 20.998
+        },
+        {
+          "id": "caption-word-18-2",
+          "text": "backstop",
+          "start": 21.118,
+          "end": 21.658
+        }
+      ]
+    },
+    {
+      "id": "caption-group-19",
+      "frame": 5,
+      "start": 21.758,
+      "end": 22.138,
+      "text": "dash",
+      "words": [
+        {
+          "id": "caption-word-19-0",
+          "text": "dash",
+          "start": 21.758,
+          "end": 22.018
+        }
+      ]
+    },
+    {
+      "id": "caption-group-20",
+      "frame": 5,
+      "start": 22.218,
+      "end": 23.198,
+      "text": "A.I.",
+      "words": [
+        {
+          "id": "caption-word-20-0",
+          "text": "A.I.",
+          "start": 22.218,
+          "end": 23.078
+        }
+      ]
+    },
+    {
+      "id": "caption-group-21",
+      "frame": 5,
+      "start": 23.618,
+      "end": 24.458,
+      "text": "Stop the loop.",
+      "words": [
+        {
+          "id": "caption-word-21-0",
+          "text": "Stop",
+          "start": 23.618,
+          "end": 23.898
+        },
+        {
+          "id": "caption-word-21-1",
+          "text": "the",
+          "start": 23.938,
+          "end": 24.018
+        },
+        {
+          "id": "caption-word-21-2",
+          "text": "loop.",
+          "start": 24.078,
+          "end": 24.338
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,196 @@
+<template>
+  <style>
+    @font-face {
+      font-family: 'Inter';
+      font-weight: 400;
+      src: url('assets/fonts/Inter-400.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'Inter';
+      font-weight: 700;
+      src: url('assets/fonts/Inter-700.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'JetBrains Mono';
+      font-weight: 400;
+      src: url('assets/fonts/JetBrainsMono-400.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'JetBrains Mono';
+      font-weight: 700;
+      src: url('assets/fonts/JetBrainsMono-700.woff2') format('woff2');
+    }
+
+    #root {
+      position: absolute;
+      inset: 0;
+      width: 1080px;
+      height: 1920px;
+      overflow: hidden;
+      background: transparent;
+      font-family: 'Inter', sans-serif;
+      color: #E8E4DF;
+    }
+
+    .r2-bg {
+      position: absolute;
+      inset: 0;
+      width: 1080px;
+      height: 1920px;
+      background: radial-gradient(circle at 50% 35%, #16161C 0%, #0C0C0E 70%, #060608 100%);
+    }
+
+    .r2-grid {
+      position: absolute;
+      inset: 0;
+      background-size: 60px 60px;
+      background-image: 
+        linear-gradient(to right, rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+      pointer-events: none;
+    }
+
+    .r2-container {
+      position: absolute;
+      left: 70px;
+      top: 160px;
+      width: 940px;
+      display: flex;
+      flex-direction: column;
+      gap: 28px;
+    }
+
+    .r2-header-card {
+      background: #18181F;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 14px;
+      padding: 32px 36px;
+      box-shadow: 0 24px 48px rgba(0, 0, 0, 0.45);
+      opacity: 0;
+      transform: translateY(15px);
+    }
+
+    .r2-kicker {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 14px;
+      font-weight: 700;
+      color: #22D67A;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin-bottom: 10px;
+    }
+
+    .r2-heading {
+      font-size: 52px;
+      font-weight: 800;
+      color: #E8E4DF;
+      line-height: 1.1;
+      letter-spacing: -0.02em;
+    }
+
+    .r2-sub {
+      font-size: 24px;
+      color: #8A8690;
+      margin-top: 8px;
+    }
+
+    .r2-code-card {
+      background: #13131A;
+      border: 1.5px solid rgba(34, 214, 122, 0.35);
+      border-radius: 14px;
+      padding: 32px 36px;
+      box-shadow: 0 24px 48px rgba(0, 0, 0, 0.5), 0 0 30px rgba(34, 214, 122, 0.1);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 18px;
+      line-height: 1.7;
+      position: relative;
+      opacity: 0;
+      transform: translateY(15px);
+    }
+
+    .r2-code-line { display: block; white-space: pre; }
+    .r2-ln { display: inline-block; width: 36px; color: #8A8690; font-size: 15px; user-select: none; }
+    .r2-kw { color: #C678DD; font-weight: 700; }
+    .r2-volt { color: #22D67A; font-weight: 700; }
+    .r2-fn { color: #61AFEF; }
+    .r2-num { color: #D19A66; font-weight: 700; }
+    .r2-comment { color: #9E9BA6; font-style: italic; }
+
+    .r2-highlight-box {
+      position: absolute;
+      left: 60px;
+      top: 140px;
+      width: 780px;
+      height: 120px;
+      border: 1.5px solid #22D67A;
+      background: rgba(34, 214, 122, 0.08);
+      border-radius: 8px;
+      pointer-events: none;
+      opacity: 0;
+    }
+
+    .r2-badge-row {
+      margin-top: 24px;
+      padding-top: 18px;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 14px;
+      font-weight: 700;
+      color: #22D67A;
+    }
+  </style>
+
+  <div id="root" data-composition-id="02-reveal" data-width="1080" data-height="1920" data-duration="5.724">
+    <div id="r2-bg-clip" class="clip r2-bg" data-start="0" data-duration="5.724" data-track-index="0">
+      <div class="r2-grid"></div>
+    </div>
+
+    <div id="r2-content-clip" class="clip r2-content" data-start="0" data-duration="5.724" data-track-index="1" style="position: absolute; inset: 0; width: 1080px; height: 1920px;">
+      <div class="r2-container">
+        <div class="r2-header-card" id="r2-head">
+          <div class="r2-kicker">✓ THE IN-PROCESS GUARDRAIL</div>
+          <div class="r2-heading">ONE WRAP CALL STOPS IT.</div>
+          <div class="r2-sub">Backstop.wrap — in-process budget, no proxy.</div>
+        </div>
+
+        <div class="r2-code-card" id="r2-code">
+          <div class="r2-highlight-box" id="r2-box"></div>
+
+          <div class="r2-code-line"><span class="r2-ln">1</span><span class="r2-kw">from </span><span class="r2-volt">backstop </span><span class="r2-kw">import </span><span class="r2-volt">Backstop</span></div>
+          <div class="r2-code-line"><span class="r2-ln">2</span></div>
+          <div class="r2-code-line"><span class="r2-ln">3</span><span class="r2-comment"># Wrap existing client before dispatch</span></div>
+          <div class="r2-code-line"><span class="r2-ln">4</span><span class="r2-fn">client </span>= <span class="r2-volt">Backstop.wrap</span>(</div>
+          <div class="r2-code-line"><span class="r2-ln">5</span>    <span class="r2-fn">raw_client</span>,</div>
+          <div class="r2-code-line"><span class="r2-ln">6</span>    <span class="r2-fn">budget</span>=<span class="r2-num" style="color: #22D67A;">120</span>  <span class="r2-comment"># hard limit</span></div>
+          <div class="r2-code-line"><span class="r2-ln">7</span>)</div>
+          <div class="r2-code-line"><span class="r2-ln">8</span></div>
+          <div class="r2-code-line"><span class="r2-ln">9</span><span class="r2-comment"># Rest of code unchanged:</span></div>
+          <div class="r2-code-line"><span class="r2-ln">10</span><span class="r2-kw">for </span><span class="r2-fn">step </span><span class="r2-kw">in </span><span class="r2-fn">range</span>(<span class="r2-num">10</span>):</div>
+
+          <div class="r2-badge-row">
+            <span>✓ ZERO PROXY</span>
+            <span>✓ ZERO LATENCY</span>
+            <span>✓ IN-PROCESS</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+    <script>
+      (function() {
+        const tl = gsap.timeline({ paused: true });
+        window.__timelines = window.__timelines || {};
+        window.__timelines["02-reveal"] = tl;
+
+        tl.to("#r2-head", { opacity: 1, y: 0, duration: 0.4, ease: "power2.out" }, 0.1);
+        tl.to("#r2-code", { opacity: 1, y: 0, duration: 0.4, ease: "power2.out" }, 0.3);
+
+        // Highlight box pops on "Backstop dot wrap"
+        tl.to("#r2-box", { opacity: 1, duration: 0.4, ease: "back.out(1.4)" }, 1.4);
+      })();
+    </script>
+  </div>
+</template>

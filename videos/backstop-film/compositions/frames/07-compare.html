@@ -1,0 +1,271 @@
+<template>
+  <style>
+    @font-face {
+      font-family: 'Inter';
+      font-weight: 400;
+      src: url('assets/fonts/Inter-400.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'Inter';
+      font-weight: 700;
+      src: url('assets/fonts/Inter-700.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'JetBrains Mono';
+      font-weight: 400;
+      src: url('assets/fonts/JetBrainsMono-400.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'JetBrains Mono';
+      font-weight: 700;
+      src: url('assets/fonts/JetBrainsMono-700.woff2') format('woff2');
+    }
+
+    #root {
+      position: absolute;
+      inset: 0;
+      width: 1920px;
+      height: 1080px;
+      overflow: hidden;
+      background: transparent;
+      font-family: 'Inter', sans-serif;
+      color: #E8E4DF;
+    }
+
+    .d7-bg {
+      position: absolute;
+      inset: 0;
+      width: 1920px;
+      height: 1080px;
+      background: radial-gradient(circle at 50% 40%, #16161B 0%, #0C0C0E 65%, #060608 100%);
+    }
+
+    .d7-grid {
+      position: absolute;
+      inset: 0;
+      background-size: 80px 80px;
+      background-image: 
+        linear-gradient(to right, rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+      pointer-events: none;
+    }
+
+    .d7-container {
+      position: absolute;
+      left: 320px;
+      top: 150px;
+      width: 1280px;
+      background: #18181D;
+      border-radius: 12px;
+      box-shadow: 0 28px 56px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .d7-top-header {
+      background: #141418;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      padding: 16px 28px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      color: #8A8690;
+    }
+
+    .d7-grid-cols {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      divide-x: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    .d7-col {
+      padding: 36px 44px;
+      display: flex;
+      flex-direction: column;
+      gap: 22px;
+    }
+
+    .d7-col-unprotected {
+      background: linear-gradient(180deg, rgba(240, 68, 56, 0.03) 0%, transparent 100%);
+      border-right: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    .d7-col-wrapped {
+      background: linear-gradient(180deg, rgba(34, 214, 122, 0.03) 0%, transparent 100%);
+    }
+
+    .d7-col-title {
+      font-size: 18px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      font-family: 'Inter', sans-serif;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+
+    .d7-stat-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 12px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+      font-size: 15px;
+    }
+
+    .d7-stat-lbl { color: #8A8690; }
+    .d7-stat-val { font-family: 'JetBrains Mono', monospace; font-size: 18px; font-weight: 700; }
+
+    .d7-hero-row {
+      margin-top: 8px;
+      padding: 16px 20px;
+      border-radius: 8px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .d7-hero-danger {
+      background: rgba(240, 68, 56, 0.12);
+      border: 1px solid rgba(240, 68, 56, 0.3);
+    }
+
+    .d7-hero-volt {
+      background: rgba(34, 214, 122, 0.12);
+      border: 1px solid #22D67A;
+      box-shadow: 0 0 24px rgba(34, 214, 122, 0.12);
+    }
+
+    .d7-footer-strip {
+      background: #121216;
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+      padding: 16px 32px;
+      text-align: center;
+      font-size: 15px;
+      font-weight: 700;
+      color: #E8E4DF;
+      letter-spacing: 0.04em;
+      opacity: 0;
+    }
+  </style>
+
+  <div id="root" data-composition-id="07-compare" data-width="1920" data-height="1080" data-duration="13.065">
+    <div id="d7-bg-clip" class="clip d7-bg" data-start="0" data-duration="13.065" data-track-index="0">
+      <div class="d7-grid"></div>
+    </div>
+
+    <div id="d7-content-clip" class="clip d7-content-layer" data-start="0" data-duration="13.065" data-track-index="1" style="position: absolute; inset: 0; width: 1920px; height: 1080px;">
+      <div class="d7-container" id="d7-cont">
+        <div class="d7-top-header">
+          <span>benchmark: backstop demo (10 attempted loop steps)</span>
+          <span>environment: in-process guardrail</span>
+        </div>
+
+        <div class="d7-grid-cols">
+          <!-- Left Column -->
+          <div class="d7-col d7-col-unprotected" id="d7-col-unprot">
+            <div class="d7-col-title" style="color: #F04438;">
+              <span>⛔</span> UNPROTECTED
+            </div>
+
+            <div class="d7-stat-row">
+              <span class="d7-stat-lbl">Calls Attempted</span>
+              <span class="d7-stat-val" style="color: #E8E4DF;">10</span>
+            </div>
+            <div class="d7-stat-row">
+              <span class="d7-stat-lbl">Calls Completed</span>
+              <span class="d7-stat-val" style="color: #F04438;">10 (100%)</span>
+            </div>
+            <div class="d7-stat-row">
+              <span class="d7-stat-lbl">Calls Blocked</span>
+              <span class="d7-stat-val" style="color: #8A8690;">0</span>
+            </div>
+
+            <div class="d7-hero-row d7-hero-danger">
+              <div>
+                <div style="font-size: 13px; color: #8A8690; text-transform: uppercase;">Total Consumed</div>
+                <div style="font-size: 28px; font-weight: 800; color: #F04438; font-family: 'JetBrains Mono';">250 TOKENS</div>
+              </div>
+              <div style="font-size: 13px; font-weight: 700; color: #F04438; text-align: right;">0% SAVED</div>
+            </div>
+          </div>
+
+          <!-- Right Column -->
+          <div class="d7-col d7-col-wrapped" id="d7-col-wrap">
+            <div class="d7-col-title" style="color: #22D67A;">
+              <span>✓</span> WRAPPED WITH BACKSTOP
+            </div>
+
+            <div class="d7-stat-row">
+              <span class="d7-stat-lbl">Calls Attempted</span>
+              <span class="d7-stat-val" style="color: #E8E4DF;">10</span>
+            </div>
+            <div class="d7-stat-row">
+              <span class="d7-stat-lbl">Calls Completed</span>
+              <span class="d7-stat-val" style="color: #22D67A;">3</span>
+            </div>
+            <div class="d7-stat-row">
+              <span class="d7-stat-lbl">Calls Blocked</span>
+              <span class="d7-stat-val" style="color: #22D67A; font-weight: 700;">7 (STOPPED)</span>
+            </div>
+
+            <div class="d7-hero-row d7-hero-volt" id="d7-hero-volt">
+              <div>
+                <div style="font-size: 13px; color: #8A8690; text-transform: uppercase;">Total Consumed</div>
+                <div style="font-size: 28px; font-weight: 800; color: #22D67A; font-family: 'JetBrains Mono';">75 TOKENS</div>
+              </div>
+              <div style="font-size: 16px; font-weight: 800; color: #22D67A; text-align: right;">−70% TOKENS</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="d7-footer-strip" id="d7-footer">
+          Same code. One wrap call. Zero network hops.
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+    <script>
+      (function() {
+        const tl = gsap.timeline({ paused: true });
+        window.__timelines = window.__timelines || {};
+        window.__timelines["07-compare"] = tl;
+
+        // Container entry
+        gsap.set("#d7-cont", { opacity: 0, y: 15 });
+        tl.to("#d7-cont", { opacity: 1, y: 0, duration: 0.5, ease: "power2.out" }, 0.2);
+
+        // Left column appears as VO says "unprotected — ten calls, two fifty tokens"
+        tl.fromTo("#d7-col-unprot", 
+          { opacity: 0, x: -10 },
+          { opacity: 1, x: 0, duration: 0.5, ease: "power2.out" },
+          1.0
+        );
+
+        // Right column enters as VO says "Wrapped — three calls, seventy-five tokens"
+        tl.fromTo("#d7-col-wrap",
+          { opacity: 0, x: 10 },
+          { opacity: 1, x: 0, duration: 0.6, ease: "back.out(1.2)" },
+          4.0
+        );
+
+        // Pulse the -70% volt box when VO says "seventy percent reduction"
+        tl.fromTo("#d7-hero-volt",
+          { scale: 1 },
+          { scale: 1.04, duration: 0.3, repeat: 1, yoyo: true, ease: "power2.inOut" },
+          7.2
+        );
+
+        // Footer appears on "Same code. One wrap call."
+        tl.to("#d7-footer", { opacity: 1, duration: 0.4 }, 9.5);
+      })();
+    </script>
+  </div>
+</template>

@@ -1,0 +1,42 @@
+{
+  "provider": "heygen",
+  "speed": 1,
+  "lines": [
+    {
+      "id": "01",
+      "text": "Two A.M. Your agent is still calling. Step after step — token after token. Nothing in your code can stop it."
+    },
+    {
+      "id": "02",
+      "text": "This is the loop that bills you. Ten iterations. No budget. No ceiling. Two hundred fifty tokens gone — and the SDK never even flinched."
+    },
+    {
+      "id": "03",
+      "text": "Backstop stops it. One line. Backstop dot wrap takes your existing client, sets a token budget, and enforces it before the request leaves your process. No proxy. No network hop."
+    },
+    {
+      "id": "04",
+      "text": "Import Backstop. Wrap the client. Set the ceiling at one hundred twenty tokens. That's it. The rest of your code doesn't change — the SDK still works the way you wrote it."
+    },
+    {
+      "id": "05",
+      "text": "Run the loop. Step zero — completed. Step one — completed. Step two — blocked. Budget Exceeded Error, raised clean. The loop is dead. Your wallet is fine."
+    },
+    {
+      "id": "06",
+      "text": "Don't trust me. Run backstop verify. Zero keys. Zero network. Eight checks pass in two seconds. Two allowed, eight blocked, two thousand tokens saved. Verified — offline."
+    },
+    {
+      "id": "07",
+      "text": "Side by side: unprotected — ten calls, two fifty tokens, no guardrail. Wrapped — three calls, seventy-five tokens, seventy percent reduction. Same code. One wrap call."
+    },
+    {
+      "id": "08",
+      "text": "Pip install backstop dash A.I. The repo is open. The proof runs offline. Stop the loop before it bills you."
+    }
+  ],
+  "bgm": {
+    "mode": "none"
+  },
+  "voice": "0e2ff5b962084420879e076a2345d13f"
+}

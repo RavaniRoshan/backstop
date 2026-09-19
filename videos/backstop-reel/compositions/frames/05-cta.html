@@ -1,0 +1,177 @@
+<template>
+  <style>
+    @font-face {
+      font-family: 'Inter';
+      font-weight: 400;
+      src: url('assets/fonts/Inter-400.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'Inter';
+      font-weight: 700;
+      src: url('assets/fonts/Inter-700.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'JetBrains Mono';
+      font-weight: 400;
+      src: url('assets/fonts/JetBrainsMono-400.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'JetBrains Mono';
+      font-weight: 700;
+      src: url('assets/fonts/JetBrainsMono-700.woff2') format('woff2');
+    }
+
+    #root {
+      position: absolute;
+      inset: 0;
+      width: 1080px;
+      height: 1920px;
+      overflow: hidden;
+      background: transparent;
+      font-family: 'Inter', sans-serif;
+      color: #E8E4DF;
+    }
+
+    .r5-bg {
+      position: absolute;
+      inset: 0;
+      width: 1080px;
+      height: 1920px;
+      background: radial-gradient(circle at 50% 35%, #16161C 0%, #0C0C0E 70%, #060608 100%);
+    }
+
+    .r5-grid {
+      position: absolute;
+      inset: 0;
+      background-size: 60px 60px;
+      background-image: 
+        linear-gradient(to right, rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+      pointer-events: none;
+    }
+
+    .r5-volt-glow {
+      position: absolute;
+      width: 800px;
+      height: 500px;
+      left: 140px;
+      top: 300px;
+      background: radial-gradient(circle, rgba(34, 214, 122, 0.1) 0%, transparent 70%);
+      filter: blur(40px);
+      pointer-events: none;
+    }
+
+    .r5-container {
+      position: absolute;
+      inset: 0;
+      width: 1080px;
+      height: 1920px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding-top: 240px;
+    }
+
+    .r5-logo {
+      width: 96px;
+      height: 96px;
+      margin-bottom: 24px;
+      opacity: 0;
+      transform: scale(0.85);
+    }
+
+    .r5-logo img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+
+    .r5-title {
+      font-size: 64px;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      color: #E8E4DF;
+      margin-bottom: 8px;
+      opacity: 0;
+    }
+
+    .r5-tagline {
+      font-size: 26px;
+      color: #8A8690;
+      margin-bottom: 44px;
+      opacity: 0;
+    }
+
+    .r5-cmd-card {
+      width: 880px;
+      height: 84px;
+      background: #181820;
+      border: 1.5px solid #22D67A;
+      border-radius: 12px;
+      box-shadow: 0 24px 48px rgba(0, 0, 0, 0.5), 0 0 30px rgba(34, 214, 122, 0.12);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      transform: translateY(15px);
+    }
+
+    .r5-cmd-text {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 30px;
+      font-weight: 700;
+      color: #22D67A;
+    }
+
+    .r5-links {
+      margin-top: 32px;
+      display: flex;
+      gap: 20px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 18px;
+      color: #8A8690;
+      opacity: 0;
+    }
+  </style>
+
+  <div id="root" data-composition-id="05-cta" data-width="1080" data-height="1920">
+    <div id="r5-bg-clip" class="clip r5-bg" data-start="0" data-duration="4.415" data-track-index="0">
+      <div class="r5-grid"></div>
+      <div class="r5-volt-glow"></div>
+    </div>
+
+    <div id="r5-content-clip" class="clip r5-content" data-start="0" data-duration="4.415" data-track-index="1" style="position: absolute; inset: 0; width: 1080px; height: 1920px;">
+      <div class="r5-container">
+        <div class="r5-logo" id="r5-logo">
+          <img src="assets/backstop-logo.svg" alt="Backstop" />
+        </div>
+
+        <div class="r5-title" id="r5-title">Backstop</div>
+        <div class="r5-tagline" id="r5-tagline">Stop the loop before it bills you.</div>
+
+        <div class="r5-cmd-card" id="r5-card">
+          <div class="r5-cmd-text">pip install "backstop-ai"</div>
+        </div>
+
+        <div class="r5-links" id="r5-links">
+          <span>github.com/RavaniRoshan/backstop</span>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+    <script>
+      (function() {
+        const tl = gsap.timeline({ paused: true });
+        window.__timelines = window.__timelines || {};
+        window.__timelines["05-cta"] = tl;
+
+        tl.to("#r5-logo", { opacity: 1, scale: 1, duration: 0.5, ease: "back.out(1.4)" }, 0.1);
+        tl.to("#r5-title", { opacity: 1, duration: 0.4 }, 0.3);
+        tl.to("#r5-tagline", { opacity: 1, duration: 0.4 }, 0.5);
+        tl.to("#r5-card", { opacity: 1, y: 0, duration: 0.5, ease: "power2.out" }, 0.7);
+        tl.to("#r5-links", { opacity: 1, duration: 0.4 }, 1.0);
+      })();
+    </script>
+  </div>
+</template>

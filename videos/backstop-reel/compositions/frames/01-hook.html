@@ -1,0 +1,245 @@
+<template>
+  <style>
+    @font-face {
+      font-family: 'Inter';
+      font-weight: 400;
+      src: url('assets/fonts/Inter-400.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'Inter';
+      font-weight: 700;
+      src: url('assets/fonts/Inter-700.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'JetBrains Mono';
+      font-weight: 400;
+      src: url('assets/fonts/JetBrainsMono-400.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'JetBrains Mono';
+      font-weight: 700;
+      src: url('assets/fonts/JetBrainsMono-700.woff2') format('woff2');
+    }
+
+    #root {
+      position: absolute;
+      inset: 0;
+      width: 1080px;
+      height: 1920px;
+      overflow: hidden;
+      background: transparent;
+      font-family: 'Inter', sans-serif;
+      color: #E8E4DF;
+    }
+
+    .r1-bg {
+      position: absolute;
+      inset: 0;
+      width: 1080px;
+      height: 1920px;
+      background: radial-gradient(circle at 50% 35%, #16161C 0%, #0C0C0E 70%, #060608 100%);
+    }
+
+    .r1-grid {
+      position: absolute;
+      inset: 0;
+      background-size: 60px 60px;
+      background-image: 
+        linear-gradient(to right, rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+      pointer-events: none;
+    }
+
+    .r1-container {
+      position: absolute;
+      left: 70px;
+      top: 160px;
+      width: 940px;
+      display: flex;
+      flex-direction: column;
+      gap: 32px;
+    }
+
+    .r1-hero-card {
+      background: #18181F;
+      border: 1.5px solid rgba(240, 68, 56, 0.4);
+      border-radius: 14px;
+      padding: 36px 40px;
+      box-shadow: 0 24px 48px rgba(0, 0, 0, 0.5), 0 0 30px rgba(240, 68, 56, 0.1);
+    }
+
+    .r1-kicker {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 15px;
+      font-weight: 700;
+      color: #F04438;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin-bottom: 12px;
+    }
+
+    .r1-main-stat {
+      font-size: 64px;
+      font-weight: 800;
+      color: #F04438;
+      line-height: 1.05;
+      letter-spacing: -0.02em;
+    }
+
+    .r1-sub-stat {
+      font-size: 32px;
+      font-weight: 700;
+      color: #E8E4DF;
+      margin-top: 6px;
+    }
+
+    .r1-counter-row {
+      margin-top: 20px;
+      padding-top: 16px;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .r1-counter-num {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 38px;
+      font-weight: 800;
+      color: #F04438;
+    }
+
+    .r1-terminal-card {
+      background: #141418;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 14px;
+      overflow: hidden;
+      box-shadow: 0 24px 48px rgba(0, 0, 0, 0.45);
+      opacity: 0;
+      transform: translateY(15px);
+    }
+
+    .r1-titlebar {
+      height: 42px;
+      background: #101014;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      display: flex;
+      align-items: center;
+      padding: 0 18px;
+      gap: 8px;
+    }
+
+    .r1-dot { width: 12px; height: 12px; border-radius: 50%; }
+    .r1-dot-red { background: #FF5F57; }
+    .r1-dot-yellow { background: #FEBC2E; }
+    .r1-dot-green { background: #28C840; }
+
+    .r1-term-body {
+      padding: 24px 28px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 15px;
+      line-height: 1.6;
+      color: #E8E4DF;
+    }
+
+    .r1-log-row {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 6px;
+      opacity: 0;
+    }
+
+    .r1-warning-bar {
+      margin-top: 16px;
+      padding: 12px;
+      background: rgba(240, 68, 56, 0.15);
+      border: 1px solid #F04438;
+      color: #F04438;
+      font-size: 14px;
+      font-weight: 700;
+      text-align: center;
+      border-radius: 6px;
+      letter-spacing: 0.06em;
+      opacity: 0;
+    }
+  </style>
+
+  <div id="root" data-composition-id="01-hook" data-width="1080" data-height="1920" data-duration="4.915">
+    <div id="r1-bg-clip" class="clip r1-bg" data-start="0" data-duration="4.915" data-track-index="0">
+      <div class="r1-grid"></div>
+    </div>
+
+    <div id="r1-content-clip" class="clip r1-content" data-start="0" data-duration="4.915" data-track-index="1" style="position: absolute; inset: 0; width: 1080px; height: 1920px;">
+      <div class="r1-container">
+        <!-- Hero stat card -->
+        <div class="r1-hero-card" id="r1-hero">
+          <div class="r1-kicker">⚠️ RUNAWAY AGENT DETECTED</div>
+          <div class="r1-main-stat">250 TOKENS BURNED</div>
+          <div class="r1-sub-stat">IN TEN SECONDS</div>
+
+          <div class="r1-counter-row">
+            <span style="color: #8A8690; font-size: 15px; text-transform: uppercase;">Unchecked Loop Spend</span>
+            <span class="r1-counter-num" id="r1-counter">0 TOKENS</span>
+          </div>
+        </div>
+
+        <!-- Terminal log stream -->
+        <div class="r1-terminal-card" id="r1-term">
+          <div class="r1-titlebar">
+            <div class="r1-dot r1-dot-red"></div>
+            <div class="r1-dot r1-dot-yellow"></div>
+            <div class="r1-dot r1-dot-green"></div>
+            <span style="margin-left: 12px; font-size: 13px; color: #8A8690; font-family: 'JetBrains Mono';">agent_worker.py — unconstrained</span>
+          </div>
+
+          <div class="r1-term-body">
+            <div class="r1-log-row" id="r1-row0"><span>[step 0] POST /v1/chat/completions</span><span style="color: #F04438;">+25 tok</span></div>
+            <div class="r1-log-row" id="r1-row1"><span>[step 1] POST /v1/chat/completions</span><span style="color: #F04438;">+50 tok</span></div>
+            <div class="r1-log-row" id="r1-row2"><span>[step 2] POST /v1/chat/completions</span><span style="color: #F04438;">+75 tok</span></div>
+            <div class="r1-log-row" id="r1-row3"><span>[step 3] POST /v1/chat/completions</span><span style="color: #F04438;">+100 tok</span></div>
+            <div class="r1-log-row" id="r1-row4"><span>[step 4] POST /v1/chat/completions</span><span style="color: #F04438;">+125 tok</span></div>
+            <div class="r1-log-row" id="r1-row5"><span>[step 5] POST /v1/chat/completions</span><span style="color: #F04438;">+150 tok</span></div>
+            <div class="r1-log-row" id="r1-row6"><span>[step 6] POST /v1/chat/completions</span><span style="color: #F04438;">+175 tok</span></div>
+            <div class="r1-log-row" id="r1-row7"><span>[step 7] POST /v1/chat/completions</span><span style="color: #F04438;">+200 tok</span></div>
+
+            <div class="r1-warning-bar" id="r1-warn">
+              NO CEILING · NO BUDGET GUARDRAIL
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+    <script>
+      (function() {
+        const tl = gsap.timeline({ paused: true });
+        window.__timelines = window.__timelines || {};
+        window.__timelines["01-hook"] = tl;
+
+        // Hero is visible immediately at frame 0, terminal slides up smoothly
+        tl.to("#r1-term", { opacity: 1, y: 0, duration: 0.4, ease: "power2.out" }, 0.2);
+
+        // Rapid count-up
+        const counter = { val: 0 };
+        const counterEl = document.getElementById("r1-counter");
+        tl.to(counter, {
+          val: 250,
+          duration: 1.8,
+          ease: "power2.inOut",
+          onUpdate: function() {
+            counterEl.textContent = Math.round(counter.val) + " TOKENS";
+          }
+        }, 0.4);
+
+        // Streaming rows
+        for (let i = 0; i <= 7; i++) {
+          tl.to("#r1-row" + i, { opacity: 1, duration: 0.1 }, 0.4 + i * 0.18);
+        }
+
+        // Warning bar
+        tl.to("#r1-warn", { opacity: 1, duration: 0.3 }, 2.2);
+      })();
+    </script>
+  </div>
+</template>

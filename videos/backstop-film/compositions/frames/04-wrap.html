@@ -1,0 +1,234 @@
+<template>
+  <style>
+    @font-face {
+      font-family: 'Inter';
+      font-weight: 400;
+      src: url('assets/fonts/Inter-400.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'Inter';
+      font-weight: 700;
+      src: url('assets/fonts/Inter-700.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'JetBrains Mono';
+      font-weight: 400;
+      src: url('assets/fonts/JetBrainsMono-400.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'JetBrains Mono';
+      font-weight: 700;
+      src: url('assets/fonts/JetBrainsMono-700.woff2') format('woff2');
+    }
+
+    #root {
+      position: absolute;
+      inset: 0;
+      width: 1920px;
+      height: 1080px;
+      overflow: hidden;
+      background: transparent;
+      font-family: 'Inter', sans-serif;
+      color: #E8E4DF;
+    }
+
+    .d4-bg {
+      position: absolute;
+      inset: 0;
+      width: 1920px;
+      height: 1080px;
+      background: radial-gradient(circle at 50% 40%, #16161B 0%, #0C0C0E 65%, #060608 100%);
+    }
+
+    .d4-grid {
+      position: absolute;
+      inset: 0;
+      background-size: 80px 80px;
+      background-image: 
+        linear-gradient(to right, rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+      pointer-events: none;
+    }
+
+    .d4-window {
+      position: absolute;
+      left: 360px;
+      top: 130px;
+      width: 1200px;
+      height: 600px;
+      background: #18181D;
+      border-radius: 10px;
+      box-shadow: 0 28px 56px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .d4-titlebar {
+      height: 38px;
+      background: #141418;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      position: relative;
+    }
+
+    .d4-traffic-lights {
+      display: flex;
+      gap: 8px;
+    }
+
+    .d4-dot { width: 12px; height: 12px; border-radius: 50%; }
+    .d4-dot-red { background: #FF5F57; }
+    .d4-dot-yellow { background: #FEBC2E; }
+    .d4-dot-green { background: #28C840; }
+
+    .d4-title {
+      position: absolute;
+      left: 0;
+      right: 0;
+      text-align: center;
+      font-size: 13px;
+      color: #8A8690;
+      font-family: 'JetBrains Mono', monospace;
+      pointer-events: none;
+    }
+
+    .d4-editor {
+      flex: 1;
+      background: #13131A;
+      padding: 24px 36px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 15.5px;
+      line-height: 1.7;
+      color: #E8E4DF;
+      position: relative;
+    }
+
+    .d4-line {
+      display: block;
+      white-space: pre;
+      position: relative;
+      z-index: 1;
+    }
+
+    .d4-ln { display: inline-block; width: 34px; color: #4E4B55; user-select: none; font-size: 14px; }
+    .d4-kw { color: #C678DD; font-weight: 700; }
+    .d4-volt-kw { color: #22D67A; font-weight: 700; }
+    .d4-fn { color: #61AFEF; }
+    .d4-str { color: #98C379; }
+    .d4-num { color: #D19A66; }
+    .d4-comment { color: #5C6370; font-style: italic; }
+
+    .d4-wrap-box {
+      position: absolute;
+      left: 60px;
+      top: 155px;
+      width: 900px;
+      height: 120px;
+      border: 1.5px solid rgba(34, 214, 122, 0.4);
+      background: rgba(34, 214, 122, 0.06);
+      border-radius: 6px;
+      pointer-events: none;
+      opacity: 0;
+      box-shadow: 0 0 24px rgba(34, 214, 122, 0.12);
+    }
+
+    .d4-badge {
+      position: absolute;
+      right: 36px;
+      bottom: 24px;
+      background: rgba(34, 214, 122, 0.12);
+      border: 1.5px solid #22D67A;
+      color: #22D67A;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      font-weight: 700;
+      padding: 8px 18px;
+      border-radius: 6px;
+      letter-spacing: 0.04em;
+      opacity: 0;
+      transform: translateY(10px);
+    }
+  </style>
+
+  <div id="root" data-composition-id="04-wrap" data-width="1920" data-height="1080" data-duration="10.975">
+    <div id="d4-bg-clip" class="clip d4-bg" data-start="0" data-duration="10.975" data-track-index="0">
+      <div class="d4-grid"></div>
+    </div>
+
+    <div id="d4-content-clip" class="clip d4-content-layer" data-start="0" data-duration="10.975" data-track-index="1" style="position: absolute; inset: 0; width: 1920px; height: 1080px;">
+      <div class="d4-window" id="d4-win">
+        <div class="d4-titlebar">
+          <div class="d4-traffic-lights">
+            <div class="d4-dot d4-dot-red"></div>
+            <div class="d4-dot d4-dot-yellow"></div>
+            <div class="d4-dot d4-dot-green"></div>
+          </div>
+          <div class="d4-title">agent_loop_guard.py — Backstop Integration</div>
+        </div>
+
+        <div class="d4-editor" id="d4-editor">
+          <div class="d4-wrap-box" id="d4-box"></div>
+
+          <div class="d4-line"><span class="d4-ln">1</span><span class="d4-kw">from</span> <span class="d4-fn">openai</span> <span class="d4-kw">import</span> <span class="d4-fn">OpenAI</span></div>
+          <div class="d4-line" id="d4-import-line"><span class="d4-ln">2</span><span class="d4-kw">from</span> <span class="d4-volt-kw">backstop</span> <span class="d4-kw">import</span> <span class="d4-volt-kw">Backstop</span>, <span class="d4-fn">BackstopConfig</span></div>
+          <div class="d4-line"><span class="d4-ln">3</span></div>
+          <div class="d4-line"><span class="d4-ln">4</span><span class="d4-comment"># Initialize standard SDK client</span></div>
+          <div class="d4-line"><span class="d4-ln">5</span><span class="d4-fn">raw_client</span> = <span class="d4-fn">OpenAI</span>()</div>
+          <div class="d4-line"><span class="d4-ln">6</span></div>
+          <div class="d4-line"><span class="d4-ln">7</span><span class="d4-comment"># Wrap client with in-process token budget</span></div>
+          <div class="d4-line"><span class="d4-ln">8</span><span class="d4-fn">client</span> = <span class="d4-volt-kw">Backstop.wrap</span>(</div>
+          <div class="d4-line"><span class="d4-ln">9</span>    <span class="d4-fn">raw_client</span>,</div>
+          <div class="d4-line" id="d4-budget-line"><span class="d4-ln">10</span>    <span class="d4-fn">budget</span>=<span class="d4-num" style="color: #22D67A; font-weight: 700; text-decoration: underline;">120</span>,  <span class="d4-comment"># Hard token ceiling</span></div>
+          <div class="d4-line"><span class="d4-ln">11</span>    <span class="d4-fn">config</span>=<span class="d4-fn">BackstopConfig</span>(<span class="d4-fn">default_max_output_tokens</span>=<span class="d4-num">30</span>)</div>
+          <div class="d4-line"><span class="d4-ln">12</span>)</div>
+          <div class="d4-line"><span class="d4-ln">13</span></div>
+          <div class="d4-line"><span class="d4-ln">14</span><span class="d4-comment"># Zero code changes below: client behaves exactly as before</span></div>
+          <div class="d4-line"><span class="d4-ln">15</span><span class="d4-kw">for</span> <span class="d4-fn">step</span> <span class="d4-kw">in</span> <span class="d4-fn">range</span>(<span class="d4-num">10</span>):</div>
+
+          <div class="d4-badge" id="d4-badge">
+            ✓ CHECKED BEFORE DISPATCH · REST OF CODE UNCHANGED
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+    <script>
+      (function() {
+        const tl = gsap.timeline({ paused: true });
+        window.__timelines = window.__timelines || {};
+        window.__timelines["04-wrap"] = tl;
+
+        // Window entry
+        gsap.set("#d4-win", { opacity: 0, y: 15 });
+        tl.to("#d4-win", { opacity: 1, y: 0, duration: 0.5, ease: "power2.out" }, 0.2);
+
+        // "Import Backstop" highlight
+        tl.fromTo("#d4-import-line", 
+          { backgroundColor: "transparent" },
+          { backgroundColor: "rgba(34, 214, 122, 0.12)", duration: 0.4, repeat: 1, yoyo: true, ease: "power1.inOut" }, 
+          1.0
+        );
+
+        // "Wrap the client" box glow
+        tl.to("#d4-box", { opacity: 1, duration: 0.5, ease: "power2.out" }, 2.5);
+
+        // "Set the ceiling at one hundred twenty tokens"
+        tl.fromTo("#d4-budget-line",
+          { backgroundColor: "transparent" },
+          { backgroundColor: "rgba(34, 214, 122, 0.18)", duration: 0.5, repeat: 1, yoyo: true },
+          4.2
+        );
+
+        // Badge entry
+        tl.to("#d4-badge", { opacity: 1, y: 0, duration: 0.5, ease: "back.out(1.4)" }, 6.2);
+
+        // Subtle camera zoom on editor
+        tl.to("#d4-editor", { scale: 1.04, transformOrigin: "center center", duration: 4.0, ease: "power1.inOut" }, 6.0);
+      })();
+    </script>
+  </div>
+</template>

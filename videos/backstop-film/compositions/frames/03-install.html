@@ -1,0 +1,341 @@
+<template>
+  <style>
+    @font-face {
+      font-family: 'Inter';
+      font-weight: 400;
+      src: url('assets/fonts/Inter-400.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'Inter';
+      font-weight: 700;
+      src: url('assets/fonts/Inter-700.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'JetBrains Mono';
+      font-weight: 400;
+      src: url('assets/fonts/JetBrainsMono-400.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'JetBrains Mono';
+      font-weight: 700;
+      src: url('assets/fonts/JetBrainsMono-700.woff2') format('woff2');
+    }
+
+    #root {
+      position: absolute;
+      inset: 0;
+      width: 1920px;
+      height: 1080px;
+      overflow: hidden;
+      background: transparent;
+      font-family: 'Inter', sans-serif;
+      color: #E8E4DF;
+    }
+
+    .d3-bg {
+      position: absolute;
+      inset: 0;
+      width: 1920px;
+      height: 1080px;
+      background: radial-gradient(circle at 50% 40%, #16161B 0%, #0C0C0E 65%, #060608 100%);
+    }
+
+    .d3-grid {
+      position: absolute;
+      inset: 0;
+      background-size: 80px 80px;
+      background-image: 
+        linear-gradient(to right, rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+      pointer-events: none;
+    }
+
+    .d3-container {
+      position: absolute;
+      left: 230px;
+      top: 170px;
+      width: 1460px;
+      display: flex;
+      gap: 32px;
+      align-items: stretch;
+    }
+
+    /* Left Terminal */
+    .d3-terminal {
+      flex: 1;
+      height: 520px;
+      background: #18181D;
+      border-radius: 10px;
+      box-shadow: 0 24px 48px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .d3-titlebar {
+      height: 38px;
+      background: #141418;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      position: relative;
+    }
+
+    .d3-traffic-lights {
+      display: flex;
+      gap: 8px;
+    }
+
+    .d3-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+    }
+    .d3-dot-red { background: #FF5F57; }
+    .d3-dot-yellow { background: #FEBC2E; }
+    .d3-dot-green { background: #28C840; }
+
+    .d3-title {
+      position: absolute;
+      left: 0;
+      right: 0;
+      text-align: center;
+      font-size: 13px;
+      color: #A09CA6;
+      font-family: 'JetBrains Mono', monospace;
+      pointer-events: none;
+    }
+
+    .d3-term-body {
+      flex: 1;
+      background: #101014;
+      padding: 24px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 15px;
+      line-height: 1.7;
+    }
+
+    .d3-prompt { color: #22D67A; font-weight: 700; margin-right: 10px; }
+    .d3-cmd { color: #E8E4DF; }
+    .d3-caret {
+      display: inline-block;
+      width: 8px;
+      height: 16px;
+      background: #E8E4DF;
+      margin-left: 4px;
+      vertical-align: middle;
+      animation: d3-blink 0.9s step-end infinite;
+    }
+    @keyframes d3-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+
+    .d3-term-line {
+      opacity: 0;
+      margin-top: 8px;
+      color: #A09CA6;
+    }
+    .d3-term-success {
+      color: #22D67A;
+      font-weight: 700;
+    }
+
+    /* Right Architecture Card */
+    .d3-arch-card {
+      flex: 1.1;
+      height: 520px;
+      background: #1A1A20;
+      border-radius: 10px;
+      box-shadow: 0 24px 48px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      padding: 36px 32px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .d3-arch-header {
+      font-size: 13px;
+      font-weight: 700;
+      color: #22D67A;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      font-family: 'JetBrains Mono', monospace;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .d3-arch-diagram {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      margin: 20px 0;
+    }
+
+    .d3-arch-node {
+      background: #25252D;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      padding: 16px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      opacity: 0;
+      transform: translateY(10px);
+    }
+
+    .d3-arch-node-title {
+      font-weight: 700;
+      font-size: 16px;
+      color: #E8E4DF;
+    }
+
+    .d3-arch-node-desc {
+      font-size: 13px;
+      color: #A09CA6;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .d3-arch-node-hero {
+      border: 1.5px solid #22D67A;
+      background: rgba(34, 214, 122, 0.08);
+      box-shadow: 0 0 20px rgba(34, 214, 122, 0.15);
+    }
+
+    .d3-arch-arrow {
+      text-align: center;
+      color: #A09CA6;
+      font-size: 14px;
+      opacity: 0;
+    }
+
+    .d3-arch-footer {
+      background: rgba(255, 255, 255, 0.03);
+      border-radius: 6px;
+      padding: 12px 16px;
+      font-size: 13px;
+      color: #A09CA6;
+      display: flex;
+      justify-content: space-around;
+      font-family: 'JetBrains Mono', monospace;
+      border: 1px solid rgba(255, 255, 255, 0.04);
+      opacity: 0;
+    }
+  </style>
+
+  <div id="root" data-composition-id="03-install" data-width="1920" data-height="1080" data-duration="13.3">
+    <div id="d3-bg-clip" class="clip d3-bg" data-start="0" data-duration="13.3" data-track-index="0">
+      <div class="d3-grid"></div>
+    </div>
+
+    <div id="d3-content-clip" class="clip d3-content-layer" data-start="0" data-duration="13.3" data-track-index="1" style="position: absolute; inset: 0; width: 1920px; height: 1080px;">
+      <div class="d3-container">
+        <!-- Terminal (Left) -->
+        <div class="d3-terminal" id="d3-term">
+          <div class="d3-titlebar">
+            <div class="d3-traffic-lights">
+              <div class="d3-dot d3-dot-red"></div>
+              <div class="d3-dot d3-dot-yellow"></div>
+              <div class="d3-dot d3-dot-green"></div>
+            </div>
+            <div class="d3-title">Terminal — pip install</div>
+          </div>
+          <div class="d3-term-body">
+            <div>
+              <span class="d3-prompt">➜ $</span>
+              <span class="d3-cmd" id="d3-cmd-text"></span><span class="d3-caret" id="d3-caret"></span>
+            </div>
+            <div class="d3-term-line" id="d3-tl1">Collecting backstop-ai</div>
+            <div class="d3-term-line" id="d3-tl2">  Downloading backstop_ai-0.6.0-py3-none-any.whl (18 kB)</div>
+            <div class="d3-term-line" id="d3-tl3">Installing collected packages: backstop-ai</div>
+            <div class="d3-term-line d3-term-success" id="d3-tl4">Successfully installed backstop-ai-0.6.0</div>
+          </div>
+        </div>
+
+        <!-- Arch Diagram (Right) -->
+        <div class="d3-arch-card" id="d3-arch">
+          <div class="d3-arch-header">
+            <span>⚡</span> In-Process Transport Architecture
+          </div>
+
+          <div class="d3-arch-diagram">
+            <div class="d3-arch-node" id="d3-node1">
+              <span class="d3-arch-node-title">SDK Client</span>
+              <span class="d3-arch-node-desc">OpenAI() / Anthropic()</span>
+            </div>
+
+            <div class="d3-arch-arrow" id="d3-arr1">▼ calls wrap()</div>
+
+            <div class="d3-arch-node d3-arch-node-hero" id="d3-node2">
+              <div>
+                <div class="d3-arch-node-title" style="color: #22D67A;">BackstopTransport</div>
+                <div style="font-size: 12px; color: #E8E4DF; margin-top: 4px;">In-Process Budget Guardrail</div>
+              </div>
+              <span class="d3-arch-node-desc" style="color: #22D67A; font-weight: 700;">CHECKED BEFORE DISPATCH</span>
+            </div>
+
+            <div class="d3-arch-arrow" id="d3-arr2">▼ dispatches if under budget</div>
+
+            <div class="d3-arch-node" id="d3-node3">
+              <span class="d3-arch-node-title">Upstream API</span>
+              <span class="d3-arch-node-desc">api.openai.com</span>
+            </div>
+          </div>
+
+          <div class="d3-arch-footer" id="d3-footer">
+            <span>✓ No Proxy</span>
+            <span>✓ No Latency</span>
+            <span>✓ Zero Network Hops</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+    <script>
+      (function() {
+        const tl = gsap.timeline({ paused: true });
+        window.__timelines = window.__timelines || {};
+        window.__timelines["03-install"] = tl;
+
+        const cmdText = document.getElementById("d3-cmd-text");
+        const fullCmd = 'pip install "backstop-ai"';
+
+        // Initial setup
+        gsap.set("#d3-term", { opacity: 0, y: 15 });
+        gsap.set("#d3-arch", { opacity: 0, y: 15 });
+
+        // 1. Enter Left Terminal and Right Card together early
+        tl.to("#d3-term", { opacity: 1, y: 0, duration: 0.5, ease: "power2.out" }, 0.2);
+        tl.to("#d3-arch", { opacity: 1, y: 0, duration: 0.5, ease: "power2.out" }, 0.4);
+
+        // 2. Type command
+        const typing = { val: 0 };
+        tl.to(typing, {
+          val: fullCmd.length,
+          duration: 1.0,
+          ease: "none",
+          onUpdate: function() {
+            cmdText.textContent = fullCmd.slice(0, Math.round(typing.val));
+          }
+        }, 0.6);
+
+        // 3. Output stream
+        tl.to("#d3-tl1", { opacity: 1, duration: 0.1 }, 1.8);
+        tl.to("#d3-tl2", { opacity: 1, duration: 0.1 }, 2.1);
+        tl.to("#d3-tl3", { opacity: 1, duration: 0.1 }, 2.4);
+        tl.to("#d3-tl4", { opacity: 1, duration: 0.2 }, 2.8);
+
+        // 4. Staggered Nodes in Diagram
+        tl.to("#d3-node1", { opacity: 1, y: 0, duration: 0.4 }, 2.2);
+        tl.to("#d3-arr1", { opacity: 1, duration: 0.3 }, 2.6);
+        tl.to("#d3-node2", { opacity: 1, y: 0, duration: 0.5, ease: "back.out(1.4)" }, 3.0);
+        tl.to("#d3-arr2", { opacity: 1, duration: 0.3 }, 3.5);
+        tl.to("#d3-node3", { opacity: 1, y: 0, duration: 0.4 }, 3.8);
+
+        // 5. Highlight footer: "No proxy. No network hop."
+        tl.to("#d3-footer", { opacity: 1, duration: 0.5 }, 4.8);
+      })();
+    </script>
+  </div>
+</template>

@@ -1,0 +1,280 @@
+<template>
+  <style>
+    @font-face {
+      font-family: 'Inter';
+      font-weight: 400;
+      src: url('assets/fonts/Inter-400.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'Inter';
+      font-weight: 700;
+      src: url('assets/fonts/Inter-700.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'JetBrains Mono';
+      font-weight: 400;
+      src: url('assets/fonts/JetBrainsMono-400.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'JetBrains Mono';
+      font-weight: 700;
+      src: url('assets/fonts/JetBrainsMono-700.woff2') format('woff2');
+    }
+
+    #root {
+      position: absolute;
+      inset: 0;
+      width: 1920px;
+      height: 1080px;
+      overflow: hidden;
+      background: transparent;
+      font-family: 'Inter', sans-serif;
+      color: #E8E4DF;
+    }
+
+    .d8-bg {
+      position: absolute;
+      inset: 0;
+      width: 1920px;
+      height: 1080px;
+      background: radial-gradient(circle at 50% 40%, #16161B 0%, #0C0C0E 65%, #060608 100%);
+    }
+
+    .d8-grid {
+      position: absolute;
+      inset: 0;
+      background-size: 80px 80px;
+      background-image: 
+        linear-gradient(to right, rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+      pointer-events: none;
+    }
+
+    .d8-volt-glow {
+      position: absolute;
+      width: 700px;
+      height: 400px;
+      left: 610px;
+      top: 250px;
+      background: radial-gradient(circle, rgba(34, 214, 122, 0.08) 0%, transparent 70%);
+      filter: blur(40px);
+      pointer-events: none;
+    }
+
+    .d8-container {
+      position: absolute;
+      inset: 0;
+      width: 1920px;
+      height: 1080px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding-top: 170px;
+    }
+
+    .d8-logo-wrap {
+      width: 76px;
+      height: 76px;
+      margin-bottom: 20px;
+      opacity: 0;
+      transform: scale(0.85);
+    }
+
+    .d8-logo-img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+
+    .d8-title {
+      font-size: 52px;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      color: #E8E4DF;
+      margin-bottom: 10px;
+      opacity: 0;
+    }
+
+    .d8-tagline {
+      font-size: 22px;
+      color: #8A8690;
+      margin-bottom: 36px;
+      opacity: 0;
+    }
+
+    .d8-cmd-card {
+      width: 740px;
+      height: 74px;
+      background: #18181F;
+      border: 1.5px solid rgba(34, 214, 122, 0.35);
+      border-radius: 10px;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4), 0 0 30px rgba(34, 214, 122, 0.1);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 28px;
+      position: relative;
+      overflow: hidden;
+      opacity: 0;
+      transform: translateY(12px);
+    }
+
+    .d8-cmd-text {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 26px;
+      font-weight: 700;
+      color: #22D67A;
+      position: relative;
+      z-index: 2;
+    }
+
+    .d8-sweep-highlight {
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 0%;
+      background: rgba(34, 214, 122, 0.18);
+      z-index: 1;
+    }
+
+    .d8-copy-btn {
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: #E8E4DF;
+      font-family: 'Inter', sans-serif;
+      font-size: 14px;
+      font-weight: 600;
+      padding: 8px 16px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      z-index: 2;
+      transition: all 0.2s ease;
+    }
+
+    .d8-copied {
+      background: rgba(34, 214, 122, 0.15) !important;
+      border-color: #22D67A !important;
+      color: #22D67A !important;
+    }
+
+    .d8-click-ripple {
+      position: absolute;
+      right: 48px;
+      top: 36px;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: rgba(34, 214, 122, 0.4);
+      transform: translate(50%, -50%) scale(0);
+      pointer-events: none;
+      z-index: 3;
+    }
+
+    .d8-meta-links {
+      margin-top: 28px;
+      display: flex;
+      gap: 24px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 15px;
+      color: #8A8690;
+      opacity: 0;
+    }
+
+    .d8-cursor {
+      position: absolute;
+      width: 24px;
+      height: 24px;
+      pointer-events: none;
+      z-index: 100;
+      opacity: 0;
+    }
+  </style>
+
+  <div id="root" data-composition-id="08-cta" data-width="1920" data-height="1080">
+    <div id="d8-bg-clip" class="clip d8-bg" data-start="0" data-duration="8.124" data-track-index="0">
+      <div class="d8-grid"></div>
+      <div class="d8-volt-glow"></div>
+    </div>
+
+    <div id="d8-content-clip" class="clip d8-content-layer" data-start="0" data-duration="8.124" data-track-index="1" style="position: absolute; inset: 0; width: 1920px; height: 1080px;">
+      <div class="d8-container">
+        <div class="d8-logo-wrap" id="d8-logo">
+          <img src="assets/backstop-logo.svg" class="d8-logo-img" alt="Backstop Logo" />
+        </div>
+
+        <div class="d8-title" id="d8-title">Backstop</div>
+        <div class="d8-tagline" id="d8-tagline">Stop agent loops from burning your budget.</div>
+
+        <div class="d8-cmd-card" id="d8-card">
+          <div class="d8-sweep-highlight" id="d8-sweep"></div>
+          <div class="d8-cmd-text" id="d8-cmd">pip install "backstop-ai"</div>
+          <div class="d8-copy-btn" id="d8-btn">
+            <span id="d8-btn-icon">📋</span>
+            <span id="d8-btn-text">Copy</span>
+          </div>
+          <div class="d8-click-ripple" id="d8-ripple"></div>
+        </div>
+
+        <div class="d8-meta-links" id="d8-meta">
+          <span>github.com/RavaniRoshan/backstop</span>
+          <span>·</span>
+          <span>MIT Licensed</span>
+          <span>·</span>
+          <span>In-Process Guardrail</span>
+        </div>
+      </div>
+
+      <!-- Real macOS arrow cursor -->
+      <svg class="d8-cursor" id="d8-cursor" viewBox="0 0 24 24" fill="none">
+        <path d="M5.5 3.5L18.5 16.5H12L8.5 22.5L5.5 3.5Z" fill="black" stroke="white" stroke-width="1.5" stroke-linejoin="round"/>
+      </svg>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+    <script>
+      (function() {
+        const tl = gsap.timeline({ paused: true });
+        window.__timelines = window.__timelines || {};
+        window.__timelines["08-cta"] = tl;
+
+        // Initial cursor placement
+        gsap.set("#d8-cursor", { opacity: 0, x: 1400, y: 700 });
+
+        // 1. Logo and titles reveal
+        tl.to("#d8-logo", { opacity: 1, scale: 1, duration: 0.6, ease: "back.out(1.4)" }, 0.2);
+        tl.to("#d8-title", { opacity: 1, duration: 0.5 }, 0.4);
+        tl.to("#d8-tagline", { opacity: 1, duration: 0.5 }, 0.6);
+
+        // 2. Command card arrives
+        tl.to("#d8-card", { opacity: 1, y: 0, duration: 0.5, ease: "power2.out" }, 0.9);
+        tl.to("#d8-meta", { opacity: 1, duration: 0.5 }, 1.3);
+
+        // 3. Cursor approaches copy button (t=2.0s), rests for 1s
+        tl.to("#d8-cursor", { opacity: 1, duration: 0.3 }, 2.0);
+        tl.to("#d8-cursor", { x: 1285, y: 465, duration: 1.0, ease: "power2.out" }, 2.1);
+
+        // 4. Click ripple at t=3.3s (after 1s rest)
+        tl.to("#d8-ripple", { scale: 3.5, opacity: 0, duration: 0.4, ease: "power1.out" }, 3.3);
+
+        // 5. Select sweep animation across text
+        tl.to("#d8-sweep", { width: "100%", duration: 0.35, ease: "power2.inOut" }, 3.3);
+
+        // 6. Button morphs to ✓ Copied
+        tl.add(function() {
+          const btn = document.getElementById("d8-btn");
+          const icon = document.getElementById("d8-btn-icon");
+          const text = document.getElementById("d8-btn-text");
+          btn.classList.add("d8-copied");
+          icon.textContent = "✓";
+          text.textContent = "Copied";
+        }, 3.4);
+
+        // 7. Cursor pulls back slightly, hold state persists cleanly to end
+        tl.to("#d8-cursor", { x: 1330, y: 520, duration: 0.8, ease: "power1.out" }, 4.0);
+      })();
+    </script>
+  </div>
+</template>

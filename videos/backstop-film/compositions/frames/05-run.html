@@ -1,0 +1,279 @@
+<template>
+  <style>
+    @font-face {
+      font-family: 'Inter';
+      font-weight: 400;
+      src: url('assets/fonts/Inter-400.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'Inter';
+      font-weight: 700;
+      src: url('assets/fonts/Inter-700.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'JetBrains Mono';
+      font-weight: 400;
+      src: url('assets/fonts/JetBrainsMono-400.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'JetBrains Mono';
+      font-weight: 700;
+      src: url('assets/fonts/JetBrainsMono-700.woff2') format('woff2');
+    }
+
+    #root {
+      position: absolute;
+      inset: 0;
+      width: 1920px;
+      height: 1080px;
+      overflow: hidden;
+      background: transparent;
+      font-family: 'Inter', sans-serif;
+      color: #E8E4DF;
+    }
+
+    .d5-bg {
+      position: absolute;
+      inset: 0;
+      width: 1920px;
+      height: 1080px;
+      background: radial-gradient(circle at 50% 40%, #16161B 0%, #0C0C0E 65%, #060608 100%);
+    }
+
+    .d5-grid {
+      position: absolute;
+      inset: 0;
+      background-size: 80px 80px;
+      background-image: 
+        linear-gradient(to right, rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+      pointer-events: none;
+    }
+
+    .d5-volt-glow {
+      position: absolute;
+      width: 900px;
+      height: 500px;
+      left: 510px;
+      top: 180px;
+      background: radial-gradient(circle, rgba(34, 214, 122, 0.12) 0%, rgba(34, 214, 122, 0.02) 60%, transparent 80%);
+      filter: blur(40px);
+      pointer-events: none;
+      opacity: 0;
+    }
+
+    .d5-window {
+      position: absolute;
+      left: 385px;
+      top: 140px;
+      width: 1150px;
+      height: 570px;
+      background: #18181D;
+      border-radius: 10px;
+      box-shadow: 0 28px 56px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .d5-titlebar {
+      height: 38px;
+      background: #141418;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      position: relative;
+    }
+
+    .d5-traffic-lights {
+      display: flex;
+      gap: 8px;
+    }
+
+    .d5-dot { width: 12px; height: 12px; border-radius: 50%; }
+    .d5-dot-red { background: #FF5F57; }
+    .d5-dot-yellow { background: #FEBC2E; }
+    .d5-dot-green { background: #28C840; }
+
+    .d5-title {
+      position: absolute;
+      left: 0;
+      right: 0;
+      text-align: center;
+      font-size: 13px;
+      color: #8A8690;
+      font-family: 'JetBrains Mono', monospace;
+      pointer-events: none;
+    }
+
+    .d5-term-inner {
+      flex: 1;
+      background: #101014;
+      padding: 26px 32px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 15.5px;
+      line-height: 1.7;
+      overflow: hidden;
+    }
+
+    .d5-prompt-row { display: flex; align-items: baseline; margin-bottom: 12px; }
+    .d5-prompt { color: #22D67A; font-weight: 700; margin-right: 12px; }
+    .d5-cmd { color: #E8E4DF; }
+    .d5-caret {
+      display: inline-block;
+      width: 8px;
+      height: 16px;
+      background: #E8E4DF;
+      margin-left: 4px;
+      vertical-align: middle;
+      animation: d5-blink 0.9s step-end infinite;
+    }
+    @keyframes d5-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+
+    .d5-out-line {
+      opacity: 0;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+    }
+
+    .d5-step-pass { color: #22D67A; font-weight: 700; margin-right: 12px; }
+    .d5-step-blocked { color: #F04438; font-weight: 700; margin-right: 12px; }
+    .d5-blocked-pill {
+      background: rgba(34, 214, 122, 0.15);
+      border: 1px solid #22D67A;
+      color: #22D67A;
+      font-size: 12px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 4px;
+      margin-left: 12px;
+    }
+
+    .d5-error-box {
+      margin-top: 14px;
+      padding: 14px 18px;
+      background: rgba(240, 68, 56, 0.08);
+      border-left: 3px solid #F04438;
+      border-radius: 4px;
+      opacity: 0;
+      transform: translateY(8px);
+    }
+
+    .d5-err-title { color: #F04438; font-weight: 700; font-size: 14px; margin-bottom: 4px; }
+    .d5-err-desc { color: #E8E4DF; font-size: 13.5px; }
+
+    .d5-verdict {
+      margin-top: 16px;
+      color: #22D67A;
+      font-weight: 700;
+      font-size: 15px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      opacity: 0;
+    }
+  </style>
+
+  <div id="root" data-composition-id="05-run" data-width="1920" data-height="1080" data-duration="11.341">
+    <div id="d5-bg-clip" class="clip d5-bg" data-start="0" data-duration="11.341" data-track-index="0">
+      <div class="d5-grid"></div>
+      <div class="d5-volt-glow" id="d5-glow"></div>
+    </div>
+
+    <div id="d5-content-clip" class="clip d5-content-layer" data-start="0" data-duration="11.341" data-track-index="1" style="position: absolute; inset: 0; width: 1920px; height: 1080px;">
+      <div class="d5-window" id="d5-win">
+        <div class="d5-titlebar">
+          <div class="d5-traffic-lights">
+            <div class="d5-dot d5-dot-red"></div>
+            <div class="d5-dot d5-dot-yellow"></div>
+            <div class="d5-dot d5-dot-green"></div>
+          </div>
+          <div class="d5-title">python agent_loop_guard.py — zsh</div>
+        </div>
+
+        <div class="d5-term-inner" id="d5-term-inner">
+          <div class="d5-prompt-row">
+            <span class="d5-prompt">➜ ~/projects/agent $</span>
+            <span class="d5-cmd" id="d5-cmd-text"></span><span class="d5-caret" id="d5-caret"></span>
+          </div>
+
+          <div class="d5-out-line" id="d5-line0">
+            <span class="d5-step-pass">[Step 0]</span>
+            <span>completed — prompt dispatched, 45 tokens billed</span>
+            <span style="color: #22D67A; margin-left: 10px;">✓</span>
+          </div>
+
+          <div class="d5-out-line" id="d5-line1">
+            <span class="d5-step-pass">[Step 1]</span>
+            <span>completed — prompt dispatched, 45 tokens billed</span>
+            <span style="color: #22D67A; margin-left: 10px;">✓</span>
+          </div>
+
+          <div class="d5-out-line" id="d5-line2">
+            <span class="d5-step-blocked">[Step 2]</span>
+            <span style="color: #F04438; font-weight: 700;">BLOCKED BEFORE NETWORK DISPATCH</span>
+            <span class="d5-blocked-pill">STOPPED BY BACKSTOP ⛔</span>
+          </div>
+
+          <div class="d5-error-box" id="d5-err-box">
+            <div class="d5-err-title">backstop.exceptions.BudgetExceededError:</div>
+            <div class="d5-err-desc">Budget ceiling 120 tokens reached (consumed 90, request needed 45). Call stopped in-process.</div>
+          </div>
+
+          <div class="d5-verdict" id="d5-verdict">
+            <span>🛡️</span>
+            <span>Loop stopped after 2 calls. No further spend possible. Your wallet is safe.</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+    <script>
+      (function() {
+        const tl = gsap.timeline({ paused: true });
+        window.__timelines = window.__timelines || {};
+        window.__timelines["05-run"] = tl;
+
+        const cmdText = document.getElementById("d5-cmd-text");
+        const fullCmd = "python agent_loop_guard.py";
+
+        // Initial state
+        gsap.set("#d5-win", { opacity: 0, y: 15 });
+        tl.to("#d5-win", { opacity: 1, y: 0, duration: 0.5, ease: "power2.out" }, 0.2);
+
+        // Command typing
+        const typing = { val: 0 };
+        tl.to(typing, {
+          val: fullCmd.length,
+          duration: 1.0,
+          ease: "none",
+          onUpdate: function() {
+            cmdText.textContent = fullCmd.slice(0, Math.round(typing.val));
+          }
+        }, 0.6);
+
+        // Step 0 completed
+        tl.to("#d5-line0", { opacity: 1, duration: 0.2 }, 1.8);
+
+        // Step 1 completed
+        tl.to("#d5-line1", { opacity: 1, duration: 0.2 }, 3.1);
+
+        // Step 2 BLOCKED - the pivotal moment
+        tl.to("#d5-line2", { opacity: 1, duration: 0.15 }, 4.7);
+        tl.to("#d5-glow", { opacity: 1, duration: 0.5 }, 4.7);
+
+        // Camera push-in on inner terminal area
+        tl.to("#d5-term-inner", { scale: 1.05, transformOrigin: "left center", duration: 0.35, ease: "power2.out" }, 4.7);
+
+        // Error box appears
+        tl.to("#d5-err-box", { opacity: 1, y: 0, duration: 0.4, ease: "power2.out" }, 5.5);
+
+        // Verdict banner: "The loop is dead. Your wallet is fine."
+        tl.to("#d5-verdict", { opacity: 1, duration: 0.4 }, 7.5);
+      })();
+    </script>
+  </div>
+</template>

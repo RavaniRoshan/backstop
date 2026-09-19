@@ -1,0 +1,282 @@
+<template>
+  <style>
+    @font-face {
+      font-family: 'Inter';
+      font-weight: 400;
+      src: url('assets/fonts/Inter-400.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'Inter';
+      font-weight: 700;
+      src: url('assets/fonts/Inter-700.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'JetBrains Mono';
+      font-weight: 400;
+      src: url('assets/fonts/JetBrainsMono-400.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'JetBrains Mono';
+      font-weight: 700;
+      src: url('assets/fonts/JetBrainsMono-700.woff2') format('woff2');
+    }
+
+    #root {
+      position: absolute;
+      inset: 0;
+      width: 1920px;
+      height: 1080px;
+      overflow: hidden;
+      background: transparent;
+      font-family: 'Inter', sans-serif;
+      color: #E8E4DF;
+    }
+
+    .d2-bg {
+      position: absolute;
+      inset: 0;
+      width: 1920px;
+      height: 1080px;
+      background: radial-gradient(circle at 50% 40%, #16161B 0%, #0C0C0E 65%, #060608 100%);
+    }
+
+    .d2-grid {
+      position: absolute;
+      inset: 0;
+      background-size: 80px 80px;
+      background-image: 
+        linear-gradient(to right, rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+      pointer-events: none;
+    }
+
+    .d2-window {
+      position: absolute;
+      left: 360px;
+      top: 130px;
+      width: 1200px;
+      height: 600px;
+      background: #18181D;
+      border-radius: 10px;
+      box-shadow: 0 28px 56px rgba(0, 0, 0, 0.5), 0 8px 20px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .d2-titlebar {
+      height: 38px;
+      background: #141418;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      position: relative;
+    }
+
+    .d2-traffic-lights {
+      display: flex;
+      gap: 8px;
+    }
+
+    .d2-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+    }
+    .d2-dot-red { background: #FF5F57; }
+    .d2-dot-yellow { background: #FEBC2E; }
+    .d2-dot-green { background: #28C840; }
+
+    .d2-title {
+      position: absolute;
+      left: 0;
+      right: 0;
+      text-align: center;
+      font-size: 13px;
+      color: #8A8690;
+      font-family: 'JetBrains Mono', monospace;
+      pointer-events: none;
+    }
+
+    .d2-body-wrap {
+      flex: 1;
+      display: flex;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .d2-sidebar {
+      width: 220px;
+      background: #121216;
+      border-right: 1px solid rgba(255, 255, 255, 0.05);
+      padding: 16px 14px;
+      font-family: 'Inter', sans-serif;
+      font-size: 13px;
+      color: #8A8690;
+    }
+
+    .d2-sidebar-heading {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      color: #5F5C66;
+      margin-bottom: 12px;
+      text-transform: uppercase;
+    }
+
+    .d2-file-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 8px;
+      border-radius: 4px;
+      margin-bottom: 2px;
+      font-size: 13px;
+    }
+
+    .d2-file-active {
+      background: rgba(255, 255, 255, 0.06);
+      color: #E8E4DF;
+      font-weight: 500;
+    }
+
+    .d2-editor {
+      flex: 1;
+      background: #13131A;
+      padding: 24px 32px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 16px;
+      line-height: 1.7;
+      color: #E8E4DF;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .d2-code-line {
+      display: block;
+      white-space: pre;
+    }
+
+    .d2-ln {
+      display: inline-block;
+      width: 32px;
+      color: #4E4B55;
+      user-select: none;
+      font-size: 14px;
+    }
+
+    .d2-kw { color: #F04438; font-weight: 700; }
+    .d2-var { color: #E8E4DF; }
+    .d2-fn { color: #61AFEF; }
+    .d2-str { color: #98C379; }
+    .d2-num { color: #D19A66; }
+    .d2-comment { color: #5C6370; font-style: italic; }
+
+    .d2-highlight-box {
+      position: absolute;
+      left: 60px;
+      top: 105px;
+      width: 820px;
+      height: 190px;
+      border: 1px solid rgba(240, 68, 56, 0.5);
+      background: rgba(240, 68, 56, 0.05);
+      border-radius: 6px;
+      pointer-events: none;
+      opacity: 0;
+    }
+
+    .d2-status-badge {
+      position: absolute;
+      right: 32px;
+      bottom: 28px;
+      background: rgba(240, 68, 56, 0.15);
+      border: 1px solid #F04438;
+      color: #F04438;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 14px;
+      font-weight: 700;
+      padding: 8px 16px;
+      border-radius: 6px;
+      letter-spacing: 0.04em;
+      opacity: 0;
+      transform: translateY(10px);
+    }
+  </style>
+
+  <div id="root" data-composition-id="02-code" data-width="1920" data-height="1080" data-duration="9.564">
+    <div id="d2-bg-clip" class="clip d2-bg" data-start="0" data-duration="9.564" data-track-index="0">
+      <div class="d2-grid"></div>
+    </div>
+
+    <div id="d2-content-clip" class="clip d2-content-layer" data-start="0" data-duration="9.564" data-track-index="1" style="position: absolute; inset: 0; width: 1920px; height: 1080px;">
+      <div class="d2-window" id="d2-win">
+        <div class="d2-titlebar">
+          <div class="d2-traffic-lights">
+            <div class="d2-dot d2-dot-red"></div>
+            <div class="d2-dot d2-dot-yellow"></div>
+            <div class="d2-dot d2-dot-green"></div>
+          </div>
+          <div class="d2-title">agent_loop_guard.py — Visual Studio Code</div>
+        </div>
+
+        <div class="d2-body-wrap" id="d2-body-wrap" data-layout-allow-overflow>
+          <div class="d2-sidebar">
+            <div class="d2-sidebar-heading">Explorer</div>
+            <div class="d2-file-item d2-file-active">
+              <span>📄</span> agent_loop_guard.py
+            </div>
+            <div class="d2-file-item">
+              <span>📄</span> README.md
+            </div>
+            <div class="d2-file-item">
+              <span>📄</span> pyproject.toml
+            </div>
+          </div>
+
+          <div class="d2-editor">
+            <div class="d2-highlight-box" id="d2-box"></div>
+
+            <div class="d2-code-line"><span class="d2-ln">1</span><span class="d2-comment"># Unprotected agent workflow — no ceiling, no budget</span></div>
+            <div class="d2-code-line"><span class="d2-ln">2</span><span class="d2-var">client</span> = <span class="d2-fn">OpenAI</span>()</div>
+            <div class="d2-code-line"><span class="d2-ln">3</span></div>
+            <div class="d2-code-line" id="d2-loop-start"><span class="d2-ln">4</span><span class="d2-kw">for </span><span class="d2-var">step </span><span class="d2-kw">in </span><span class="d2-fn">range</span>(<span class="d2-num">10</span>):</div>
+            <div class="d2-code-line"><span class="d2-ln">5</span>    <span class="d2-var">response</span> = <span class="d2-var">client</span>.<span class="d2-var">chat</span>.<span class="d2-var">completions</span>.<span class="d2-fn">create</span>(</div>
+            <div class="d2-code-line"><span class="d2-ln">6</span>        <span class="d2-var">model</span>=<span class="d2-str">"gpt-4o"</span>,</div>
+            <div class="d2-code-line"><span class="d2-ln">7</span>        <span class="d2-var">messages</span>=[{<span class="d2-str">"role"</span>: <span class="d2-str">"user"</span>, <span class="d2-str">"content"</span>: <span class="d2-str">f"Task step {step}"</span>}]</div>
+            <div class="d2-code-line"><span class="d2-ln">8</span>    )</div>
+            <div class="d2-code-line"><span class="d2-ln">9</span>    <span class="d2-fn">execute_tool</span>(<span class="d2-var">response</span>.<span class="d2-var">choices</span>[<span class="d2-num">0</span>].<span class="d2-var">message</span>.<span class="d2-var">content</span>)</div>
+            <div class="d2-code-line"><span class="d2-ln">10</span></div>
+            <div class="d2-code-line"><span class="d2-ln">11</span><span class="d2-comment"># The SDK never flinches — requests bill directly to your API key</span></div>
+
+            <div class="d2-status-badge" id="d2-badge">
+              10 ITERATIONS · 250 TOKENS · $0 GUARDRAIL
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+    <script>
+      (function() {
+        const tl = gsap.timeline({ paused: true });
+        window.__timelines = window.__timelines || {};
+        window.__timelines["02-code"] = tl;
+
+        // Window entry
+        gsap.set("#d2-win", { opacity: 0, y: 15 });
+        tl.to("#d2-win", { opacity: 1, y: 0, duration: 0.6, ease: "power2.out" }, 0.2);
+
+        // Highlight box fades in over the loop
+        tl.to("#d2-box", { opacity: 1, duration: 0.5, ease: "power2.out" }, 2.0);
+
+        // Badge slides up and appears
+        tl.to("#d2-badge", { opacity: 1, y: 0, duration: 0.5, ease: "back.out(1.5)" }, 3.5);
+
+        // Subtle camera zoom on editor inner area (not window chrome!)
+        tl.to("#d2-body-wrap", { scale: 1.02, transformOrigin: "center center", duration: 4.5, ease: "power1.inOut" }, 4.0);
+      })();
+    </script>
+  </div>
+</template>

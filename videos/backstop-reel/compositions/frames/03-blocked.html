@@ -1,0 +1,238 @@
+<template>
+  <style>
+    @font-face {
+      font-family: 'Inter';
+      font-weight: 400;
+      src: url('assets/fonts/Inter-400.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'Inter';
+      font-weight: 700;
+      src: url('assets/fonts/Inter-700.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'JetBrains Mono';
+      font-weight: 400;
+      src: url('assets/fonts/JetBrainsMono-400.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'JetBrains Mono';
+      font-weight: 700;
+      src: url('assets/fonts/JetBrainsMono-700.woff2') format('woff2');
+    }
+
+    #root {
+      position: absolute;
+      inset: 0;
+      width: 1080px;
+      height: 1920px;
+      overflow: hidden;
+      background: transparent;
+      font-family: 'Inter', sans-serif;
+      color: #E8E4DF;
+    }
+
+    .r3-bg {
+      position: absolute;
+      inset: 0;
+      width: 1080px;
+      height: 1920px;
+      background: radial-gradient(circle at 50% 35%, #16161C 0%, #0C0C0E 70%, #060608 100%);
+    }
+
+    .r3-grid {
+      position: absolute;
+      inset: 0;
+      background-size: 60px 60px;
+      background-image: 
+        linear-gradient(to right, rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+      pointer-events: none;
+    }
+
+    .r3-container {
+      position: absolute;
+      left: 70px;
+      top: 160px;
+      width: 940px;
+      display: flex;
+      flex-direction: column;
+      gap: 28px;
+    }
+
+    .r3-header-card {
+      background: #18181F;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 14px;
+      padding: 32px 36px;
+      box-shadow: 0 24px 48px rgba(0, 0, 0, 0.45);
+      opacity: 0;
+      transform: translateY(15px);
+    }
+
+    .r3-kicker {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 14px;
+      font-weight: 700;
+      color: #22D67A;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin-bottom: 10px;
+    }
+
+    .r3-heading {
+      font-size: 56px;
+      font-weight: 800;
+      color: #22D67A;
+      line-height: 1.08;
+      letter-spacing: -0.02em;
+    }
+
+    .r3-sub {
+      font-size: 24px;
+      color: #8A8690;
+      margin-top: 8px;
+    }
+
+    .r3-terminal-card {
+      background: #141418;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 14px;
+      overflow: hidden;
+      box-shadow: 0 24px 48px rgba(0, 0, 0, 0.45);
+      opacity: 0;
+      transform: translateY(15px);
+    }
+
+    .r3-titlebar {
+      height: 42px;
+      background: #101014;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      display: flex;
+      align-items: center;
+      padding: 0 18px;
+      gap: 8px;
+    }
+
+    .r3-dot { width: 12px; height: 12px; border-radius: 50%; }
+    .r3-dot-red { background: #FF5F57; }
+    .r3-dot-yellow { background: #FEBC2E; }
+    .r3-dot-green { background: #28C840; }
+
+    .r3-term-body {
+      padding: 24px 28px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 15px;
+      line-height: 1.65;
+    }
+
+    .r3-step-row {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 6px;
+      opacity: 0;
+    }
+
+    .r3-step-pass { color: #22D67A; font-weight: 700; }
+    .r3-step-block { color: #F04438; font-weight: 700; }
+
+    .r3-metrics-row {
+      display: grid;
+      grid-template-columns: 1fr 1.2fr;
+      gap: 20px;
+      opacity: 0;
+    }
+
+    .r3-metric-box {
+      background: #181820;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 12px;
+      padding: 20px 24px;
+      text-align: center;
+    }
+
+    .r3-metric-hero {
+      border: 1.5px solid #22D67A;
+      background: rgba(34, 214, 122, 0.08);
+      box-shadow: 0 0 24px rgba(34, 214, 122, 0.15);
+    }
+
+    .r3-metric-val {
+      font-size: 40px;
+      font-weight: 800;
+      font-family: 'Inter', sans-serif;
+    }
+
+    .r3-metric-lbl {
+      font-size: 13px;
+      color: #8A8690;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-top: 4px;
+    }
+  </style>
+
+  <div id="root" data-composition-id="03-blocked" data-width="1080" data-height="1920" data-duration="5.254">
+    <div id="r3-bg-clip" class="clip r3-bg" data-start="0" data-duration="5.254" data-track-index="0">
+      <div class="r3-grid"></div>
+    </div>
+
+    <div id="r3-content-clip" class="clip r3-content" data-start="0" data-duration="5.254" data-track-index="1" style="position: absolute; inset: 0; width: 1080px; height: 1920px;">
+      <div class="r3-container">
+        <div class="r3-header-card" id="r3-head">
+          <div class="r3-kicker">⚡ RESULTS: RUNAWAY LOOP STOPPED</div>
+          <div class="r3-heading">SEVEN BLOCKED.</div>
+          <div class="r3-sub">Three calls pass. Seven blocked. −70% saved.</div>
+        </div>
+
+        <div class="r3-terminal-card" id="r3-term">
+          <div class="r3-titlebar">
+            <div class="r3-dot r3-dot-red"></div>
+            <div class="r3-dot r3-dot-yellow"></div>
+            <div class="r3-dot r3-dot-green"></div>
+            <span style="margin-left: 12px; font-size: 13px; color: #8A8690; font-family: 'JetBrains Mono';">guarded_loop.py — execution</span>
+          </div>
+
+          <div class="r3-term-body">
+            <div class="r3-step-row" id="r3-s0"><span class="r3-step-pass">[Step 0] 200 OK — 25 tokens billed</span><span style="color: #22D67A;">✓ PASS</span></div>
+            <div class="r3-step-row" id="r3-s1"><span class="r3-step-pass">[Step 1] 200 OK — 25 tokens billed</span><span style="color: #22D67A;">✓ PASS</span></div>
+            <div class="r3-step-row" id="r3-s2"><span class="r3-step-pass">[Step 2] 200 OK — 25 tokens billed</span><span style="color: #22D67A;">✓ PASS</span></div>
+            <div class="r3-step-row" id="r3-s3"><span class="r3-step-block">[Step 3] Budget limit 120 exceeded</span><span style="color: #F04438; font-weight: 700;">⛔ BLOCKED</span></div>
+            <div class="r3-step-row" id="r3-s4"><span class="r3-step-block">[Steps 4..9] 6 more calls blocked</span><span style="color: #F04438; font-weight: 700;">⛔ BLOCKED</span></div>
+          </div>
+        </div>
+
+        <div class="r3-metrics-row" id="r3-metrics">
+          <div class="r3-metric-box">
+            <div class="r3-metric-val" style="color: #E8E4DF;">3</div>
+            <div class="r3-metric-lbl">Allowed Calls</div>
+          </div>
+          <div class="r3-metric-box r3-metric-hero">
+            <div class="r3-metric-val" style="color: #22D67A;">−70%</div>
+            <div class="r3-metric-lbl" style="color: #22D67A; font-weight: 700;">Tokens Saved</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+    <script>
+      (function() {
+        const tl = gsap.timeline({ paused: true });
+        window.__timelines = window.__timelines || {};
+        window.__timelines["03-blocked"] = tl;
+
+        tl.to("#r3-head", { opacity: 1, y: 0, duration: 0.4, ease: "power2.out" }, 0.1);
+        tl.to("#r3-term", { opacity: 1, y: 0, duration: 0.4, ease: "power2.out" }, 0.3);
+
+        tl.to("#r3-s0", { opacity: 1, duration: 0.1 }, 0.6);
+        tl.to("#r3-s1", { opacity: 1, duration: 0.1 }, 0.8);
+        tl.to("#r3-s2", { opacity: 1, duration: 0.1 }, 1.0);
+        tl.to("#r3-s3", { opacity: 1, duration: 0.2 }, 1.3);
+        tl.to("#r3-s4", { opacity: 1, duration: 0.2 }, 1.6);
+
+        tl.to("#r3-metrics", { opacity: 1, duration: 0.4, ease: "back.out(1.4)" }, 2.0);
+      })();
+    </script>
+  </div>
+</template>

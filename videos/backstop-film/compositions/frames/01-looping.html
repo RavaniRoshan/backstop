@@ -1,0 +1,357 @@
+<template>
+  <style>
+    @font-face {
+      font-family: 'Inter';
+      font-weight: 400;
+      src: url('assets/fonts/Inter-400.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'Inter';
+      font-weight: 700;
+      src: url('assets/fonts/Inter-700.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'JetBrains Mono';
+      font-weight: 400;
+      src: url('assets/fonts/JetBrainsMono-400.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'JetBrains Mono';
+      font-weight: 700;
+      src: url('assets/fonts/JetBrainsMono-700.woff2') format('woff2');
+    }
+
+    #root {
+      position: absolute;
+      inset: 0;
+      width: 1920px;
+      height: 1080px;
+      overflow: hidden;
+      background: transparent;
+      font-family: 'Inter', sans-serif;
+      color: #E8E4DF;
+    }
+
+    .d1-bg {
+      position: absolute;
+      inset: 0;
+      width: 1920px;
+      height: 1080px;
+      background: radial-gradient(circle at 50% 40%, #16161B 0%, #0C0C0E 65%, #060608 100%);
+    }
+
+    .d1-grid {
+      position: absolute;
+      inset: 0;
+      background-size: 80px 80px;
+      background-image: 
+        linear-gradient(to right, rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+      pointer-events: none;
+    }
+
+    .d1-danger-glow {
+      position: absolute;
+      width: 800px;
+      height: 500px;
+      left: 560px;
+      top: 180px;
+      background: radial-gradient(circle, rgba(240, 68, 56, 0.12) 0%, rgba(240, 68, 56, 0.02) 60%, transparent 80%);
+      filter: blur(40px);
+      pointer-events: none;
+      opacity: 0;
+    }
+
+    .d1-window {
+      position: absolute;
+      left: 385px;
+      top: 140px;
+      width: 1150px;
+      height: 580px;
+      background: #1A1A1F;
+      border-radius: 10px;
+      box-shadow: 0 28px 56px rgba(0, 0, 0, 0.5), 0 8px 20px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .d1-titlebar {
+      height: 38px;
+      background: #141418;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      position: relative;
+    }
+
+    .d1-traffic-lights {
+      display: flex;
+      gap: 8px;
+    }
+
+    .d1-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+    }
+    .d1-dot-red { background: #FF5F57; }
+    .d1-dot-yellow { background: #FEBC2E; }
+    .d1-dot-green { background: #28C840; }
+
+    .d1-title {
+      position: absolute;
+      left: 0;
+      right: 0;
+      text-align: center;
+      font-size: 13px;
+      font-weight: 500;
+      color: #8A8690;
+      font-family: 'JetBrains Mono', monospace;
+      pointer-events: none;
+    }
+
+    .d1-badge-wrap {
+      margin-left: auto;
+      z-index: 2;
+    }
+
+    .d1-token-counter {
+      background: rgba(240, 68, 56, 0.15);
+      border: 1px solid rgba(240, 68, 56, 0.4);
+      color: #FF574D;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      font-weight: 700;
+      padding: 3px 10px;
+      border-radius: 4px;
+      letter-spacing: 0.05em;
+    }
+
+    .d1-terminal-body {
+      flex: 1;
+      padding: 24px 28px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 16px;
+      line-height: 1.65;
+      color: #E8E4DF;
+      background: #101014;
+      overflow: hidden;
+    }
+
+    .d1-prompt-line {
+      display: flex;
+      align-items: center;
+      margin-bottom: 14px;
+    }
+
+    .d1-prompt {
+      color: #22D67A;
+      margin-right: 12px;
+      font-weight: 700;
+    }
+
+    .d1-cmd {
+      color: #E8E4DF;
+    }
+
+    .d1-caret {
+      display: inline-block;
+      width: 9px;
+      height: 18px;
+      background: #E8E4DF;
+      margin-left: 4px;
+      vertical-align: middle;
+      animation: d1-blink 0.9s step-end infinite;
+    }
+
+    @keyframes d1-blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0; }
+    }
+
+    .d1-line {
+      opacity: 0;
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      white-space: nowrap;
+    }
+
+    .d1-line-step {
+      color: #8A8690;
+      margin-right: 12px;
+    }
+
+    .d1-line-status {
+      color: #FEBC2E;
+      margin-right: 12px;
+    }
+
+    .d1-line-danger {
+      color: #FF574D;
+      font-weight: 700;
+      margin-left: auto;
+    }
+
+    .d1-cursor {
+      position: absolute;
+      width: 24px;
+      height: 24px;
+      pointer-events: none;
+      z-index: 100;
+      opacity: 0;
+    }
+  </style>
+
+  <div id="root" data-composition-id="01-looping" data-width="1920" data-height="1080" data-duration="8.546">
+    <div id="d1-bg-clip" class="clip d1-bg" data-start="0" data-duration="8.546" data-track-index="0">
+      <div class="d1-grid"></div>
+      <div class="d1-danger-glow" id="d1-glow"></div>
+    </div>
+
+    <div id="d1-content-clip" class="clip d1-content-layer" data-start="0" data-duration="8.546" data-track-index="1" style="position: absolute; inset: 0; width: 1920px; height: 1080px;">
+      <div class="d1-window" id="d1-win">
+        <div class="d1-titlebar">
+          <div class="d1-traffic-lights">
+            <div class="d1-dot d1-dot-red"></div>
+            <div class="d1-dot d1-dot-yellow"></div>
+            <div class="d1-dot d1-dot-green"></div>
+          </div>
+          <div class="d1-title">agent_loop.py — bash — 1150×580</div>
+          <div class="d1-badge-wrap">
+            <span class="d1-token-counter" id="d1-tokens">TOKENS: 0</span>
+          </div>
+        </div>
+
+        <div class="d1-terminal-body">
+          <div class="d1-prompt-line">
+            <span class="d1-prompt">➜ ~/projects/agent $</span>
+            <span class="d1-cmd" id="d1-cmd-text"></span><span class="d1-caret" id="d1-caret"></span>
+          </div>
+          <div class="d1-line" id="d1-l0">
+            <span class="d1-line-step">[step 0]</span>
+            <span class="d1-line-status">POST /v1/chat/completions</span>
+            <span>status 200 OK — 25 tokens</span>
+            <span class="d1-line-danger">+25 tokens ($)</span>
+          </div>
+          <div class="d1-line" id="d1-l1">
+            <span class="d1-line-step">[step 1]</span>
+            <span class="d1-line-status">POST /v1/chat/completions</span>
+            <span>status 200 OK — 25 tokens</span>
+            <span class="d1-line-danger">+50 tokens ($)</span>
+          </div>
+          <div class="d1-line" id="d1-l2">
+            <span class="d1-line-step">[step 2]</span>
+            <span class="d1-line-status">POST /v1/chat/completions</span>
+            <span>status 200 OK — 25 tokens</span>
+            <span class="d1-line-danger">+75 tokens ($)</span>
+          </div>
+          <div class="d1-line" id="d1-l3">
+            <span class="d1-line-step">[step 3]</span>
+            <span class="d1-line-status">POST /v1/chat/completions</span>
+            <span>status 200 OK — 25 tokens</span>
+            <span class="d1-line-danger">+100 tokens ($)</span>
+          </div>
+          <div class="d1-line" id="d1-l4">
+            <span class="d1-line-step">[step 4]</span>
+            <span class="d1-line-status">POST /v1/chat/completions</span>
+            <span>status 200 OK — 25 tokens</span>
+            <span class="d1-line-danger">+125 tokens ($)</span>
+          </div>
+          <div class="d1-line" id="d1-l5">
+            <span class="d1-line-step">[step 5]</span>
+            <span class="d1-line-status">POST /v1/chat/completions</span>
+            <span>status 200 OK — 25 tokens</span>
+            <span class="d1-line-danger">+150 tokens ($)</span>
+          </div>
+          <div class="d1-line" id="d1-l6">
+            <span class="d1-line-step">[step 6]</span>
+            <span class="d1-line-status">POST /v1/chat/completions</span>
+            <span>status 200 OK — 25 tokens</span>
+            <span class="d1-line-danger">+175 tokens ($)</span>
+          </div>
+          <div class="d1-line" id="d1-l7">
+            <span class="d1-line-step">[step 7]</span>
+            <span class="d1-line-status">POST /v1/chat/completions</span>
+            <span>status 200 OK — 25 tokens</span>
+            <span class="d1-line-danger">+200 tokens ($)</span>
+          </div>
+          <div class="d1-line" id="d1-l8">
+            <span class="d1-line-step">[step 8]</span>
+            <span class="d1-line-status">POST /v1/chat/completions</span>
+            <span>status 200 OK — 25 tokens</span>
+            <span class="d1-line-danger">+225 tokens ($)</span>
+          </div>
+          <div class="d1-line" id="d1-l9">
+            <span class="d1-line-step">[step 9]</span>
+            <span class="d1-line-status">POST /v1/chat/completions</span>
+            <span>status 200 OK — 25 tokens</span>
+            <span class="d1-line-danger">+250 tokens ($)</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- macOS arrow cursor -->
+      <svg class="d1-cursor" id="d1-cursor" viewBox="0 0 24 24" fill="none">
+        <path d="M5.5 3.5L18.5 16.5H12L8.5 22.5L5.5 3.5Z" fill="black" stroke="white" stroke-width="1.5" stroke-linejoin="round"/>
+      </svg>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+    <script>
+      (function() {
+        const tl = gsap.timeline({ paused: true });
+        window.__timelines = window.__timelines || {};
+        window.__timelines["01-looping"] = tl;
+
+        const cmdText = document.getElementById("d1-cmd-text");
+        const tokenCounter = document.getElementById("d1-tokens");
+        const fullCmd = "python runaway_agent.py";
+
+        // Initial state - window is immediately visible at frame 0
+        gsap.set("#d1-cursor", { opacity: 0, x: 1200, y: 650 });
+
+        // 1. Typing command starts almost immediately
+        const typingObj = { val: 0 };
+        tl.to(typingObj, {
+          val: fullCmd.length,
+          duration: 1.0,
+          ease: "none",
+          onUpdate: function() {
+            cmdText.textContent = fullCmd.slice(0, Math.round(typingObj.val));
+          }
+        }, 0.3);
+
+        // 3. Lines reveal and counter increases
+        const steps = [
+          { id: "#d1-l0", tokens: 25, time: 2.1 },
+          { id: "#d1-l1", tokens: 50, time: 2.6 },
+          { id: "#d1-l2", tokens: 75, time: 3.1 },
+          { id: "#d1-l3", tokens: 100, time: 3.6 },
+          { id: "#d1-l4", tokens: 125, time: 4.1 },
+          { id: "#d1-l5", tokens: 150, time: 4.6 },
+          { id: "#d1-l6", tokens: 175, time: 5.1 },
+          { id: "#d1-l7", tokens: 200, time: 5.6 },
+          { id: "#d1-l8", tokens: 225, time: 6.1 },
+          { id: "#d1-l9", tokens: 250, time: 6.6 }
+        ];
+
+        steps.forEach(function(s) {
+          tl.to(s.id, { opacity: 1, duration: 0.15, ease: "power1.out" }, s.time);
+          tl.add(function() {
+            tokenCounter.textContent = "TOKENS: " + s.tokens;
+          }, s.time);
+        });
+
+        // Danger glow rises as burn escalates
+        tl.to("#d1-glow", { opacity: 1, duration: 3.0, ease: "power2.in" }, 3.5);
+
+        // Helpless cursor floats in
+        tl.to("#d1-cursor", { opacity: 1, duration: 0.4 }, 4.5);
+        tl.to("#d1-cursor", { x: 950, y: 460, duration: 1.8, ease: "power2.out" }, 4.6);
+      })();
+    </script>
+  </div>
+</template>

@@ -1,0 +1,8 @@
+Backstop
+Stop agent loops from burning your budget — in-process token budgets for OpenAI and Anthropic.
+pip install "backstop-ai"
+GitHub: RavaniRoshan/backstop (MIT)
+
+Real CLI commands:
+- `backstop demo`: 10 attempted, 3 completed, 7 blocked, -70% tokens (250 -> 75), BudgetExceededError raised.
+- `backstop verify`: 2 allowed, 8 blocked, 2,000 tokens saved, Status: VERIFIED (100% offline mock).
