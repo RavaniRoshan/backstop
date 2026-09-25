@@ -1,10 +1,37 @@
 from __future__ import annotations
 
 import gc
+
+import httpx
 import pytest
 
 from backstop.telemetry import get_registry
-from backstop.verify import VerifyRunner, mask_secrets, run_verify
+from backstop.verify import (
+    VerifyRunner,
+    default_api_key_env,
+    mask_secrets,
+    run_verify,
+)
+
+
+class _RecordingAuthProbe:
+    """Stands in for ``httpx.Client`` so the live auth probe never dials out."""
+
+    calls: list[tuple[str, dict[str, str]]] = []
+
+    def __init__(self, *, base_url: str, timeout: float) -> None:
+        self.base_url = base_url
+        self.timeout = timeout
+
+    def __enter__(self) -> "_RecordingAuthProbe":
+        return self
+
+    def __exit__(self, *exc: object) -> bool:
+        return False
+
+    def get(self, path: str, headers: dict[str, str]) -> httpx.Response:
+        type(self).calls.append((self.base_url, headers))
+        return httpx.Response(200)
 
 
 @pytest.fixture(autouse=True)
@@ -56,6 +83,42 @@ def test_provider_auth_skips_without_key():
     runner = VerifyRunner(live=True, api_key_env="DEFINITELY_NOT_SET_12345")
     res = runner._check_provider_auth()
     assert res.status == "skip"
+
+
+def test_default_api_key_env_is_resolved_per_provider():
+    assert default_api_key_env("openai") == "OPENAI_API_KEY"
+    assert default_api_key_env("anthropic") == "ANTHROPIC_API_KEY"
+
+
+def test_default_api_key_env_refuses_an_unknown_provider():
+    # Never fall back to the OpenAI key for a provider we do not recognise.
+    with pytest.raises(ValueError):
+        default_api_key_env("cohere")
+
+
+def test_runner_resolves_the_key_env_of_the_selected_provider():
+    assert VerifyRunner(provider="openai").api_key_env == "OPENAI_API_KEY"
+    assert VerifyRunner(provider="anthropic").api_key_env == "ANTHROPIC_API_KEY"
+
+
+def test_explicit_api_key_env_wins_over_the_provider_default():
+    runner = VerifyRunner(provider="anthropic", api_key_env="MY_PROXY_KEY")
+    assert runner.api_key_env == "MY_PROXY_KEY"
+
+
+def test_live_probe_never_sends_the_other_providers_key(monkeypatch):
+    """The live auth probe must carry the selected provider's own key only."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-must-not-leak")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-secret-value")
+    _RecordingAuthProbe.calls.clear()
+    monkeypatch.setattr(httpx, "Client", _RecordingAuthProbe)
+
+    res = VerifyRunner(live=True, provider="anthropic")._check_provider_auth()
+
+    assert res.status == "pass"
+    assert _RecordingAuthProbe.calls == [
+        ("https://api.anthropic.com/v1", {"Authorization": "Bearer sk-ant-secret-value"})
+    ]
 
 
 def test_shadow_records_without_blocking():

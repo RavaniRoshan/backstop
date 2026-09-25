@@ -366,7 +366,12 @@ def main(argv: list[str] | None = None) -> int:
     verify.add_argument("--provider", choices=["openai", "anthropic"], default="openai")
     verify.add_argument("--model", help="unused for auth probe; documented for future live completion")
     verify.add_argument("--base-url", help="override provider base URL for the live probe")
-    verify.add_argument("--api-key-env", default="OPENAI_API_KEY", help="env var holding the provider key")
+    verify.add_argument(
+        "--api-key-env",
+        default=None,
+        help="env var holding the provider key (default: OPENAI_API_KEY for "
+        "--provider openai, ANTHROPIC_API_KEY for --provider anthropic)",
+    )
     verify.add_argument("--timeout", type=float, default=30.0, help="per-check timeout for live probes")
 
     demo = subparsers.add_parser(

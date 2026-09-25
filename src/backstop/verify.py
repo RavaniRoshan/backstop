@@ -21,6 +21,26 @@ _STATUS_GLYPH = {"pass": "PASS", "warn": "WARN", "fail": "FAIL", "skip": "SKIP"}
 
 _KEY_RE = re.compile(r"(sk-[A-Za-z0-9_\-]{8,}|[A-Za-z0-9]{32,})")
 
+_PROVIDER_KEY_ENV = {
+    "openai": "OPENAI_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+}
+
+
+def default_api_key_env(provider: str) -> str:
+    """Name of the env var holding ``provider``'s key.
+
+    Resolved per provider so the live auth probe never reads — and therefore
+    never sends — one provider's credential to another provider's endpoint. An
+    explicit ``--api-key-env`` always wins over this default.
+    """
+    try:
+        return _PROVIDER_KEY_ENV[provider]
+    except KeyError:
+        raise ValueError(
+            f"unknown provider {provider!r}; expected one of {sorted(_PROVIDER_KEY_ENV)}"
+        ) from None
+
 
 def mask_secrets(text: str) -> str:
     """Redact anything that looks like an API key so verify output is safe to paste."""
@@ -74,7 +94,7 @@ class VerifyRunner:
         provider: str = "openai",
         model: str | None = None,
         base_url: str | None = None,
-        api_key_env: str = "OPENAI_API_KEY",
+        api_key_env: str | None = None,
     ) -> None:
         self.live = live
         self.strict = strict
@@ -82,7 +102,7 @@ class VerifyRunner:
         self.provider = provider
         self.model = model
         self.base_url = base_url
-        self.api_key_env = api_key_env
+        self.api_key_env = api_key_env or default_api_key_env(provider)
         self.proof: dict | None = None
 
     # ------------------------------------------------------------------
@@ -686,7 +706,7 @@ def run_verify(
     provider: str = "openai",
     model: str | None = None,
     base_url: str | None = None,
-    api_key_env: str = "OPENAI_API_KEY",
+    api_key_env: str | None = None,
 ) -> int:
     runner = VerifyRunner(
         live=live, strict=strict, timeout=timeout, provider=provider, model=model, base_url=base_url, api_key_env=api_key_env
