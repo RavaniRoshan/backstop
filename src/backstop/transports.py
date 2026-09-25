@@ -319,6 +319,11 @@ class BackstopTransport(httpx.BaseTransport):
                     tenant_budget=tenant_budget,
                     created_at=tracker.created_at,
                 )
+                # Record at dispatch, not at consumption: the point is to release
+                # the half-open probe, not to measure stream lifetime. Skipping
+                # this left a circuit that had gone half-open stuck in half-open,
+                # so every later request was rejected with CircuitBreakerOpenError.
+                self._record_outcome(response.status_code, success=success, circuit=circuit)
                 usage = None
             else:
                 response.read()
@@ -788,6 +793,9 @@ class AsyncBackstopTransport(httpx.AsyncBaseTransport):
                     tenant_budget=tenant_budget,
                     created_at=tracker.created_at,
                 )
+                # Async twin of the sync branch: record at dispatch so the
+                # half-open probe is released by a stream that set up cleanly.
+                self._record_outcome(response.status_code, success=success, circuit=circuit)
                 usage = None
             else:
                 await response.aread()

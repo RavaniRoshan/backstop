@@ -3,13 +3,119 @@
 A streamed request must reconcile to the actual usage reported in the SSE
 body, NOT to the estimated output tokens. When the provider emits no usage
 in the stream, the estimate is used as a fallback.
+
+Also covers circuit-breaker bookkeeping for streams: a stream that sets up
+cleanly must record an outcome, or a circuit left half-open by an earlier 503
+stays half-open and rejects every later request forever.
 """
 import httpx
+import pytest
 
 from backstop import BackstopConfig
+from backstop.circuit import CircuitState
 from backstop.state import BackstopState
 from backstop.streaming import setup_streaming
-from backstop.transports import BackstopTransport
+from backstop.transports import AsyncBackstopTransport, BackstopTransport
+
+
+def _circuit_config() -> BackstopConfig:
+    """One 503 opens the circuit; zero cooldown, so the next request probes it."""
+    return BackstopConfig(
+        default_max_output_tokens=20,
+        retry_max_attempts=1,
+        circuit_min_requests=1,
+        circuit_failure_threshold=1.0,
+        circuit_cooldown_seconds=0.0,
+    )
+
+
+def _open_the_circuit(state: BackstopState) -> None:
+    """Drive the circuit to OPEN through the non-streaming recording path."""
+    client = httpx.Client(
+        transport=BackstopTransport(state, httpx.MockTransport(lambda r: httpx.Response(503))),
+        base_url="https://mock.local",
+    )
+    assert client.post("/v1/chat/completions", json={"model": "x", "messages": []}).status_code == 503
+    client.close()
+    assert state.circuit.state is CircuitState.OPEN
+
+
+def _sse_ok() -> httpx.Response:
+    return httpx.Response(
+        200, content=STREAM_NO_USAGE, headers={"content-type": "text/event-stream"}
+    )
+
+
+def test_successful_stream_releases_the_half_open_probe():
+    state = BackstopState.create(50_000, _circuit_config())
+    _open_the_circuit(state)
+
+    # This stream is the half-open probe. It succeeds, so the circuit must close.
+    client = httpx.Client(
+        transport=BackstopTransport(state, httpx.MockTransport(lambda r: _sse_ok())),
+        base_url="https://mock.local",
+    )
+    streamed = client.post(
+        "/v1/chat/completions", json={"model": "x", "messages": [], "stream": True}
+    )
+    assert streamed.status_code == 200
+    streamed.close()
+
+    assert state.circuit.state is CircuitState.CLOSED, (
+        "a successful stream must close a half-open circuit, not leave the probe set"
+    )
+
+    # The observable symptom of the bug: the probe was never released, so every
+    # later request was rejected with CircuitBreakerOpenError.
+    later = client.post("/v1/chat/completions", json={"model": "x", "messages": []})
+    assert later.status_code == 200
+    client.close()
+
+
+@pytest.mark.anyio
+async def test_async_successful_stream_releases_the_half_open_probe():
+    state = BackstopState.create(50_000, _circuit_config())
+    _open_the_circuit(state)
+
+    async with httpx.AsyncClient(
+        transport=AsyncBackstopTransport(state, httpx.MockTransport(lambda r: _sse_ok())),
+        base_url="https://mock.local",
+    ) as client:
+        streamed = await client.post(
+            "/v1/chat/completions", json={"model": "x", "messages": [], "stream": True}
+        )
+        assert streamed.status_code == 200
+        await streamed.aclose()
+
+        assert state.circuit.state is CircuitState.CLOSED, (
+            "a successful stream must close a half-open circuit, not leave the probe set"
+        )
+
+        later = await client.post("/v1/chat/completions", json={"model": "x", "messages": []})
+        assert later.status_code == 200
+
+
+def test_failed_stream_reopens_the_circuit():
+    """A stream that comes back as an error records a failure for the probe."""
+    state = BackstopState.create(50_000, _circuit_config())
+    _open_the_circuit(state)
+
+    client = httpx.Client(
+        transport=BackstopTransport(
+            state, httpx.MockTransport(lambda r: httpx.Response(503, content=b"nope"))
+        ),
+        base_url="https://mock.local",
+    )
+    failed = client.post(
+        "/v1/chat/completions", json={"model": "x", "messages": [], "stream": True}
+    )
+    assert failed.status_code == 503
+    failed.close()
+
+    assert state.circuit.state is CircuitState.OPEN, (
+        "a failed stream must fail the half-open probe instead of leaving it set"
+    )
+    client.close()
 
 
 class _LazyByteStream(httpx.SyncByteStream):
