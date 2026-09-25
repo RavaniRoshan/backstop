@@ -45,18 +45,24 @@ class PriorityGate:
     def acquire(self, priority: Priority, timeout: float | None = None) -> float:
         ticket = _Ticket(priority, next(self._counter), time.monotonic())
         effective = timeout if timeout is not None else self._config.queue_timeout
+        acquired = False
         with self._condition:
             self._queues[priority].append(ticket)
             self._condition.notify_all()
-            while not self._can_admit(ticket):
-                if effective is None:
-                    self._condition.wait()
-                else:
-                    if not self._condition.wait(timeout=effective):
-                        raise TimeoutError("gate acquire timed out")
-            self._queues[priority].popleft()
-            self._active += 1
-            return time.monotonic() - ticket.enqueued_at
+            try:
+                while not self._can_admit(ticket):
+                    if effective is None:
+                        self._condition.wait()
+                    else:
+                        if not self._condition.wait(timeout=effective):
+                            raise TimeoutError("gate acquire timed out")
+                self._queues[priority].popleft()
+                self._active += 1
+                acquired = True
+                return time.monotonic() - ticket.enqueued_at
+            finally:
+                if not acquired:
+                    self._discard(priority, ticket)
 
     def release(self) -> None:
         with self._condition:
@@ -66,25 +72,44 @@ class PriorityGate:
     async def aacquire(self, priority: Priority, timeout: float | None = None) -> float:
         ticket = _Ticket(priority, next(self._counter), time.monotonic())
         effective = timeout if timeout is not None else self._config.queue_timeout
+        acquired = False
         async with self._async_condition:
             self._queues[priority].append(ticket)
             self._async_condition.notify_all()
-            while not self._can_admit(ticket):
-                try:
-                    if effective is None:
-                        await self._async_condition.wait()
-                    else:
-                        await asyncio.wait_for(self._async_condition.wait(), effective)
-                except asyncio.TimeoutError:
-                    raise TimeoutError("gate acquire timed out")
-            self._queues[priority].popleft()
-            self._active += 1
-            return time.monotonic() - ticket.enqueued_at
+            try:
+                while not self._can_admit(ticket):
+                    try:
+                        if effective is None:
+                            await self._async_condition.wait()
+                        else:
+                            await asyncio.wait_for(self._async_condition.wait(), effective)
+                    except asyncio.TimeoutError:
+                        raise TimeoutError("gate acquire timed out")
+                self._queues[priority].popleft()
+                self._active += 1
+                acquired = True
+                return time.monotonic() - ticket.enqueued_at
+            finally:
+                if not acquired:
+                    self._discard(priority, ticket)
 
     async def arelease(self) -> None:
         async with self._async_condition:
             self._active = max(0, self._active - 1)
             self._async_condition.notify_all()
+
+    def _discard(self, priority: Priority, ticket: _Ticket) -> None:
+        """Drop a ticket that never reached ``_can_admit``.
+
+        ``_choose_ticket`` only ever looks at the head of each deque, so a
+        ticket left behind by a timed-out or failed acquirer would be reselected
+        forever and wedge that priority permanently.
+        """
+        queue = self._queues[priority]
+        for index, queued in enumerate(queue):
+            if queued is ticket:
+                del queue[index]
+                return
 
     def _can_admit(self, ticket: _Ticket) -> bool:
         if self._active >= self._aimd.current_limit:
