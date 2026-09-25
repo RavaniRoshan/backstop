@@ -63,6 +63,10 @@ class PriorityGate:
             finally:
                 if not acquired:
                     self._discard(priority, ticket)
+                    # A survivor behind the discarded ticket may now be admissible
+                    # (the deque head moved, or an AIMD raise freed a slot), so
+                    # wake it instead of leaving it asleep until unrelated traffic.
+                    self._condition.notify_all()
 
     def release(self) -> None:
         with self._condition:
@@ -92,6 +96,9 @@ class PriorityGate:
             finally:
                 if not acquired:
                     self._discard(priority, ticket)
+                    # Async twin of the sync branch: notify the async condition,
+                    # which is the one held here.
+                    self._async_condition.notify_all()
 
     async def arelease(self) -> None:
         async with self._async_condition:
