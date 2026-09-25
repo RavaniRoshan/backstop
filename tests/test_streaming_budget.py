@@ -134,6 +134,30 @@ class _LazyByteStream(httpx.SyncByteStream):
             yield chunk
 
 
+@pytest.mark.anyio
+async def test_async_failed_stream_reopens_the_circuit():
+    """A stream that comes back as an error records a failure for the probe."""
+    state = BackstopState.create(50_000, _circuit_config())
+    _open_the_circuit(state)
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, content=b"nope")
+
+    async with httpx.AsyncClient(
+        transport=AsyncBackstopTransport(state, httpx.MockTransport(handler)),
+        base_url="https://mock.local",
+    ) as client:
+        failed = await client.post(
+            "/v1/chat/completions", json={"model": "x", "messages": [], "stream": True}
+        )
+        assert failed.status_code == 503
+        await failed.aclose()
+
+        assert state.circuit.state is CircuitState.OPEN, (
+            "a failed stream must fail the half-open probe instead of leaving it set"
+        )
+
+
 def test_streaming_reconciles_via_iter_lines_non_buffered():
     """Real SDK-style consumption (iter_lines) on a lazy stream reconciles."""
     state = BackstopState.create(50_000, BackstopConfig(default_max_output_tokens=50))
