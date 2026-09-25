@@ -12,11 +12,24 @@ from .exceptions import (
 from .extract import count_tokens
 from .hooks import AfterResponseHook, BeforeRequestHook
 from .latency import BackstopMeta
-from .ledger import BudgetLedger, ReservationTicket, TenantBudget, get_current_tenant, get_ledger, with_budget
+from .ledger import (
+    Attribution,
+    BudgetLedger,
+    ReservationTicket,
+    SpendEvent,
+    TenantBudget,
+    attribution,
+    current_attribution,
+    get_current_tenant,
+    get_ledger,
+    with_attribution,
+    with_budget,
+)
 from .wrapper import Backstop
 
 __all__ = [
     "AfterResponseHook",
+    "Attribution",
     "Backstop",
     "BackstopConfig",
     "BackstopMeta",
@@ -28,12 +41,16 @@ __all__ = [
     "LatencyBudgetExceededError",
     "Priority",
     "ReservationTicket",
+    "SpendEvent",
     "TenantBudget",
     "UnsupportedClientError",
     "BackstopError",
+    "attribution",
     "budgets",
     "count_tokens",
+    "current_attribution",
     "get_current_tenant",
+    "with_attribution",
     "with_budget",
     "cost",
 ]

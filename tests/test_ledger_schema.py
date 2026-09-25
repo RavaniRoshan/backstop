@@ -528,3 +528,47 @@ def test_concurrent_tasks_keep_their_own_scopes():
         "payments": Attribution(team="payments"),
         "refunds": Attribution(team="refunds"),
     }
+
+
+# ---------------------------------------------------------------------------
+# Top-level exports
+# ---------------------------------------------------------------------------
+
+
+def test_top_level_package_reexports_the_ledger_public_api():
+    import backstop
+
+    from backstop import ledger
+
+    assert backstop.Attribution is ledger.Attribution
+    assert backstop.SpendEvent is ledger.SpendEvent
+    assert backstop.attribution is ledger.attribution
+    assert backstop.with_attribution is ledger.with_attribution
+    assert backstop.current_attribution is ledger.current_attribution
+
+
+def test_top_level_ledger_exports_are_declared_in_dunder_all():
+    import backstop
+
+    for name in (
+        "Attribution",
+        "SpendEvent",
+        "attribution",
+        "current_attribution",
+        "with_attribution",
+    ):
+        assert name in backstop.__all__
+
+
+def test_documented_top_level_import_form_works():
+    from backstop import attribution, current_attribution, with_attribution
+
+    @with_attribution(agent="refund-bot")
+    def handle_refund():
+        return current_attribution()
+
+    with attribution(team="payments", feature="checkout-v2"):
+        assert handle_refund() == Attribution(
+            team="payments", feature="checkout-v2", agent="refund-bot"
+        )
+        assert current_attribution() == Attribution(team="payments", feature="checkout-v2")
