@@ -1,6 +1,6 @@
 # Backstop
 
-> In-process token budget enforcement, circuit breaking, and concurrency control for OpenAI and Anthropic SDK clients. Wraps the SDK's internal httpx transport — no proxy, no call-site changes.
+> In-process token budget enforcement, circuit breaking, and concurrency control for OpenAI and Anthropic SDK clients. The default `Backstop.wrap()` path injects a transport (`httpx` or `httpx2`, whichever the SDK uses) in-process — no network hop, no call-site changes. An optional OpenAI-compatible reverse proxy also ships as `backstop serve`; it is a separate mode, not what `wrap()` does.
 
 - Documentation: /README.md
 - Quick start: /docs/quickstart.md
@@ -10,6 +10,9 @@
 - Architecture: /docs/architecture.md
 - Benchmarks: /docs/benchmarks.md
 - Examples: /examples/
+- Committed benchmark snapshot: /docs/benchmark-results-2026-07-20.md
+- Concurrency and scale limits: /docs/concurrency.md
+- Threat model: /docs/threat-model.md
 
 ## Install (0.6.0 published)
 
@@ -52,25 +55,61 @@ except BudgetExceededError:
 ## Keyless proof (no API key needed)
 
 ```bash
-backstop verify   # 8/8 PASS in ~2s, purely offline
+backstop verify   # 8 checks, purely offline, exits 0
 backstop demo     # side-by-side runaway loop comparison
 ```
+
+## Priority admission
+
+Exactly three priorities: `critical`, `default`, `background`. There is no
+`normal`. The gate **queues and prioritises; it does not shed** — nothing is
+cancelled. `starvation_after_seconds` (default 1.0) releases the oldest ticket
+in any queue once it has waited that long, so a low-priority ticket cannot wait
+forever. `queue_timeout` bounds the wait with an error instead.
+
+## Retries
+
+Wrapping sets the wrapped client to `max_retries=0`. Backstop performs the
+retries itself, in the transport, with its own backoff and circuit state. Do
+not expect the SDK's retry layer to still be active.
 
 ## SDK compatibility
 
 - OpenAI: `>=2.37,<4` on Python 3.10–3.12 ✅
 - Anthropic: `>=0.98,<2` on Python 3.10–3.12 ✅
 
-Run `backstop doctor` to check your installed versions.
+Those are the *tested* ranges. CI runs one job on ubuntu-latest across
+Python 3.10/3.11/3.12 × openai 2.37.0/3.14.0 × anthropic 0.99.0/1.6.0, plus a
+single `openai`-latest cross-check. It does not install the `redis`, `otel`,
+`fastapi` or `tokenizers` extras, does not run the TypeScript package, and has
+no lint, typecheck, or coverage step. Below the floors the SDK catches
+`BudgetExceededError` and re-raises it as `APIConnectionError`, hiding the
+guardrail.
+
+`backstop doctor` is a wrap-and-import smoke test only — it does not send a
+request through the wrapped transport, and it exits 1 whenever `httpx2` is
+absent, which is not a declared dependency. Trust `backstop verify`, not
+`doctor`.
 
 ## CLIs
 
-- `backstop verify` — proves enforcement offline in ~2s with 8 checks
+- `backstop verify` — proves enforcement offline with 8 checks; `--live` adds a `GET /models` auth probe
 - `backstop demo` — side-by-side runaway loop (unprotected vs wrapped)
-- `backstop doctor` — checks SDK versions and wrap path
-- `backstop benchmark` — reproducible overhead measurement
+- `backstop doctor` — SDK versions and wrap path; see the caveats above
+- `backstop benchmark` — overhead measurement; deterministic counts, wall-clock latencies
+- `backstop serve` — optional OpenAI-compatible gateway (needs the `fastapi` extra)
 - `backstop metrics` — Prometheus endpoint
 - `backstop real-openai` / `real-anthropic` — live smoke tests (require API key)
+
+## Benchmarks
+
+The only committed overhead figures are in
+`docs/benchmark-results-2026-07-20.md`: 0.07 ms at p50, p95 and p99 over 1,000
+requests against a local `httpx.MockTransport`. That snapshot records the date,
+seed, mock transport and request count; it does **not** record CPU, OS, Python
+version or SDK version. Re-measure with `backstop benchmark`. The overhead check
+inside `verify` passes below a 5 ms p99 bound, not at a specific figure, and CI
+runs the benchmark as a threshold-free smoke test.
 
 ## Agentic-installer quickstart
 
