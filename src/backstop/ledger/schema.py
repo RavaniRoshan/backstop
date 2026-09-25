@@ -153,7 +153,7 @@ def _cost_payload(cost: Any) -> Any:
 
 @dataclass(frozen=True)
 class SpendEvent:
-    """One priced-ready record of a single provider request.
+    """One record of a single provider request, ready to be priced.
 
     Token counts are what the provider reported, or what Backstop estimated
     locally when the provider reported none — ``estimated`` distinguishes the

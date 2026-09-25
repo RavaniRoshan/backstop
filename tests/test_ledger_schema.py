@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import FrozenInstanceError
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -57,7 +58,7 @@ def test_attribution_defaults_to_all_none():
 
 
 def test_attribution_is_frozen():
-    with pytest.raises(Exception):
+    with pytest.raises(FrozenInstanceError):
         Attribution(team="payments").team = "refunds"  # type: ignore[misc]
 
 
@@ -141,7 +142,7 @@ def test_occurred_at_matches_the_exported_regex():
 
 
 def test_event_is_frozen():
-    with pytest.raises(Exception):
+    with pytest.raises(FrozenInstanceError):
         make_event().outcome = "error"  # type: ignore[misc]
 
 
