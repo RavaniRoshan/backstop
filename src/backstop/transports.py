@@ -131,6 +131,30 @@ def _reconcile(
         global_budget.reconcile(reservation, usage, success=success)
 
 
+async def _areconcile(
+    tenant_budget: object | None,
+    global_budget: object,
+    reservation: Reservation | LedgerReservation | None,
+    usage: int | None,
+    *,
+    success: bool,
+    downgraded: bool = False,
+) -> None:
+    """Async twin of :func:`_reconcile`.
+
+    Goes through ``Budget.areconcile`` so a shared (Redis) backend commits on
+    its own async client instead of blocking the event loop.
+    """
+    if reservation is None:
+        if downgraded and tenant_budget is not None and usage is not None and success:
+            tenant_budget.commit(LedgerReservation(getattr(tenant_budget, "tenant_id", ""), 0), usage)
+        return
+    if isinstance(reservation, LedgerReservation) and tenant_budget is not None:
+        tenant_budget.commit(reservation, usage if success else 0)
+    elif isinstance(reservation, Reservation):
+        await global_budget.areconcile(reservation, usage, success=success)
+
+
 def _build_alerts(config) -> object | None:
     """Build a BudgetAlertManager from config, or None when unconfigured."""
     if not config.webhook_endpoints:
@@ -807,7 +831,7 @@ class AsyncBackstopTransport(httpx.AsyncBaseTransport):
                 if self.state.quota is not None:
                     self.state.quota.ingest(dict(response.headers))
                     self.state.quota.adjust(self.state.aimd)
-                _reconcile(tenant_budget, self.state.budget, reservation, usage, success=success, downgraded=downgraded)
+                await _areconcile(tenant_budget, self.state.budget, reservation, usage, success=success, downgraded=downgraded)
                 self._record_outcome(response.status_code, success=success, circuit=circuit)
                 if self._alerts is not None:
                     _b = tenant_budget if tenant_budget is not None else self.state.budget
@@ -854,12 +878,12 @@ class AsyncBackstopTransport(httpx.AsyncBaseTransport):
             if fallback is not None:
                 return fallback
             tracker.completed_at = time.monotonic()
-            _reconcile(tenant_budget, self.state.budget, reservation, 0, success=False)
+            await _areconcile(tenant_budget, self.state.budget, reservation, 0, success=False)
             self._observe_request(meta.endpoint, meta.priority, tracker.created_at, "circuit_open")
             raise
         except Exception:
             tracker.completed_at = time.monotonic()
-            _reconcile(tenant_budget, self.state.budget, reservation, 0, success=False)
+            await _areconcile(tenant_budget, self.state.budget, reservation, 0, success=False)
             self._record_outcome(599, success=False, circuit=circuit)
             self._observe_request(meta.endpoint, meta.priority, tracker.created_at, "exception")
             raise
@@ -900,7 +924,7 @@ class AsyncBackstopTransport(httpx.AsyncBaseTransport):
                 continue
             usage = response_usage_tokens(response)
             success = response.status_code < 400
-            _reconcile(tenant_budget, self.state.budget, reservation, usage, success=success)
+            await _areconcile(tenant_budget, self.state.budget, reservation, usage, success=success)
             self._record_outcome(response.status_code, success=success, circuit=circuit)
             if self._alerts is not None:
                 _b = tenant_budget if tenant_budget is not None else self.state.budget

@@ -88,6 +88,11 @@ class InMemoryBudgetBackend(BudgetBackend):
             self._reserved = max(0, self._reserved - reserved)
             self._spent = min(self._total, self._spent + charge)
 
+    async def acommit(self, reserved: int, charge: int) -> None:
+        # This backend is pure in-memory state, so there is no I/O to move off
+        # the event loop; the base class's to_thread hop would be pure overhead.
+        self.commit(reserved, charge)
+
 
 _RESERVE_LUA = """
 local spent = tonumber(redis.call('HGET', KEYS[1], 'spent')) or 0
