@@ -142,8 +142,10 @@ async def _areconcile(
 ) -> None:
     """Async twin of :func:`_reconcile`.
 
-    Goes through ``Budget.areconcile`` so a shared (Redis) backend commits on
-    its own async client instead of blocking the event loop.
+    Goes through ``Budget.areconcile`` so the commit runs on the await path
+    rather than inline on the event loop. A shared backend still holds a
+    synchronous client, so its ``acommit`` moves the call to a worker thread via
+    ``asyncio.to_thread``; the in-memory backend commits in place.
     """
     if reservation is None:
         if downgraded and tenant_budget is not None and usage is not None and success:
