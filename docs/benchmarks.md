@@ -60,15 +60,31 @@ from CI.
 0.07 ms overhead at p50, p95 and p99 over 1,000 requests against a local
 `httpx.MockTransport`, with seed `0x00C0FFEE` and no network.
 
-**Deterministic and therefore comparable:** the scenario counts — requests,
-provider calls, successes, provider errors, budget-blocked, circuit-blocked.
+**Nothing in that file reproduces digit-for-digit, including the counts.** The
+seed makes the *input sequence* deterministic, not the outcome of every path.
+Two independent kinds of wall-clock dependence are baked in:
 
-**Wall-clock and therefore not comparable digit-for-digit:** every latency
-figure in the file. Re-running the same command on the same machine will move
-them. The snapshot does not record the host CPU, OS, Python version, or provider
-SDK version, so a difference between two snapshots cannot be attributed.
+- **Latencies**, obviously. Re-running on the same machine moves them.
+- **Scenario counts for the timing-dependent scenarios.** `error-storm`
+  exercises retry backoff and circuit cooldown, and `budget-hit` competes
+  requests against that same machinery. Both are wall-clock timers, so their
+  counts can differ between runs on one host and between hosts.
 
-Report the conditions alongside the number, per the rules above.
+Concretely, against the current tree:
+
+| Scenario | Snapshot (2026-07-20) | Re-running now | Reproduces? |
+|---|---|---|---|
+| `burst` | 50 requests / 50 provider calls / 50 successes | same | yes |
+| `steady-state` | 30 / 30 / 30 | same | yes |
+| `error-storm` | 50 / **15** / **11** / **39** circuit-blocked | 50 / **12** / **8** / **42** circuit-blocked | **no** |
+| `budget-hit` | 80 / 16 / 16 / **64** budget-blocked | usually 80 / 16 / 16 / 64, sometimes 80 / 18 / 18 / 62 | **not always** |
+
+So: `burst` and `steady-state` are safe to compare across runs. Treat
+`error-storm` and `budget-hit` as indicative only. The snapshot also does not
+record the host CPU, OS, Python version, or provider SDK version, so a
+difference between two snapshots cannot be attributed to a cause.
+
+Report the conditions alongside any number, per the rules above.
 
 ## Benchmark Rules
 

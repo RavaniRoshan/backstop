@@ -329,10 +329,18 @@ Reproduce the measurement yourself:
 backstop benchmark
 ```
 
-That prints the same table for your host. The counts in it (provider calls,
-budget-blocked, circuit-blocked) are deterministic and match the snapshot
-exactly; the latencies are wall-clock and will not. The same measurement is also
-available standalone, with no CLI, as
+That prints the same table for your host. Two things about comparability,
+because the seed only fixes the input sequence, not the outcomes:
+
+- **Latencies are wall-clock** and will never match a snapshot.
+- **The `burst` and `steady-state` counts reproduce exactly. The
+  `error-storm` and `budget-hit` counts do not reliably.** Both scenarios turn
+  on retry backoff and circuit cooldown, which are wall-clock timers. For
+  example, the snapshot's `error-storm` row (15 provider calls, 11 successes,
+  39 circuit-blocked) does not reproduce on a current tree, which reports 12 / 8
+  / 42 instead. Compare those two rows as indicative, never as a diff.
+
+The same measurement is also available standalone, with no CLI, as
 `PYTHONPATH=src python3 benchmarks/local_overhead.py --requests 1000`.
 
 The overhead check inside `backstop verify` passes below a **5 ms** p99

@@ -96,7 +96,7 @@ absent, which is not a declared dependency. Trust `backstop verify`, not
 - `backstop verify` — proves enforcement offline with 8 checks; `--live` adds a `GET /models` auth probe
 - `backstop demo` — side-by-side runaway loop (unprotected vs wrapped)
 - `backstop doctor` — SDK versions and wrap path; see the caveats above
-- `backstop benchmark` — overhead measurement; deterministic counts, wall-clock latencies
+- `backstop benchmark` — overhead measurement; latencies are wall-clock, and the `error-storm` / `budget-hit` scenario counts depend on retry backoff and circuit cooldown, so only `burst` and `steady-state` reproduce exactly
 - `backstop serve` — optional OpenAI-compatible gateway (needs the `fastapi` extra)
 - `backstop metrics` — Prometheus endpoint
 - `backstop real-openai` / `real-anthropic` — live smoke tests (require API key)
