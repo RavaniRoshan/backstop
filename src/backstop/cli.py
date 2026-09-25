@@ -365,8 +365,12 @@ def main(argv: list[str] | None = None) -> int:
     verify = subparsers.add_parser(
         "verify", help="run reproducible proof checks against this install (collapse install -> trust)"
     )
-    verify.add_argument("--live", action="store_true", help="also probe the real provider (GET /models)")
-    verify.add_argument("--offline", action="store_true", help="never touch the network (default)")
+    # --live and --offline are opposites, so argparse owns the conflict: the
+    # runner only reads --live, and a user who asked for no network must not
+    # get a request either way.
+    verify_network = verify.add_mutually_exclusive_group()
+    verify_network.add_argument("--live", action="store_true", help="also probe the real provider (GET /models)")
+    verify_network.add_argument("--offline", action="store_true", help="never touch the network (default)")
     verify.add_argument("--strict", action="store_true", help="treat warnings as failures (for CI)")
     verify.add_argument("--json", action="store_true", help="emit JSON instead of Markdown")
     verify.add_argument("--provider", choices=["openai", "anthropic"], default="openai")

@@ -154,6 +154,50 @@ def test_cli_verify_live_never_sends_the_other_providers_key(monkeypatch, auth_p
     assert "sk-ant-secret-value" in str(headers)
 
 
+def test_cli_verify_rejects_live_and_offline_together(monkeypatch, auth_probe, capsys):
+    """Asking for offline and live at once is a usage error, not a live probe.
+
+    ``--offline`` used to be inert: the runner only ever read ``--live``, so
+    this combination silently dialled out despite the user asking for no
+    network. A key is exported so the probe *would* fire if it were honoured,
+    and ``auth_probe`` fails the test on any un-mocked ``Client.get``.
+    """
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-must-not-be-sent")
+
+    with pytest.raises(SystemExit) as excinfo:
+        main(["verify", "--live", "--offline"])
+
+    assert excinfo.value.code != 0
+    err = capsys.readouterr().err
+    assert "usage:" in err
+    assert "--offline" in err
+    assert "--live" in err
+    assert auth_probe == [], "a network call was made despite --offline"
+
+
+def test_cli_verify_live_alone_still_probes(monkeypatch, auth_probe, capsys):
+    """--live on its own is unchanged: it still probes, and still passes."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-secret-value")
+
+    exit_code = main(["verify", "--live"])
+
+    capsys.readouterr()
+    assert exit_code == 0
+    assert len(auth_probe) == 1, "the live auth probe never ran"
+
+
+def test_cli_verify_offline_alone_still_probes_nothing(monkeypatch, auth_probe, capsys):
+    """--offline on its own is unchanged: the default, fully offline run."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-must-not-be-sent")
+
+    exit_code = main(["verify", "--offline"])
+
+    out = capsys.readouterr().out
+    assert exit_code == 0
+    assert auth_probe == [], "a network call was made despite --offline"
+    assert "provider auth (live)" not in out
+
+
 def test_live_probe_uses_bearer_auth_for_openai(monkeypatch, auth_probe):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-secret-value")
 
