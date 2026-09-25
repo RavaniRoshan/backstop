@@ -216,6 +216,7 @@ def test_explicit_provider_default_base_url_does_not_warn(monkeypatch, auth_prob
 
 def test_shadow_records_without_blocking():
     res = VerifyRunner()._check_shadow()
+    assert res.status == "pass"
 
 
 def test_shadow_env_killswitch_disables():
