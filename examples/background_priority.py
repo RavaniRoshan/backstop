@@ -1,7 +1,13 @@
 """
 Priority admission control example. Requires OPENAI_API_KEY to be set.
 
-Critical requests pass through when background requests are shed under load.
+When the concurrency limit is reached, a request waits for a slot and a
+critical request is selected ahead of waiting default and background ones.
+The gate queues and prioritises; it does not shed, so no background request
+is cancelled or discarded. Once a ticket has waited `starvation_after_seconds`
+(default 1.0) the oldest one in any queue is released even if a higher priority
+is still waiting, so a background request that has aged can be admitted ahead
+of a waiting critical one.
 """
 from __future__ import annotations
 
