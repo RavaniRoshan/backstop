@@ -1,4 +1,4 @@
-"""Backstop's spend ledger: the immutable spend event schema.
+"""Backstop's spend ledger: the spend event schema and attribution context.
 
 This package also owns the ``backstop.ledger`` import name that the in-process
 budget ledger has held since the start (``TenantBudget``, ``BudgetLedger``,
@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 from types import ModuleType
 
+from .context import attribution, current_attribution, with_attribution
 from .schema import Attribution, SpendEvent
 
 _BUDGET_LEDGER_ALIAS = "backstop._budget_ledger"
@@ -52,8 +53,11 @@ __all__ = [
     "ReservationTicket",
     "SpendEvent",
     "TenantBudget",
+    "attribution",
+    "current_attribution",
     "get_current_tenant",
     "get_ledger",
     "reset_ledger",
+    "with_attribution",
     "with_budget",
 ]

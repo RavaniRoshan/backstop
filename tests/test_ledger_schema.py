@@ -1,14 +1,24 @@
 """Tests for the ledger spend event schema and the attribution context.
 
+The attribution semantics are the ones the ledger's finance claims rest on:
+nesting merges, an exception inside a scope does not leak the inner value, and
+a scope survives an ``asyncio`` task boundary.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from backstop.ledger import Attribution, SpendEvent
+from backstop.ledger import (
+    Attribution,
+    SpendEvent,
+    attribution,
+    current_attribution,
+    with_attribution,
+)
 from backstop.ledger.schema import (
     OCCURRED_AT_RE,
     OUTCOMES,
@@ -253,3 +263,268 @@ def test_from_dict_revalidates():
     payload["priority"] = "urgent"
     with pytest.raises(ValueError, match="priority"):
         SpendEvent.from_dict(payload)
+
+
+# ---------------------------------------------------------------------------
+# Attribution context: scoping
+# ---------------------------------------------------------------------------
+
+
+def test_current_attribution_is_never_none_outside_any_scope():
+    assert isinstance(current_attribution(), Attribution)
+
+
+def test_attribution_context_manager_yields_the_merged_value():
+    with attribution(team="payments") as active:
+        assert active == Attribution(team="payments")
+        assert current_attribution() is active
+
+
+def test_nested_scope_wins_on_conflicts_and_inherits_the_rest():
+    with attribution(team="payments", feature="checkout-v2"):
+        with attribution(feature="refunds", agent="refund-bot"):
+            active = current_attribution()
+            assert active == Attribution(
+                team="payments", feature="refunds", agent="refund-bot"
+            )
+        assert current_attribution() == Attribution(
+            team="payments", feature="checkout-v2"
+        )
+    assert current_attribution() == Attribution()
+
+
+def test_outer_value_is_restored_when_the_inner_body_raises():
+    with attribution(team="payments"):
+        with pytest.raises(RuntimeError, match="boom"):
+            with attribution(feature="refunds"):
+                assert current_attribution().feature == "refunds"
+                raise RuntimeError("boom")
+        assert current_attribution() == Attribution(team="payments")
+
+
+def test_outer_value_is_restored_when_an_outer_body_raises():
+    with pytest.raises(RuntimeError, match="boom"):
+        with attribution(team="payments"):
+            raise RuntimeError("boom")
+    assert current_attribution() == Attribution()
+
+
+def test_unknown_field_name_raises_type_error():
+    with pytest.raises(TypeError, match="cost_centerz"):
+        with attribution(team="payments", cost_centerz="cc-1"):
+            pass
+
+
+def test_unknown_field_name_raises_before_the_scope_is_entered():
+    with attribution(team="payments"):
+        with pytest.raises(TypeError, match="nope"):
+            with attribution(nope="x"):
+                pass
+        assert current_attribution() == Attribution(team="payments")
+
+
+@pytest.mark.parametrize("bad", [1, 3.5, object(), ["team"], {"a": 1}])
+def test_non_string_values_raise_type_error(bad):
+    with pytest.raises(TypeError, match="team"):
+        attribution(team=bad)
+
+
+def test_decorator_rejects_a_non_string_value_at_decoration_time():
+    with pytest.raises(TypeError, match="team"):
+        with_attribution(team=7)
+
+
+# ---------------------------------------------------------------------------
+# Attribution context: decorator
+# ---------------------------------------------------------------------------
+
+
+def test_decorated_function_runs_under_its_fields():
+    @with_attribution(agent="refund-bot")
+    def handle_refund(ticket):
+        return current_attribution()
+
+    assert handle_refund("t-1") == Attribution(agent="refund-bot")
+    assert current_attribution() == Attribution()
+
+
+def test_decorated_function_merges_with_the_enclosing_scope():
+    with attribution(team="payments"):
+        @with_attribution(agent="refund-bot")
+        def handle_refund():
+            return current_attribution()
+
+        assert handle_refund() == Attribution(team="payments", agent="refund-bot")
+        assert current_attribution() == Attribution(team="payments")
+
+
+def test_decorator_restores_the_outer_value_when_the_body_raises():
+    with attribution(team="payments"):
+
+        @with_attribution(feature="refunds")
+        def boom():
+            raise RuntimeError("boom")
+
+        with pytest.raises(RuntimeError, match="boom"):
+            boom()
+        assert current_attribution() == Attribution(team="payments")
+
+
+def test_decorator_works_on_methods_and_preserves_metadata():
+    class Refunds:
+        @with_attribution(agent="refund-bot")
+        def handle(self, ticket):
+            return current_attribution(), self
+
+        @staticmethod
+        @with_attribution(agent="refund-bot")
+        def statics(ticket):
+            return current_attribution(), ticket
+
+    refunds = Refunds()
+    active, receiver = refunds.handle("t-1")
+    assert active == Attribution(agent="refund-bot")
+    assert receiver is refunds
+    assert Refunds.handle.__name__ == "handle"
+
+    active, ticket = Refunds.statics("t-1")
+    assert active == Attribution(agent="refund-bot")
+    assert ticket == "t-1"
+
+
+def test_decorator_refuses_a_generator_function():
+    with pytest.raises(TypeError, match="generator"):
+
+        @with_attribution(agent="refund-bot")
+        def stream():
+            yield current_attribution()
+
+
+# ---------------------------------------------------------------------------
+# Attribution context: async
+# ---------------------------------------------------------------------------
+
+
+def test_decorated_coroutine_runs_under_its_fields():
+    @with_attribution(agent="refund-bot")
+    async def handle_refund(ticket):
+        await asyncio.sleep(0)
+        return current_attribution()
+
+    async def main():
+        return await handle_refund("t-1")
+
+    assert asyncio.run(main()) == Attribution(agent="refund-bot")
+    assert current_attribution() == Attribution()
+
+
+def test_decorated_coroutine_restores_the_outer_value_after_await():
+    with attribution(team="payments"):
+
+        @with_attribution(agent="refund-bot")
+        async def handle_refund():
+            await asyncio.sleep(0)
+            return current_attribution()
+
+        async def main():
+            return await handle_refund()
+
+        assert asyncio.run(main()) == Attribution(team="payments", agent="refund-bot")
+        assert current_attribution() == Attribution(team="payments")
+
+
+def test_decorated_coroutine_restores_the_outer_value_when_it_raises():
+    with attribution(team="payments"):
+
+        @with_attribution(agent="refund-bot")
+        async def boom():
+            await asyncio.sleep(0)
+            raise RuntimeError("boom")
+
+        async def main():
+            await boom()
+
+        with pytest.raises(RuntimeError, match="boom"):
+            asyncio.run(main())
+        assert current_attribution() == Attribution(team="payments")
+
+
+def test_coroutine_wrapper_is_not_marked_async_when_wrapping_sync_callables():
+    @with_attribution(agent="refund-bot")
+    def sync_callable():
+        return None
+
+    assert not asyncio.iscoroutinefunction(sync_callable)
+
+
+def test_coroutine_wrapper_is_awaitable_for_async_callables():
+    @with_attribution(agent="refund-bot")
+    async def async_callable():
+        return 1
+
+    assert asyncio.iscoroutinefunction(async_callable)
+
+
+def test_attribution_context_manager_spans_an_await():
+    async def main():
+        with attribution(team="payments", feature="checkout-v2"):
+            await asyncio.sleep(0)
+            return current_attribution()
+
+    assert asyncio.run(main()) == Attribution(team="payments", feature="checkout-v2")
+    assert current_attribution() == Attribution()
+
+
+def test_attribution_propagates_into_an_asyncio_task():
+    seen: list[Attribution] = []
+
+    async def child():
+        seen.append(current_attribution())
+        with attribution(feature="refunds"):
+            seen.append(current_attribution())
+
+    async def main():
+        with attribution(team="payments", feature="checkout-v2"):
+            await asyncio.create_task(child())
+        seen.append(current_attribution())
+
+    asyncio.run(main())
+
+    assert seen[0] == Attribution(team="payments", feature="checkout-v2")
+    assert seen[1] == Attribution(team="payments", feature="refunds")
+    assert seen[2] == Attribution()
+
+
+def test_a_task_scope_does_not_leak_back_to_the_parent_task():
+    async def child():
+        with attribution(team="refunds"):
+            return current_attribution()
+
+    async def main():
+        with attribution(team="payments"):
+            inside = await asyncio.create_task(child())
+            return inside, current_attribution()
+
+    inside, after = asyncio.run(main())
+
+    assert inside == Attribution(team="refunds")
+    assert after == Attribution(team="payments")
+
+
+def test_concurrent_tasks_keep_their_own_scopes():
+    observed: dict[str, Attribution] = {}
+
+    async def worker(name):
+        with attribution(team=name):
+            await asyncio.sleep(0)
+            observed[name] = current_attribution()
+
+    async def main():
+        await asyncio.gather(worker("payments"), worker("refunds"))
+
+    asyncio.run(main())
+
+    assert observed == {
+        "payments": Attribution(team="payments"),
+        "refunds": Attribution(team="refunds"),
+    }
