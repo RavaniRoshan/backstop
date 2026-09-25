@@ -285,6 +285,60 @@ async def test_async_rate_limiter_denies_request():
             )
 
 
+def test_sync_pre_admission_denial_releases_the_reservation():
+    """A guard denial must not strand the reservation taken before admission."""
+    from backstop.exceptions import GuardrailViolationError
+
+    cfg = BackstopConfig(agent_guard=_Deny(), default_max_output_tokens=50)
+    state = BackstopState.create(50, cfg)
+    client = httpx.Client(
+        transport=BackstopTransport(state, httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True}))),
+        base_url="https://mock.local",
+    )
+    payload = {"model": "m", "messages": []}
+    for _ in range(3):
+        with pytest.raises(GuardrailViolationError):
+            client.post(
+                "/v1/chat/completions", json=payload, headers={"X-Backstop-Agent": "agent-1"}
+            )
+        assert state.budget.backend.reserved == 0, "the denial stranded the reservation"
+
+    assert state.budget.remaining == 50
+    # The budget is intact, so an unguarded request is still admitted.
+    assert client.post("/v1/chat/completions", json=payload).status_code == 200
+    client.close()
+
+
+@pytest.mark.anyio
+async def test_async_pre_admission_denial_releases_the_reservation():
+    """Async twin: a guard denial must not strand the reservation either."""
+    from backstop.exceptions import GuardrailViolationError
+
+    cfg = BackstopConfig(agent_guard=_Deny(), default_max_output_tokens=50)
+    state = BackstopState.create(50, cfg)
+    payload = {"model": "m", "messages": []}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"ok": True})
+
+    async with httpx.AsyncClient(
+        transport=AsyncBackstopTransport(state, httpx.MockTransport(handler)),
+        base_url="https://mock.local",
+    ) as client:
+        for _ in range(3):
+            with pytest.raises(GuardrailViolationError):
+                await client.post(
+                    "/v1/chat/completions",
+                    json=payload,
+                    headers={"X-Backstop-Agent": "agent-1"},
+                )
+            assert state.budget.backend.reserved == 0, "the denial stranded the reservation"
+
+        assert state.budget.remaining == 50
+        response = await client.post("/v1/chat/completions", json=payload)
+        assert response.status_code == 200
+
+
 @pytest.mark.anyio
 async def test_async_shadow_policy_records_sampled_request():
     sink = _Sink()

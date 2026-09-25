@@ -295,7 +295,13 @@ class BackstopTransport(httpx.BaseTransport):
                     self._audit("deny", "budget_exceeded", meta, tenant_id=tenant_id)
                     raise
 
-        self._pre_admit_checks(request, meta, tenant_id)
+        try:
+            self._pre_admit_checks(request, meta, tenant_id)
+        except Exception:
+            # The reservation was taken before admission ran. A denial here has to
+            # hand it back, or every rejected request permanently drains budget.
+            _reconcile(tenant_budget, self.state.budget, reservation, 0, success=False)
+            raise
 
         try:
             if self.state.config.before_request is not None:
@@ -771,7 +777,14 @@ class AsyncBackstopTransport(httpx.AsyncBaseTransport):
                         self._metrics.call("tenant_budget_exceeded", tenant_id)
                     raise
 
-        self._pre_admit_checks(request, meta, tenant_id)
+        try:
+            self._pre_admit_checks(request, meta, tenant_id)
+        except Exception:
+            # Async twin of the sync branch: a pre-admission denial has to hand
+            # the reservation back, or every rejected request permanently drains
+            # budget.
+            await _areconcile(tenant_budget, self.state.budget, reservation, 0, success=False)
+            raise
 
         try:
             if self.state.config.before_request is not None:
