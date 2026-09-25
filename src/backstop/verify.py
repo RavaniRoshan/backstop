@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 import time
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -25,6 +26,31 @@ _PROVIDER_KEY_ENV = {
     "openai": "OPENAI_API_KEY",
     "anthropic": "ANTHROPIC_API_KEY",
 }
+
+_PROVIDER_BASE_URL = {
+    "openai": "https://api.openai.com/v1",
+    "anthropic": "https://api.anthropic.com/v1",
+}
+
+
+def _warn_on_foreign_base_url(provider: str, base_url: str) -> None:
+    """Warn when the provider credential is about to go to a non-default host.
+
+    ``--base-url`` is a legitimate flag (proxies, gateways, regional endpoints),
+    so it is never blocked -- but sending a live provider key to an arbitrary
+    host is a trust decision the caller should see out loud, not discover later
+    in someone else's logs.
+    """
+    host = httpx.URL(base_url).host
+    default_host = httpx.URL(_PROVIDER_BASE_URL[provider]).host
+    if host == default_host:
+        return
+    print(
+        f"warning: --base-url host {host!r} is not {provider}'s default "
+        f"({default_host}); the {provider} credential from the selected key env "
+        f"will be sent to {host}",
+        file=sys.stderr,
+    )
 
 
 def default_api_key_env(provider: str) -> str:
@@ -587,7 +613,9 @@ class VerifyRunner:
             )
         base = self.base_url
         if base is None:
-            base = "https://api.openai.com/v1" if self.provider == "openai" else "https://api.anthropic.com/v1"
+            base = _PROVIDER_BASE_URL[self.provider]
+        else:
+            _warn_on_foreign_base_url(self.provider, base)
         try:
             with httpx.Client(base_url=base, timeout=self.timeout) as c:
                 r = c.get("/models", headers=_auth_headers(self.provider, key))

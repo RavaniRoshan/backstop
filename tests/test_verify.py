@@ -16,7 +16,6 @@ from backstop.verify import (
 
 
 _REAL_GET = httpx.Client.get
-_PROBE_HOSTS = frozenset({"api.openai.com", "api.anthropic.com"})
 
 # (base_url, headers) of every intercepted live auth probe.
 _PROBE_CALLS: list[tuple[str, dict[str, str]]] = []
@@ -25,14 +24,13 @@ _PROBE_CALLS: list[tuple[str, dict[str, str]]] = []
 def _record_probe_get(client, url, **kwargs) -> httpx.Response:
     """Stand in for ``httpx.Client.get`` on the live auth probe only.
 
-    ``verify`` reaches the provider through a client whose base_url is the
-    provider host. Every other client in the run -- the offline MockTransport
-    proofs and the SDK clients -- stays completely real, so ``main()`` still
-    exercises the whole command and nothing dials out.
+    Deny by default: every client in ``verify`` that is allowed to answer from a
+    mock carries a ``MockTransport`` (the offline proofs, and the clients handed
+    to the SDKs). Anything else gets recorded instead of dialled out, so no test
+    in this file can make a network call, whatever ``--base-url`` says.
     """
-    base_url = str(client.base_url or "")
-    if httpx.URL(base_url).host in _PROBE_HOSTS:
-        _PROBE_CALLS.append((base_url, kwargs.get("headers") or {}))
+    if not isinstance(getattr(client, "_transport", None), httpx.MockTransport):
+        _PROBE_CALLS.append((str(client.base_url or ""), kwargs.get("headers") or {}))
         return httpx.Response(200)
     return _REAL_GET(client, url, **kwargs)
 
@@ -177,6 +175,43 @@ def test_live_probe_uses_x_api_key_for_anthropic(monkeypatch, auth_probe):
     assert headers["x-api-key"] == "sk-ant-secret-value"
     assert headers["anthropic-version"] == "2023-06-01"
     assert "Authorization" not in headers
+
+
+def test_custom_base_url_warns_before_sending_the_credential(monkeypatch, auth_probe, capsys):
+    """--base-url still works, but a foreign host gets a loud warning."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-secret-value")
+
+    res = VerifyRunner(
+        live=True, provider="anthropic", base_url="https://proxy.internal/anthropic"
+    )._check_provider_auth()
+
+    assert res.status == "pass"
+    err = capsys.readouterr().err
+    assert "anthropic" in err
+    assert "proxy.internal" in err
+    assert "credential" in err
+    # the flag is not blocked: the probe still went to the given host
+    assert httpx.URL(auth_probe[0][0]).host == "proxy.internal"
+
+
+def test_default_base_url_does_not_warn(monkeypatch, auth_probe, capsys):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-secret-value")
+
+    res = VerifyRunner(live=True, provider="anthropic")._check_provider_auth()
+
+    assert res.status == "pass"
+    assert capsys.readouterr().err == ""
+
+
+def test_explicit_provider_default_base_url_does_not_warn(monkeypatch, auth_probe, capsys):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-secret-value")
+
+    res = VerifyRunner(
+        live=True, provider="openai", base_url="https://api.openai.com/v1"
+    )._check_provider_auth()
+
+    assert res.status == "pass"
+    assert capsys.readouterr().err == ""
 
 
 def test_shadow_records_without_blocking():
