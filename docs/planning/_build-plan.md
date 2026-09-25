@@ -51,7 +51,7 @@ After this build, a user can:
 
 ## Definition of Done
 
-- `python -m pytest` green, with no reduction in passing test count versus baseline (254).
+- `python -m pytest` green, with no reduction in passing test count versus baseline (246 passed, 8 skipped).
 - `backstop verify`, `backstop demo`, `backstop ledger demo`, and `backstop doctor` all exit 0
   with no network and no key.
 - `CHANGELOG.md` `## [Unreleased]` documents every user-visible change from this build.
@@ -69,7 +69,7 @@ controller owns it.
 
 | # | Task | Depends on | Touches | Status |
 |---|---|---|---|---|
-| 1 | Correctness fixes: credential leak, gate ticket leak, streaming circuit wedge, async parity, blocking async Redis reconcile | — | `cli.py`, `verify.py`, `admission.py`, `transports.py`, `circuit.py`, `budget.py`, `state_backends.py`, tests | pending |
+| 1 | DONE Correctness fixes: credential leak, gate ticket leak, streaming circuit wedge, async parity, blocking async Redis reconcile | — | `cli.py`, `verify.py`, `admission.py`, `transports.py`, `circuit.py`, `budget.py`, `state_backends.py`, tests | pending |
 | 2 | Truthfulness pass: README, docs, install.sh, llms.txt release + behaviour claims | 1 | `README.md`, `docs/*.md`, `install.sh`, `llms.txt` | pending |
 | 3 | Spend event schema + attribution context (Area A) | — | new `ledger/` package, `__init__.py` | pending |
 | 4 | Price catalog with precedence + cost computation (Area C) | 3 | new `pricing_catalog.py`, `ledger/` | pending |
