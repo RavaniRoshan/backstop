@@ -4,19 +4,28 @@ Backstop's Python distribution is `backstop-ai`. The import remains
 `backstop`, and the console commands remain `backstop` and `wedge`.
 Python 3.10 or newer is required.
 
-> **0.6.0 is unreleased.** PyPI publication and installation from PyPI have
-> not been verified. The registry commands below are for use after publication;
-> until then, use the source instructions. The PyPI name `backstop` belongs to
+> **0.6.0 is published.** The registry commands below are the supported
+> install path: `backstop-ai` 0.6.0 is on PyPI, `backstop-ai` 0.6.0 is on npm,
+> and the `v0.6.0` GitHub Release carries the wheel and sdist. The default
+> branch is unreleased work past that tag. The PyPI name `backstop` belongs to
 > an unrelated project.
 >
-> SDK compatibility is unresolved: current Anthropic SDKs can reject wrapping,
-> and SDKs can relabel Backstop enforcement errors as connection errors.
-> Dependency bounds have not yet been changed. Installing successfully does
-> not prove provider compatibility or budget enforcement.
+> SDK compatibility is bounded, not open-ended. Below the declared floors
+> (`openai>=2.37`, `anthropic>=0.98`) the provider SDK catches Backstop's
+> `BudgetExceededError` and re-raises it as `APIConnectionError`, so budget
+> enforcement becomes invisible to your code; older SDKs additionally break
+> against `httpx>=0.28`. Within the tested range that relabelling does not
+> happen. Installing successfully still does not prove provider
+> compatibility — run `backstop verify` for that, and read its documented
+> limits in [Verifying the install](install.md#verifying-the-install).
+>
+> The npm package `backstop-ai` is a different, partial TypeScript port of this
+> project. `pip install backstop-ai` and `npm install backstop-ai` do not give
+> you the same code.
 
 ## End users
 
-### One line (after publication)
+### One line
 
 ```bash
 pip install "backstop-ai[anthropic]"
@@ -25,7 +34,7 @@ pip install "backstop-ai[anthropic]"
 This installs the library plus the Anthropic SDK dependency. Use
 `pip install backstop-ai` for the base dependencies, including OpenAI.
 
-### Convenience installer (after publication)
+### Convenience installer
 
 The installer detects Python and invokes pip. It is not a substitute for
 resolving the compatibility limitations above. Review it before running:
@@ -38,7 +47,8 @@ sh install.sh
 It runs `python3 -m pip install --user --upgrade "backstop-ai[anthropic]==0.6.0"`.
 If the PyPI install fails, it falls back to the GitHub repository's current
 source, which is not a pinned release. Set `BACKSTOP_NO_GITFALLBACK=1` to
-fail instead. This installer has not been run as part of 0.6.0 verification.
+fail instead. The 0.6.0 release verification installed from PyPI directly with
+pip, not through this script.
 
 > The script supports macOS and Linux; on Windows use Python's official
 > installer and `pip`. Prefer a virtual environment and the pip commands above
@@ -59,7 +69,7 @@ Extras are combinable: `pip install "backstop-ai[anthropic,metrics]"`.
 
 ### Run without a permanent install (pipx run)
 
-After publication, if you have [pipx](https://pipx.pypa.io) installed, run
+If you have [pipx](https://pipx.pypa.io) installed, run
 either CLI in an ephemeral virtual environment. Specify the distribution
 explicitly because it differs from the console command names:
 
@@ -117,7 +127,7 @@ pipx install --index-url https://pypi.internal/simple backstop-ai
 Configure upstream access through your mirror according to your organization's
 package-source policy.
 
-### Pinned installs (after publication)
+### Pinned installs
 
 ```bash
 pip install "backstop-ai[anthropic]==0.6.0"

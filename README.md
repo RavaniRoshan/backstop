@@ -78,13 +78,18 @@ backstop demo
 
 ## Install
 
-> **0.6.0 is unreleased.** Until published on PyPI, install from source (see below).
+`0.6.0` is published — on PyPI as `backstop-ai`, on npm as `backstop-ai`, and
+as the `v0.6.0` GitHub Release. `pip install` gives you that release; the
+default branch carries unreleased work past it, so the source install below
+tracks `main` rather than `v0.6.0`.
 
 ```bash
-# After PyPI publication:
-pip install "backstop-ai"           # OpenAI only
+pip install "backstop-ai"             # OpenAI only
 pip install "backstop-ai[anthropic]"  # OpenAI + Anthropic
 ```
+
+> The npm package of the same name is a **partial TypeScript port**, not the
+> Python distribution. See [TypeScript](#typescript-partial-port) below.
 
 ### From source
 

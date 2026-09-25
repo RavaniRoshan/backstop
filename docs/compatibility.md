@@ -1,12 +1,14 @@
 # Compatibility Matrix
 
-> 0.6.0 is unreleased. The SDK ranges below are the **tested** ranges from
-> `.github/workflows/ci.yml` — not a claim of universal support. Wrapping an
-> SDK outside these ranges emits a loud `UserWarning` naming the tested range
-> (PLAN 1.4.1) and proceeds unverified. Enforcement-error propagation
-> (`BudgetExceededError` catchable by user code, not `APIConnectionError`) is
-> verified on openai 3.14.0 + anthropic 1.5.0 (current) and openai 2.37.0 +
-> anthropic 0.99.0 (legacy matrix) via `tests/test_guardrail_visibility.py`.
+> 0.6.0 is published (PyPI `backstop-ai`, GitHub Release `v0.6.0`). The SDK
+> ranges below are the **tested** ranges from `.github/workflows/ci.yml` — not
+> a claim of universal support, and not a claim that every combination is
+> exercised. Wrapping an SDK outside these ranges emits a loud `UserWarning`
+> naming the tested range (PLAN 1.4.1) and proceeds unverified.
+> Enforcement-error propagation (`BudgetExceededError` catchable by user code,
+> not `APIConnectionError`) is verified on openai 3.14.0 + anthropic 1.5.0
+> (current) and openai 2.37.0 + anthropic 0.99.0 (legacy matrix) via
+> `tests/test_guardrail_visibility.py`.
 > See [installation limitations](install.md).
 
 ## Python

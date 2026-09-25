@@ -2,9 +2,10 @@
 # Backstop — one-command installer (convenience / secondary path).
 #
 # Canonical install remains:   pip install "backstop-ai[anthropic]"
-# 0.6.0 is unreleased: PyPI publication and SDK compatibility verification
-# are pending. Review this script and /docs/install.md before running it.
-# The Git fallback below installs current source, not a pinned release.
+# 0.6.0 is published: PyPI `backstop-ai`, the `v0.6.0` GitHub Release, and
+# npm `backstop-ai`. The Git fallback below installs current source from
+# main, which is unreleased work past the tag, not a pinned release.
+# Review this script and /docs/install.md before running it.
 #
 #   curl -fsSL https://raw.githubusercontent.com/RavaniRoshan/backstop/main/install.sh | sh
 #
@@ -111,7 +112,6 @@ EXTRAS="${BACKSTOP_EXTRAS:-anthropic}"
 BACKSTOP_VERSION="0.6.0"
 SPEC="backstop-ai[$EXTRAS]==${BACKSTOP_VERSION}"
 
-warn "0.6.0 is unreleased; PyPI publication and SDK compatibility verification are pending."
 info "Installing $SPEC (user scheme)..."
 if python3 -m pip install --user --upgrade "$SPEC"; then
   :

@@ -11,22 +11,26 @@
 - Benchmarks: /docs/benchmarks.md
 - Examples: /examples/
 
-## Install (0.6.0 unreleased)
+## Install (0.6.0 published)
 
-The distribution is `backstop-ai`; the import is `backstop`. PyPI publication is pending.
-Until then, install from source:
+The distribution is `backstop-ai`; the import is `backstop`. 0.6.0 is on PyPI
+and on the `v0.6.0` GitHub Release. Note that `backstop-ai` on **npm** is a
+separate, partial TypeScript port — not this package.
+
+```bash
+pip install backstop-ai               # OpenAI + base
+pip install "backstop-ai[anthropic]"  # OpenAI + Anthropic
+pip install "backstop-ai[redis]"      # shared/distributed budget
+pip install "backstop-ai[otel]"       # OpenTelemetry metrics export
+pip install "backstop-ai[fastapi]"    # gateway/sidecar mode
+```
+
+To work against unreleased work past the tag:
 
 ```bash
 git clone https://github.com/RavaniRoshan/backstop.git
 cd backstop && pip install -e ".[anthropic]"
 ```
-
-After publication:
-- `pip install backstop-ai` — OpenAI + base
-- `pip install "backstop-ai[anthropic]"` — OpenAI + Anthropic
-- `pip install "backstop-ai[redis]"` — shared/distributed budget
-- `pip install "backstop-ai[otel]"` — OpenTelemetry metrics export
-- `pip install "backstop-ai[fastapi]"` — per-tenant FastAPI example
 
 ## Quick start
 
@@ -73,7 +77,7 @@ Run `backstop doctor` to check your installed versions.
 If you are an agent installing Backstop into a codebase:
 
 1. Check SDK compatibility: OpenAI `>=2.37,<4`, Anthropic `>=0.98,<2`.
-2. Until PyPI publication, install from source.
+2. `pip install "backstop-ai[anthropic]"` (or install from source for unreleased work).
 3. Integration: `client = Backstop.wrap(client, budget=50_000)` — one line.
 4. Verify: `backstop verify` proves enforcement without any API key.
 5. Catch `backstop.exceptions.BudgetExceededError` to handle budget exhaustion.
