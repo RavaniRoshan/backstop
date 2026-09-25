@@ -220,6 +220,14 @@ def _make_sync_client(cfg, handler):
     )
 
 
+def _make_async_client(cfg, handler):
+    state = BackstopState.create(1000, cfg)
+    return httpx.AsyncClient(
+        transport=AsyncBackstopTransport(state, httpx.MockTransport(handler)),
+        base_url="https://mock.local",
+    )
+
+
 def test_rate_limiter_denies_request():
     from backstop.exceptions import RateLimitError
 
@@ -240,6 +248,56 @@ def test_agent_guard_denies_request():
             json={"model": "m", "messages": [{"role": "user", "content": "hi"}]},
             headers={"X-Backstop-Agent": "agent-1"},
         )
+
+
+@pytest.mark.anyio
+async def test_async_agent_guard_denies_request():
+    from backstop.exceptions import GuardrailViolationError
+
+    cfg = BackstopConfig(agent_guard=_Deny(), default_max_output_tokens=1)
+
+    async def handler(request):
+        return httpx.Response(200, json={"ok": True})
+
+    async with _make_async_client(cfg, handler) as client:
+        with pytest.raises(GuardrailViolationError):
+            await client.post(
+                "/v1/chat/completions",
+                json={"model": "m", "messages": [{"role": "user", "content": "hi"}]},
+                headers={"X-Backstop-Agent": "agent-1"},
+            )
+
+
+@pytest.mark.anyio
+async def test_async_rate_limiter_denies_request():
+    from backstop.exceptions import RateLimitError
+
+    cfg = BackstopConfig(rate_limiter=_Deny(), default_max_output_tokens=1)
+
+    async def handler(request):
+        return httpx.Response(200, json={"ok": True})
+
+    async with _make_async_client(cfg, handler) as client:
+        with pytest.raises(RateLimitError):
+            await client.post(
+                "/v1/chat/completions",
+                json={"model": "m", "messages": [{"role": "user", "content": "hi"}]},
+            )
+
+
+@pytest.mark.anyio
+async def test_async_shadow_policy_records_sampled_request():
+    sink = _Sink()
+    cfg = BackstopConfig(shadow_policy=ShadowPolicy(sample_rate=1.0, sink=sink), default_max_output_tokens=1)
+
+    async def handler(request):
+        return httpx.Response(200, json={"ok": True})
+
+    async with _make_async_client(cfg, handler) as client:
+        await client.post(
+            "/v1/chat/completions", json={"model": "m", "messages": [{"role": "user", "content": "hi"}]}
+        )
+    assert any(r.get("decision") == "shadow" for r in sink.records)
 
 
 def test_shadow_policy_records_sampled_request():

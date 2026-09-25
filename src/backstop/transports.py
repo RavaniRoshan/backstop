@@ -747,6 +747,8 @@ class AsyncBackstopTransport(httpx.AsyncBaseTransport):
                         self._metrics.call("tenant_budget_exceeded", tenant_id)
                     raise
 
+        self._pre_admit_checks(request, meta, tenant_id)
+
         try:
             if self.state.config.before_request is not None:
                 hook = BeforeRequestHook(
