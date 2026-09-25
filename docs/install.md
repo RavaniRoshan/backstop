@@ -17,7 +17,7 @@ Python 3.10 or newer is required.
 > against `httpx>=0.28`. Within the tested range that relabelling does not
 > happen. Installing successfully still does not prove provider
 > compatibility — run `backstop verify` for that, and read its documented
-> limits in [Verifying the install](install.md#verifying-the-install).
+> limits in [Checking your install](install.md#checking-your-install).
 >
 > The npm package `backstop-ai` is a different, partial TypeScript port of this
 > project. `pip install backstop-ai` and `npm install backstop-ai` do not give
@@ -169,12 +169,52 @@ This is an example for an image you build, not a published Backstop image.
 backstop --help
 wedge --help
 python -c "import backstop; print(backstop.__version__)"
+backstop verify
 ```
 
-These commands check CLI entry points and the import version, not provider
-compatibility. The current `backstop doctor` smoke test is not sufficient to
-prove SDK wrapping or enforcement works.
+The first three check CLI entry points and the import version. They say nothing
+about provider compatibility. `backstop verify` is the command that does: it
+runs eight offline checks against a local mock transport — wrap pipeline,
+budget block, overhead, cache, per-agent isolation, hierarchical budgets, shadow
+mode — and exits 0 with no network and no key.
+
+### `backstop doctor` — what it proves, and its one known defect
+
+`backstop doctor` is a **wrap-and-import smoke test**. It builds mock clients,
+wraps them, and confirms HTTP-family detection resolves. It does **not** send a
+request through the wrapped transport, so it cannot prove enforcement works. Use
+`backstop verify` for that.
+
+Known defect: `doctor` imports `httpx2` unconditionally in its wrap smoke test,
+but `httpx2` is not a declared dependency — it only arrives as a dependency of
+`openai>=3` / `anthropic>=1`. On an install that resolves to the older SDK
+family, so that `httpx2` is absent, the import fails and `doctor` exits 1 with a
+`ModuleNotFoundError` traceback. That is a bug in `doctor`, not a broken install:
+
+```bash
+python -c "import httpx2" && echo "httpx2 present" || echo "doctor will exit 1 here"
+```
+
+`backstop verify` is unaffected by this and is the command to trust.
+
+### Probing the live provider
+
+`backstop verify --live` adds one network check: a `GET /models` against the
+provider. It resolves the key per provider — `OPENAI_API_KEY` for
+`--provider openai`, `ANTHROPIC_API_KEY` for `--provider anthropic` — with an
+explicit `--api-key-env` overriding the default, and sends provider-correct
+auth headers. If `--base-url` points somewhere other than the provider's default
+host, `verify` warns on stderr naming the destination, because your provider
+credential is about to be sent there.
+
+A 200 proves the key exists. It does **not** prove scope, quota, or model
+entitlement.
+
+One flag trap: `--offline` is accepted but inert. The runner only reads
+`--live`, so passing `--offline` together with `--live` still performs the live
+probe. Omit `--live` for no network.
 
 > `wedge` with `provider: anthropic` requires the `anthropic` extra:
-> `pip install "backstop-ai[anthropic]"`. The extra installs the SDK; it does
-> not resolve the known wrapping incompatibility.
+> `pip install "backstop-ai[anthropic]"`. The extra installs the SDK; the
+> enforcement floors documented in
+> [compatibility](compatibility.md#providers) are what make the error catchable.

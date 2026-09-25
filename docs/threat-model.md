@@ -21,10 +21,20 @@ Application process
 
 In OSS local mode, Backstop code runs inside the application process. No Backstop-hosted service is required.
 
+The optional gateway mode changes this shape. `backstop serve` is a process of
+itself: clients send request bodies to it, and it forwards them upstream. In
+that mode the Backstop process does see payloads and does hold whichever
+upstream credential it was configured with, so it becomes a component in your
+trust boundary rather than a library inside yours. See
+[docs/architecture.md](architecture.md#optional-gateway--sidecar-mode).
+
 ## Default Privacy Posture
 
-- Provider API keys remain in the application environment.
-- Prompt and response payloads are not sent to a Backstop service.
+- Provider API keys remain in the application environment, or in whatever
+  process runs `backstop serve` if you use the gateway.
+- Prompt and response payloads are not sent to a Backstop service. There is no
+  Backstop service. In gateway mode they transit the gateway process you
+  operate, which is a different statement.
 - Metrics should describe control-plane behavior and usage, not raw content.
 - Hooks run in the application process and are controlled by the application owner.
 
@@ -37,7 +47,9 @@ If a service uses both wrapped and unwrapped SDK clients, unwrapped calls bypass
 Mitigation:
 
 - Document wrapping at client construction boundaries.
-- Add `backstop doctor` in a future phase to detect common misconfiguration.
+- `backstop doctor` exists and reports SDK versions and wrap status, but it does
+  **not** scan your codebase for unwrapped clients. It cannot detect this
+  misconfiguration today. Wrapping discipline is on the application.
 
 ### Metric Leakage
 
@@ -65,11 +77,17 @@ In local mode, replicated services enforce separate budgets.
 Mitigation:
 
 - Document local-mode limits.
-- Add Redis-backed distributed state in Phase 1.
+- Redis-backed distributed state shipped in the `redis` extra: set
+  `BackstopConfig(shared_budget=True, redis_url=...)` and the token budget is
+  reserved and committed through Redis rather than process memory. It is
+  optional and off by default. Note that CI does not install the `redis` extra,
+  so that path has no automated coverage.
 
 ### Control Plane Outage
 
-A future hosted control plane could become an availability dependency.
+A future hosted control plane could become an availability dependency. There is
+no control plane today, so this is a design constraint on hypothetical future
+work, not a current risk.
 
 Mitigation:
 

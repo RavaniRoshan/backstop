@@ -48,7 +48,15 @@ except BudgetExceededError:
 backstop verify
 ```
 
-This proves enforcement works end-to-end using a local mock transport. Should complete in under 5 seconds with 8/8 PASS.
+This proves enforcement works end-to-end using a local mock transport: it wraps
+a real SDK client, runs ten requests through a 500-token budget, and shows 2
+served and 8 blocked with `BudgetExceededError`. Eight mechanism checks follow
+and the command exits 0, with no network and no key. The one figure that varies
+per machine is the control-path overhead line.
+
+Use `backstop verify` rather than `backstop doctor` as your compatibility check:
+`doctor` is a wrap-and-import smoke test that does not send a request through
+the wrapped transport.
 
 ## 5. See the guardrail in action
 
@@ -57,6 +65,23 @@ backstop demo
 ```
 
 Runs a 10-iteration agent loop, unprotected vs wrapped, side by side. No API key needed.
+
+## 6. Control the traffic you admit
+
+`critical` requests are selected ahead of waiting `default` and `background`
+ones; nothing is shed. `starvation_after_seconds` releases an aged ticket so it
+cannot wait forever, and `queue_timeout` bounds the wait with an error instead.
+
+```python
+from openai import OpenAI
+from backstop import Backstop, BackstopConfig
+
+client = Backstop.wrap(
+    OpenAI(),
+    budget=50_000,
+    config=BackstopConfig(starvation_after_seconds=1.0, queue_timeout=10.0),
+)
+```
 
 ---
 

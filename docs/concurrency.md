@@ -12,8 +12,10 @@ the real cost is waiting on the provider's network I/O, which *does* release the
 GIL. But it means:
 
 - **10 / 20 / 50 concurrent `wrap()` sessions in one process** is fine for
-  typical request workloads — they spend ~99% of their time awaiting the model
-  API, not holding the lock.
+  typical request workloads — they spend nearly all of their time awaiting the
+  model API, not holding the lock. The exact fraction is workload-dependent and
+  is not something this repo measures, so treat it as a qualitative claim, not a
+  number.
 - **Hundreds of CPU-bound, synchronous sessions** in one process will serialize
   and degrade tail latency. This is the same ceiling every in-process library
   (and every async framework) faces; it is not a Backstop bug.
@@ -76,7 +78,14 @@ throughput).
 ## When to use a proxy gateway instead
 
 If you need **per-tenant request routing, key vaulting, or multi-language
-services behind one endpoint**, a proxy (LiteLLM, BricksLLM) is a better fit.
-Backstop's wedge is that for *single-language Python* services you get the same
-controls with **zero infra and a one-line drop-in**. Pick the proxy when your
-topology is inherently multi-language or multi-team at the network edge.
+services behind one endpoint**, a proxy is a better fit. Backstop itself ships
+an optional one — `backstop serve --target https://api.openai.com/v1`, needing
+the `fastapi` extra — which runs the same policy engine in front of a real
+network hop. That is a genuinely different deployment from `wrap()`: it adds
+latency, a process to operate, and a place payloads transit through. Reach for
+it when wrapping every client construction site is impractical or the policy
+must be non-bypassable, and stay in-process otherwise.
+
+Backstop's wedge for *single-language Python* services is that you get the same
+controls with **zero infra and a one-line drop-in**. Pick a dedicated proxy when
+your topology is inherently multi-language or multi-team at the network edge.
