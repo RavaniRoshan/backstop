@@ -33,6 +33,43 @@ backstop harness --scenario budget-hit
 
 These scenarios exercise budget blocking, provider pressure, retry behavior, AIMD changes, and circuit breaking.
 
+## How CI uses this
+
+`.github/workflows/ci.yml` runs one step labelled "Run benchmark smoke":
+
+```yaml
+- name: Run benchmark smoke
+  run: python -m backstop benchmark
+```
+
+Read that as a **smoke test, not a regression gate.** The command exits 0 as
+long as the benchmark harness runs at all. There is no threshold comparison
+against any committed baseline, no stored artifact from the run, and no
+annotation of the result on the PR. A genuine performance regression — overhead
+tripling, or the deterministic scenario counts changing — will not fail the
+build. You have to read the output yourself.
+
+For the same reason, do not treat a green CI badge as evidence that overhead is
+still in the sub-millisecond class. `backstop verify` has an internal
+5 ms p99 bound (`src/backstop/verify.py`), but that runs from your shell, not
+from CI.
+
+## What the committed snapshot does and does not pin
+
+[`benchmark-results-2026-07-20.md`](benchmark-results-2026-07-20.md) records
+0.07 ms overhead at p50, p95 and p99 over 1,000 requests against a local
+`httpx.MockTransport`, with seed `0x00C0FFEE` and no network.
+
+**Deterministic and therefore comparable:** the scenario counts — requests,
+provider calls, successes, provider errors, budget-blocked, circuit-blocked.
+
+**Wall-clock and therefore not comparable digit-for-digit:** every latency
+figure in the file. Re-running the same command on the same machine will move
+them. The snapshot does not record the host CPU, OS, Python version, or provider
+SDK version, so a difference between two snapshots cannot be attributed.
+
+Report the conditions alongside the number, per the rules above.
+
 ## Benchmark Rules
 
 - Do not compare local mock-provider results to real provider latency.
@@ -43,4 +80,9 @@ These scenarios exercise budget blocking, provider pressure, retry behavior, AIM
 
 ## Latest Snapshot
 
-See [`benchmark-results-2026-07-20.md`](benchmark-results-2026-07-20.md) for the current committed local benchmark snapshot. Regenerate it with `backstop benchmark --publish`.
+See [`benchmark-results-2026-07-20.md`](benchmark-results-2026-07-20.md) for
+the current committed local benchmark snapshot. Regenerate it with
+`backstop benchmark --publish`, which writes
+`docs/benchmark-results-<today's date>.md` — a new dated file each day, so a
+regeneration is a diff you review and commit rather than a silent update of the
+existing snapshot.

@@ -28,7 +28,7 @@ Your options today:
 |---|---|---|---|
 | Hope the agent stops | 0 ms | none | n/a |
 | Proxy gateway (LiteLLM, etc.) | +network hop | high | ✗ |
-| **Backstop** | **<0.1 ms p50** | **one wrap call** | **✓** |
+| **Backstop** | **0.07 ms p50** | **one wrap call** | **✓** |
 
 ---
 
@@ -305,14 +305,39 @@ See [docs/architecture.md](docs/architecture.md) for the full design.
 
 ## Benchmarks
 
-Control-path overhead (local, not measuring network):
+Control-path overhead, from the committed snapshot
+[`docs/benchmark-results-2026-07-20.md`](docs/benchmark-results-2026-07-20.md)
+— 1,000 requests through a local `httpx.MockTransport`, no network:
 
-| Percentile | Overhead |
-|---|---|
-| p50 | ~0.09 ms |
-| p99 | ~0.10 ms |
+| Percentile | Direct | Backstop | Overhead |
+|---|---|---|---|
+| p50 | 0.12 ms | 0.19 ms | **0.07 ms** |
+| p95 | 0.22 ms | 0.30 ms | **0.07 ms** |
+| p99 | 0.30 ms | 0.38 ms | **0.07 ms** |
 
-PLACEHOLDER_BENCHMARK_SECTION_RESTORED_AFTER_COMMIT
+Those are the only overhead numbers this repository commits. What the snapshot
+records about conditions: date 2026-07-20, seed `0x00C0FFEE`, local mock
+transport, no network, 1,000 requests. It does **not** record the host CPU, the
+OS, the Python version, or the provider SDK version — so read 0.07 ms as one
+recorded run, not a guarantee. (An earlier version of this file claimed
+~0.09 ms p50 on a named MacBook M1 / openai 3.14 / httpx 0.28 configuration that
+no artifact in this repo records; that claim is gone rather than restated.)
+
+Reproduce the measurement yourself:
+
+```bash
+backstop benchmark
+```
+
+That prints the same table for your host. The counts in it (provider calls,
+budget-blocked, circuit-blocked) are deterministic and match the snapshot
+exactly; the latencies are wall-clock and will not. The same measurement is also
+available standalone, with no CLI, as
+`PYTHONPATH=src python3 benchmarks/local_overhead.py --requests 1000`.
+
+The overhead check inside `backstop verify` passes below a **5 ms** p99
+threshold — it proves the control path stayed in the sub-millisecond class, not
+that it hit any particular figure.
 
 See [docs/benchmarks.md](docs/benchmarks.md).
 
