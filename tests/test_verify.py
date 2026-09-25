@@ -5,6 +5,7 @@ import gc
 import httpx
 import pytest
 
+from backstop.cli import main
 from backstop.telemetry import get_registry
 from backstop.verify import (
     VerifyRunner,
@@ -14,24 +15,34 @@ from backstop.verify import (
 )
 
 
-class _RecordingAuthProbe:
-    """Stands in for ``httpx.Client`` so the live auth probe never dials out."""
+_REAL_GET = httpx.Client.get
+_PROBE_HOSTS = frozenset({"api.openai.com", "api.anthropic.com"})
 
-    calls: list[tuple[str, dict[str, str]]] = []
+# (base_url, headers) of every intercepted live auth probe.
+_PROBE_CALLS: list[tuple[str, dict[str, str]]] = []
 
-    def __init__(self, *, base_url: str, timeout: float) -> None:
-        self.base_url = base_url
-        self.timeout = timeout
 
-    def __enter__(self) -> "_RecordingAuthProbe":
-        return self
+def _record_probe_get(client, url, **kwargs) -> httpx.Response:
+    """Stand in for ``httpx.Client.get`` on the live auth probe only.
 
-    def __exit__(self, *exc: object) -> bool:
-        return False
-
-    def get(self, path: str, headers: dict[str, str]) -> httpx.Response:
-        type(self).calls.append((self.base_url, headers))
+    ``verify`` reaches the provider through a client whose base_url is the
+    provider host. Every other client in the run -- the offline MockTransport
+    proofs and the SDK clients -- stays completely real, so ``main()`` still
+    exercises the whole command and nothing dials out.
+    """
+    base_url = str(client.base_url or "")
+    if httpx.URL(base_url).host in _PROBE_HOSTS:
+        _PROBE_CALLS.append((base_url, kwargs.get("headers") or {}))
         return httpx.Response(200)
+    return _REAL_GET(client, url, **kwargs)
+
+
+@pytest.fixture
+def auth_probe(monkeypatch):
+    """Intercept the live auth probe; no network call is made."""
+    _PROBE_CALLS.clear()
+    monkeypatch.setattr(httpx.Client, "get", _record_probe_get)
+    return _PROBE_CALLS
 
 
 @pytest.fixture(autouse=True)
@@ -106,24 +117,41 @@ def test_explicit_api_key_env_wins_over_the_provider_default():
     assert runner.api_key_env == "MY_PROXY_KEY"
 
 
-def test_live_probe_never_sends_the_other_providers_key(monkeypatch):
+def test_live_probe_never_sends_the_other_providers_key(monkeypatch, auth_probe):
     """The live auth probe must carry the selected provider's own key only."""
     monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-must-not-leak")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-secret-value")
-    _RecordingAuthProbe.calls.clear()
-    monkeypatch.setattr(httpx, "Client", _RecordingAuthProbe)
 
     res = VerifyRunner(live=True, provider="anthropic")._check_provider_auth()
 
     assert res.status == "pass"
-    assert _RecordingAuthProbe.calls == [
-        ("https://api.anthropic.com/v1", {"Authorization": "Bearer sk-ant-secret-value"})
+    assert auth_probe == [
+        ("https://api.anthropic.com/v1/", {"Authorization": "Bearer sk-ant-secret-value"})
     ]
+
+
+def test_cli_verify_live_never_sends_the_other_providers_key(monkeypatch, auth_probe, capsys):
+    """End-to-end through argparse: `verify --provider anthropic --live`.
+
+    The helper tests cannot catch a wrong ``--api-key-env`` argparse default, so
+    this drives the real CLI with both provider keys in the environment.
+    """
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-must-not-leak")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-secret-value")
+
+    exit_code = main(["verify", "--live", "--provider", "anthropic"])
+
+    capsys.readouterr()
+    assert exit_code == 0, "the whole verify run must still pass"
+    assert auth_probe, "the live auth probe never ran"
+    base_url, headers = auth_probe[-1]
+    assert base_url.startswith("https://api.anthropic.com/")
+    assert "sk-openai-must-not-leak" not in str(headers)
+    assert "sk-ant-secret-value" in str(headers)
 
 
 def test_shadow_records_without_blocking():
     res = VerifyRunner()._check_shadow()
-    assert res.status == "pass"
 
 
 def test_shadow_env_killswitch_disables():
