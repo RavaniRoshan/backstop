@@ -9,7 +9,7 @@
 
 All notable changes to Backstop should be documented in this file.
 
-## 0.6.0 — Unreleased
+## 0.6.0
 
 - Renamed the Python distribution to `backstop-ai`; `import backstop` and the
   `backstop` / `wedge` console commands are unchanged.
@@ -18,9 +18,17 @@ All notable changes to Backstop should be documented in this file.
 - Corrected install examples and removed unsupported PyPI verification claims.
   Historical install strings below are retained as history, not current guidance;
   see [the install guide](docs/install.md).
-- Release preparation only: PyPI publication and clean-environment installation
-  from PyPI are pending. Provider SDK compatibility and enforcement-error
-  propagation remain unresolved; SDK dependency bounds are unchanged.
+- Published. `twine upload` put 0.6.0 on PyPI; a clean virtualenv then resolved
+  `backstop-ai[anthropic]` to 0.6.0, with `backstop doctor` and `backstop verify`
+  both succeeding. The `v0.6.0` GitHub Release carries the wheel and sdist, and
+  `backstop-ai@0.6.0` is on npm (a separate, partial TypeScript port of this
+  project, not the Python distribution). Work after this tag is unreleased and
+  lands under `## [Unreleased]` below.
+- Enforcement-error propagation is bounded rather than open-ended: below the
+  declared floors (`openai>=2.37`, `anthropic>=0.98`) the provider SDK catches
+  `BudgetExceededError` and re-raises it as `APIConnectionError`, so enforcement
+  is invisible to user code. Within the tested range it does not. See
+  [docs/compatibility.md](docs/compatibility.md).
 
 ## Unreleased
 
