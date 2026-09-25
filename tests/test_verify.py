@@ -156,6 +156,29 @@ def test_cli_verify_live_never_sends_the_other_providers_key(monkeypatch, auth_p
     assert "sk-ant-secret-value" in str(headers)
 
 
+def test_live_probe_uses_bearer_auth_for_openai(monkeypatch, auth_probe):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-secret-value")
+
+    res = VerifyRunner(live=True, provider="openai")._check_provider_auth()
+
+    assert res.status == "pass"
+    _, headers = auth_probe[0]
+    assert headers == {"Authorization": "Bearer sk-openai-secret-value"}
+
+
+def test_live_probe_uses_x_api_key_for_anthropic(monkeypatch, auth_probe):
+    """Anthropic rejects `Authorization: Bearer` even with a valid key."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-secret-value")
+
+    res = VerifyRunner(live=True, provider="anthropic")._check_provider_auth()
+
+    assert res.status == "pass"
+    _, headers = auth_probe[0]
+    assert headers["x-api-key"] == "sk-ant-secret-value"
+    assert headers["anthropic-version"] == "2023-06-01"
+    assert "Authorization" not in headers
+
+
 def test_shadow_records_without_blocking():
     res = VerifyRunner()._check_shadow()
 

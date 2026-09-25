@@ -42,6 +42,18 @@ def default_api_key_env(provider: str) -> str:
         ) from None
 
 
+# Anthropic pins the API version on every request; `Authorization: Bearer` is an
+# OpenAI shape and gets a 401 from Anthropic even when the key is valid.
+_ANTHROPIC_VERSION = "2023-06-01"
+
+
+def _auth_headers(provider: str, key: str) -> dict[str, str]:
+    """Auth headers in the shape ``provider`` actually expects."""
+    if provider == "anthropic":
+        return {"x-api-key": key, "anthropic-version": _ANTHROPIC_VERSION}
+    return {"Authorization": f"Bearer {key}"}
+
+
 def mask_secrets(text: str) -> str:
     """Redact anything that looks like an API key so verify output is safe to paste."""
     return _KEY_RE.sub(lambda m: f"{m.group(0)[:4]}****", text)
@@ -578,7 +590,7 @@ class VerifyRunner:
             base = "https://api.openai.com/v1" if self.provider == "openai" else "https://api.anthropic.com/v1"
         try:
             with httpx.Client(base_url=base, timeout=self.timeout) as c:
-                r = c.get("/models", headers={"Authorization": f"Bearer {key}"})
+                r = c.get("/models", headers=_auth_headers(self.provider, key))
             dt = (time.perf_counter() - t0) * 1000
             if r.status_code == 200:
                 return CheckResult(
