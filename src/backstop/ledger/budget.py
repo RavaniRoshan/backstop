@@ -5,7 +5,7 @@ from contextvars import ContextVar
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 
-from .exceptions import BudgetExceededError
+from ..exceptions import BudgetExceededError
 
 
 @dataclass
