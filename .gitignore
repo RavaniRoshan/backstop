@@ -22,6 +22,8 @@ benchmarks/competitive/compose/
 benchmarks/competitive/*.json
 benchmarks/competitive/__pycache__/
 
+.worktrees/
+
 # Internal working artifacts — never publish (see PLAN.md §0 rule 9)
 artifacts/
 agent/
