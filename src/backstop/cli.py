@@ -178,30 +178,36 @@ def _run_doctor() -> int:
         from .config import BackstopConfig
         from .wrapper import Backstop
         
+        # Verify the _httpcompat module works
+        from . import _httpcompat
+        print("- [ok] _httpcompat module loaded successfully")
+
         # Test with httpx mock transport (this is what the actual tests use)
         import httpx
         state = BackstopState.create(100_000, BackstopConfig(default_max_output_tokens=1))
         mock_transport = httpx.MockTransport(lambda r: httpx.Response(200, json={"id": "mock", "object": "chat.completion", "choices": [{"message": {"role": "assistant", "content": "test"}}]}))
         client = httpx.Client(transport=mock_transport, base_url="https://mock.local")
         print("- [ok] httpx MockTransport works (as used in tests)")
-        
-        # Test with httpx2 mock transport (important for Anthropic support)
-        import httpx2
-        httpx2_mock_transport = httpx2.MockTransport(lambda r: httpx2.Response(200, json={"id": "mock", "object": "chat.completion", "choices": [{"message": {"role": "assistant", "content": "test"}}]}))
-        httpx2_client = httpx2.Client(transport=httpx2_mock_transport, base_url="https://mock.local")
-        print("- [ok] httpx2 MockTransport works (for Anthropic compatibility)")
-        
-        # Verify the _httpcompat module works
-        from . import _httpcompat
-        print("- [ok] _httpcompat module loaded successfully")
-        
+
         # Verify compat_for function works
         compat = _httpcompat.compat_for(client)
         print(f"- [ok] compat_for detected httpx family: {compat.name}")
-        
-        compat2 = _httpcompat.compat_for(httpx2_client)
-        print(f"- [ok] compat_for detected httpx2 family: {compat2.name}")
-        
+
+        # httpx2 is optional: it is not a declared dependency and only arrives
+        # transitively with openai>=3 / anthropic>=1, so its absence means the
+        # SDKs in use are on the httpx family that was just exercised above.
+        # Report it and move on; do not fail the install.
+        if _httpcompat.HTTPX2 is None:
+            print("- [--] httpx2 not installed; the SDKs in use are on the httpx family")
+        else:
+            httpx2 = _httpcompat.HTTPX2
+            httpx2_mock_transport = httpx2.MockTransport(lambda r: httpx2.Response(200, json={"id": "mock", "object": "chat.completion", "choices": [{"message": {"role": "assistant", "content": "test"}}]}))
+            httpx2_client = httpx2.Client(transport=httpx2_mock_transport, base_url="https://mock.local")
+            print("- [ok] httpx2 MockTransport works (for Anthropic compatibility)")
+
+            compat2 = _httpcompat.compat_for(httpx2_client)
+            print(f"- [ok] compat_for detected httpx2 family: {compat2.name}")
+
     except Exception as exc:
         print(f"- [!!] wrap smoke test failed: {exc}")
         import traceback
