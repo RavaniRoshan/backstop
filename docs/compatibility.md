@@ -21,12 +21,24 @@
 
 ## Providers
 
-| Provider | Client | Tested SDK range | Verified | Status | Notes |
+| Provider | Client | Tested SDK range | Verified in CI | Status | Notes |
 | --- | --- | --- | --- | --- | --- |
-| OpenAI | `openai.OpenAI` | `>=2.37,<4` | 2.37.0, 3.14.0, latest | Supported | Sync wrap; `httpx`/`httpx2` family auto-detected per client |
-| OpenAI | `openai.AsyncOpenAI` | `>=2.37,<4` | 2.37.0, 3.14.0, latest | Supported | Async wrap; same family detection |
-| Anthropic | `anthropic.Anthropic` | `>=0.98,<2` | 0.99.0, 1.5.0, 1.6.0, latest | Supported | Optional dependency via `backstop-ai[anthropic]`; `httpx2` client on `>=1.0` |
-| Anthropic | `anthropic.AsyncAnthropic` | `>=0.98,<2` | 0.99.0, 1.5.0, 1.6.0, latest | Supported | Same as sync |
+| OpenAI | `openai.OpenAI` | `>=2.37,<4` | 2.37.0, 3.14.0, latest¹ | Supported | Sync wrap; `httpx`/`httpx2` family auto-detected per client |
+| OpenAI | `openai.AsyncOpenAI` | `>=2.37,<4` | 2.37.0, 3.14.0, latest¹ | Supported | Async wrap; same family detection |
+| Anthropic | `anthropic.Anthropic` | `>=0.98,<2` | 0.99.0, 1.6.0 | Supported | Optional dependency via `backstop-ai[anthropic]`; `httpx2` client on `>=1.0` |
+| Anthropic | `anthropic.AsyncAnthropic` | `>=0.98,<2` | 0.99.0, 1.6.0 | Supported | Same as sync |
+
+¹ `latest` is resolved in a single CI cross-check row (Python 3.12, `openai`
+latest against `anthropic` 0.99.0), not across the full matrix. Anthropic
+`latest` is **not** tracked by CI at all — the 1.5.0 and 1.6.0 figures in the
+header note come from `tests/test_guardrail_visibility.py` on a developer
+machine, not from the CI matrix. Treat "1.5.0 verified" as a local observation.
+
+CI runs on **ubuntu-latest only**, and installs
+`pip install -e ".[test,metrics,anthropic]"` — so the `redis`, `otel`,
+`fastapi` and `tokenizers` extras get no CI execution, and neither does the
+TypeScript package. See [docs/sdk-matrix.md](sdk-matrix.md#what-ci-actually-proves)
+for the full list of what the matrix does and does not cover.
 
 Unsupported: SDKs below the floors (`openai<2.37`, `anthropic<0.98`) — their
 request loop catches every transport exception, including Backstop's
@@ -37,8 +49,10 @@ propagate-as-is guard first ships in openai 2.37.0 / anthropic 0.98.0
 `anthropic<0.40`) additionally crash against `httpx>=0.28`, which removed
 the `proxies` kwarg. Also unsupported: future majors at/above the ceilings
 (`openai>=4`, `anthropic>=2` — none released as of 2026-09-18).
-`Backstop.wrap()` warns on these but does not refuse; verify with
-`backstop doctor` before relying on them.
+`Backstop.wrap()` warns on these but does not refuse; check with
+`backstop verify --live` before relying on an untested version, and read
+[the `doctor` caveats](sdk-matrix.md#checking-your-environment) before
+trusting a `doctor` exit code.
 
 ## Optional Extras
 
@@ -76,6 +90,20 @@ the `proxies` kwarg. Also unsupported: future majors at/above the ceilings
 | Gateway / sidecar | Optional (`fastapi` extra) |
 | Shadow / canary rollout | Supported |
 | Hosted control plane | Planned |
+
+"Supported" in this table means the feature ships and is documented. It does
+**not** mean CI exercises it. The four rows marked Optional depend on extras
+that `.github/workflows/ci.yml` does not install, so the distributed-budget,
+OpenTelemetry, gateway and tiktoken paths have no automated coverage today.
+The `pyyaml` wedge dependency *is* installed by CI.
+
+## TypeScript package
+
+A separate `backstop-ai` on **npm** implements a subset of the above for the
+OpenAI TypeScript SDK. It is not covered by anything in this page: it is a
+different interception strategy (`client.chat.completions.create` patching, not
+transport injection), has no Anthropic support, roughly half the config surface,
+and no CI. Do not read the tables here as describing it.
 
 ## Compatibility Policy
 
