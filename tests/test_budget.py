@@ -55,6 +55,7 @@ class _RecordingBackend(InMemoryBudgetBackend):
     ``sync_commits`` counts commits entered from outside the async path (i.e. a
     synchronous reconcile on the event loop); ``commit_threads`` records the
     thread each commit actually ran on, so a stray ``to_thread`` hop shows up.
+    The same applies to ``reserve_threads``.
     """
 
     def __init__(self, total):
@@ -62,6 +63,7 @@ class _RecordingBackend(InMemoryBudgetBackend):
         self.acommits = 0
         self.sync_commits = 0
         self.commit_threads: list[int] = []
+        self.reserve_threads: list[int] = []
         self._in_async_commit = False
 
     def commit(self, reserved, charge):
@@ -69,6 +71,10 @@ class _RecordingBackend(InMemoryBudgetBackend):
             self.sync_commits += 1
         self.commit_threads.append(threading.get_ident())
         super().commit(reserved, charge)
+
+    def reserve(self, tokens):
+        self.reserve_threads.append(threading.get_ident())
+        return super().reserve(tokens)
 
     async def acommit(self, reserved, charge):
         self.acommits += 1
@@ -105,6 +111,21 @@ async def test_in_memory_acommit_stays_on_the_event_loop():
         "the in-memory commit hopped to another thread for no reason"
     )
     assert budget.spent == 25
+
+
+@pytest.mark.anyio
+async def test_in_memory_areserve_stays_on_the_event_loop():
+    """The default backend has no I/O, so the reserve must not hop either."""
+    backend = _RecordingBackend(100)
+    budget = Budget(100, backend=backend)
+
+    reservation = await budget.areserve(30)
+
+    assert backend.reserve_threads == [threading.get_ident()], (
+        "the in-memory reserve hopped to another thread for no reason"
+    )
+    assert reservation.tokens == 30
+    assert budget.remaining == 70
 
 
 @pytest.mark.anyio

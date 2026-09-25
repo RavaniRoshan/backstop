@@ -81,6 +81,11 @@ class InMemoryBudgetBackend(BudgetBackend):
             self._reserved += tokens
             return True
 
+    async def areserve(self, tokens: int) -> bool:
+        # In-memory state, so there is no I/O to move off the event loop; the base
+        # class's to_thread hop would be pure overhead. Mirrors ``acommit``.
+        return self.reserve(tokens)
+
     def commit(self, reserved: int, charge: int) -> None:
         if self._total is None:
             return
