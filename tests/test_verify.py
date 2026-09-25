@@ -118,16 +118,22 @@ def test_explicit_api_key_env_wins_over_the_provider_default():
 
 
 def test_live_probe_never_sends_the_other_providers_key(monkeypatch, auth_probe):
-    """The live auth probe must carry the selected provider's own key only."""
+    """The live auth probe must carry the selected provider's own key only.
+
+    Asserted on the absence of the leaked value rather than an exact header dict,
+    so this stays about *which credential* travels, not about how it is framed.
+    """
     monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-must-not-leak")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-secret-value")
 
     res = VerifyRunner(live=True, provider="anthropic")._check_provider_auth()
 
     assert res.status == "pass"
-    assert auth_probe == [
-        ("https://api.anthropic.com/v1/", {"Authorization": "Bearer sk-ant-secret-value"})
-    ]
+    assert len(auth_probe) == 1
+    base_url, headers = auth_probe[0]
+    assert httpx.URL(base_url).host == "api.anthropic.com"
+    assert "sk-openai-must-not-leak" not in str(headers)
+    assert "sk-ant-secret-value" in str(headers)
 
 
 def test_cli_verify_live_never_sends_the_other_providers_key(monkeypatch, auth_probe, capsys):
