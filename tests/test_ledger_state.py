@@ -296,3 +296,19 @@ def test_the_public_close_takes_a_wrapped_client_and_a_bare_one():
     assert bare == CloseReport.nothing_submitted()
     assert bare.lost == 0
     assert bare.drained is True
+
+
+def test_detection_on_its_own_builds_a_catalog_and_no_ring():
+    """The detector needs a price, not a place to put the event.
+
+    The transport prices before the detector reads it — a velocity over an
+    unpriced window is zero by definition — so a detection-only deployment does
+    need the catalog. ``submit`` is gated on ``ledger_enabled`` alone, so nothing
+    would ever be written and the ring would sit there empty for the life of the
+    process.
+    """
+    state = _state(BackstopConfig(detection_enabled=True, ledger_memory_events=10_000))
+    assert isinstance(state.ledger.sink, NullSink)
+    assert isinstance(state.prices, PriceCatalog)
+    # Not merely "not a ring": the ring is the thing that cost 10,000 slots.
+    assert not isinstance(state.ledger.sink, MemorySink)

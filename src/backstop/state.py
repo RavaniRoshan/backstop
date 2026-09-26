@@ -227,17 +227,31 @@ def _build_ledger(resolved: BackstopConfig) -> tuple[BoundedWriter, PriceCatalog
     :class:`~backstop.ledger.sink.JsonlSink`, which opens its file on the first
     write rather than here, so constructing a state touches no filesystem. With
     no path the sink is a bounded in-memory ring of ``ledger_memory_events``.
+
+    The detector alone is the case that separates the two halves of that
+    decision. It needs a *catalog*, because the transport prices an event before
+    the detector reads it and a velocity measured on an unpriced window is zero
+    by definition; it does not need a *sink*, because ``submit`` is gated on
+    ``ledger_enabled`` and nothing would ever be written. So the two are decided
+    separately here: a detection-only deployment gets a catalog and a
+    :class:`NullSink`, not a ten-thousand-slot ring that can never be filled.
     """
     if not (resolved.ledger_enabled or resolved.detection_enabled):
         return BoundedWriter(NullSink()), None
+    if not resolved.ledger_enabled:
+        return BoundedWriter(NullSink()), _build_catalog(resolved)
     sink = (
         JsonlSink(resolved.ledger_path)
         if resolved.ledger_path
         else MemorySink(resolved.ledger_memory_events)
     )
-    prices = (
+    return BoundedWriter(sink), _build_catalog(resolved)
+
+
+def _build_catalog(resolved: BackstopConfig) -> PriceCatalog:
+    """The rate card events are billed against: the user's file, else the bundled one."""
+    return (
         PriceCatalog.from_file(resolved.price_catalog_path)
         if resolved.price_catalog_path
         else PriceCatalog()
     )
-    return BoundedWriter(sink), prices

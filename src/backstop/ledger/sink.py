@@ -216,7 +216,12 @@ class MemorySink:
             return tuple(self._ring)
 
     def __len__(self) -> int:
-        return len(self._ring)
+        # Under the lock, like every other reader of the ring. ``len`` on a
+        # ``deque`` is a single C call, so this costs nothing measurable, and
+        # ``__repr__`` — which reads the length — is the one place a diagnostic
+        # can run while the drain thread is mid-append.
+        with self._lock:
+            return len(self._ring)
 
     def clear(self) -> None:
         """Forget every retained event. The capacity is unchanged."""

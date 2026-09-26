@@ -1001,3 +1001,39 @@ def test_the_ledger_package_exports_every_sink() -> None:
     for name in ("LedgerSink", "NullSink", "MemorySink", "JsonlSink", "BoundedWriter"):
         assert name in ledger.__all__, f"{name} is not exported from backstop.ledger"
         assert getattr(ledger, name) is not None
+
+
+def test_every_reader_of_the_memory_ring_takes_its_lock() -> None:
+    """One discipline for the ring, not three of four.
+
+    ``events``, ``write`` and ``clear`` all take the lock, so a snapshot is never
+    torn. ``__len__`` did not, and it is what ``__repr__`` reads — which is the
+    one diagnostic a user is likely to run while the drain thread is appending.
+    Asserted on the lock rather than on a race: a timing test would pass or fail
+    on the machine it ran on, and this claim is about the discipline.
+    """
+    sink = MemorySink(4)
+    counting = _CountingLock(sink._lock)
+    sink._lock = counting  # type: ignore[assignment]
+    sink.write(SpendEvent(provider="openai", model="gpt-4o", endpoint="/v1/x",
+                          priority="default", outcome="success", input_tokens=1,
+                          output_tokens=1, estimated=False, attribution=Attribution()))
+    taken = counting.entered
+    assert len(sink) == 1
+    assert counting.entered == taken + 1
+    assert "held=1" in repr(sink)
+
+
+class _CountingLock:
+    """A real lock that records how many times it was entered."""
+
+    def __init__(self, lock: object) -> None:
+        self._lock = lock
+        self.entered = 0
+
+    def __enter__(self) -> None:
+        self._lock.__enter__()  # type: ignore[attr-defined]
+        self.entered += 1
+
+    def __exit__(self, *exc: object) -> None:
+        self._lock.__exit__(*exc)  # type: ignore[attr-defined]
