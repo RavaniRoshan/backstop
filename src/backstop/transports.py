@@ -443,11 +443,34 @@ def _dispatch_alert(alerts, tenant_id: str | None, used: float, limit: float) ->
         pass
 
 
-class BackstopTransport(httpx.BaseTransport):
+class BackstopTransport:
+    """In-process transport guard.
+
+    Deliberately inherits from nothing. A transport is a duck-typed interface
+    (`handle_request`) in `httpx`, in `httpx2` and in every provider SDK we wrap,
+    and each of those bases is a *different class* - so subclassing one of them
+    means the class is wrong for the other family. It also cannot be pinned
+    reliably: an installed SDK (`anthropic` 0.116.0) rebinds
+    `httpx.BaseTransport` to its own class at import time, so by the time this
+    module is evaluated the name may already refer to something else, depending
+    entirely on what the user's application imported first. The behavioural
+    interface is what matters and it is verified by test.
+
+    `httpx.Client` additionally requires the context-manager protocol on its
+    transport, so those two methods delegate to the wrapped inner transport.
+    """
+
+    def __enter__(self) -> "BackstopTransport":
+        self._transport.__enter__()
+        return self
+
+    def __exit__(self, *exc_info: object) -> object:
+        return self._transport.__exit__(*exc_info)
+
     def __init__(
         self,
         state: BackstopState,
-        transport: httpx.BaseTransport | None = None,
+        transport: Any | None = None,
         *,
         sleep: RetrySleep | None = None,
         compat: _HttpCompat | None = None,
@@ -993,11 +1016,26 @@ class BackstopTransport(httpx.BaseTransport):
             request.headers["authorization"] = f"Bearer {secret}"
 
 
-class AsyncBackstopTransport(httpx.AsyncBaseTransport):
+class AsyncBackstopTransport:
+    """Async twin of :class:`BackstopTransport`; duck-typed for the same reasons.
+
+    `httpx.AsyncClient` additionally requires the async context-manager
+    protocol on its transport, so these two are implemented by delegating to the
+    wrapped inner transport. `httpx.AsyncBaseTransport` is not subclassed,
+    because for an httpx2-based SDK it is a different class entirely and its
+    identity is not stable across a process that has imported an SDK.
+    """
+
+    async def __aenter__(self) -> "AsyncBackstopTransport":
+        await self._transport.__aenter__()
+        return self
+
+    async def __aexit__(self, *exc_info: object) -> object:
+        return await self._transport.__aexit__(*exc_info)
     def __init__(
         self,
         state: BackstopState,
-        transport: httpx.AsyncBaseTransport | None = None,
+        transport: Any | None = None,
         *,
         sleep: AsyncRetrySleep | None = None,
         compat: _HttpCompat | None = None,

@@ -332,7 +332,10 @@ def _build_async_http_client(client: Any, state: BackstopState) -> Any:
 def _sync_transport_from(base: Any) -> Any:
     compat = compat_for(base)
     transport = getattr(base, "_transport", None)
-    if isinstance(transport, (HTTPX.BaseTransport, compat.BaseTransport)):
+    # duck-typed, not isinstance: `httpx.BaseTransport` is not a stable identity
+    # (see the warning in `_httpcompat`), and an isinstance miss here silently
+    # threw away the SDK's own transport - proxies, TLS and pool config with it.
+    if hasattr(transport, "handle_request"):
         return transport
     return compat.HTTPTransport()
 
@@ -340,7 +343,7 @@ def _sync_transport_from(base: Any) -> Any:
 def _async_transport_from(base: Any) -> Any:
     compat = compat_for(base)
     transport = getattr(base, "_transport", None)
-    if isinstance(transport, (HTTPX.AsyncBaseTransport, compat.AsyncBaseTransport)):
+    if hasattr(transport, "handle_async_request"):
         return transport
     return compat.AsyncHTTPTransport()
 

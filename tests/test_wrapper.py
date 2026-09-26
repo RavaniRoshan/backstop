@@ -199,3 +199,59 @@ def test_wrap_silent_on_supported_sdk_version():
     finally:
         client._client.close()
 
+
+
+# ---------------------------------------------------------------------------
+# transport contract
+# ---------------------------------------------------------------------------
+
+
+def test_transport_is_duck_typed_not_family_bound():
+    """A transport must not be bound to one httpx family's base class.
+
+    `httpx.BaseTransport` and `httpx2.BaseTransport` are different classes, and
+    neither identity is stable: an installed SDK (`anthropic` 0.116.0) rebinds
+    `httpx.BaseTransport` to its own class at import time. So backstop's
+    transports inherit from nothing and implement the interface instead, which
+    is what every provider SDK and both httpx families actually require.
+    """
+    from backstop.transports import AsyncBackstopTransport, BackstopTransport
+
+    for impl, method in (
+        (BackstopTransport, "handle_request"),
+        (AsyncBackstopTransport, "handle_async_request"),
+    ):
+        assert impl.__bases__ == (object,), f"{impl.__name__} must not inherit a family base"
+        assert callable(getattr(impl, method)), f"{impl.__name__} is missing {method}"
+
+    # the async side also needs the context-manager protocol, which
+    # httpx.AsyncClient checks for explicitly
+    assert hasattr(AsyncBackstopTransport, "__aenter__")
+    assert hasattr(AsyncBackstopTransport, "__aexit__")
+
+
+def test_a_wrapped_client_reuses_the_sdks_own_transport():
+    """Reuse must be duck-typed, or the SDK's transport config is discarded.
+
+    An isinstance check against a family base silently fails when the base has
+    been rebound, and the fallback then replaces the SDK's transport - taking
+    its proxy, TLS and connection-pool configuration with it.
+    """
+    import httpx
+    import openai
+
+    from backstop.wrapper import _sync_transport_from
+
+    class _Sentinel:
+        """Duck-typed, which is the only property the check may rely on."""
+
+        def handle_request(self, request):  # pragma: no cover - never called
+            raise AssertionError("must not be called")
+
+    sentinel = _Sentinel()
+
+    class _Client:
+        _transport = sentinel
+
+    assert _sync_transport_from(_Client()) is sentinel
+    assert _sync_transport_from(openai.OpenAI(api_key="sk-test")) is not None

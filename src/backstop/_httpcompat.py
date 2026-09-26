@@ -25,6 +25,15 @@ except ImportError:  # pragma: no cover - exercised only on httpx-only installs
     _HAS_HTTPX2 = False
 
 
+# WARNING, learned the hard way: at least one installed SDK (`anthropic` 0.116.0)
+# rebinds `httpx.BaseTransport` to its own class at import time - including the
+# attribute on `httpx._transports.base`. So `httpx.BaseTransport` is NOT a stable
+# identity in a process that has imported an SDK, and no amount of import
+# ordering inside backstop can pin it, because the user's own imports may have
+# run first. Nothing in backstop may subclass or isinstance-check these classes;
+# the transport contract is duck-typed instead. See `transports.py`.
+
+
 class _HttpCompat:
     """Namespace exposing one httpx-compatible module's transport surface."""
 
