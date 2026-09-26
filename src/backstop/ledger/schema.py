@@ -18,6 +18,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field, fields, is_dataclass
 from datetime import datetime, timezone
+from math import isfinite
 from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qsl, urlsplit, urlunsplit
 from uuid import uuid4
@@ -47,7 +48,16 @@ OUTCOMES: tuple[str, ...] = (
 #: ``occurred_at`` wire form: RFC 3339 UTC with exactly six fractional digits.
 OCCURRED_AT_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$")
 
-_TOKEN_FIELDS = ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens")
+#: ``event_id`` wire form: ``uuid4().hex``, 32 lowercase hex characters.
+EVENT_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+
+_COUNT_FIELDS = (
+    "input_tokens",
+    "output_tokens",
+    "cache_read_tokens",
+    "cache_write_tokens",
+    "retries",
+)
 
 
 def utc_now() -> str:
@@ -229,30 +239,96 @@ class SpendEvent:
     request_id: str | None = None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.endpoint, str):
-            raise TypeError(
-                f"endpoint must be a str, got {type(self.endpoint).__name__} {self.endpoint!r}"
-            )
-        # A frozen dataclass refuses assignment, so the normalised endpoint is
-        # written exactly once, here; the record is immutable from this point on
-        # and equals what the caller handed in only when it was already clean.
-        object.__setattr__(self, "endpoint", normalize_endpoint(self.endpoint))
-        for name in _TOKEN_FIELDS:
+        # The transport builds one of these per request, so every check below is
+        # O(fields) and runs against a pattern compiled once at import.
+        for name in _COUNT_FIELDS:
             value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise TypeError(
+                    f"{name} must be an int, got {type(value).__name__} {value!r}"
+                )
             if value < 0:
                 raise ValueError(f"{name} must be >= 0, got {value}")
-        if self.retries < 0:
-            raise ValueError(f"retries must be >= 0, got {self.retries}")
-        if self.latency_ms < 0:
-            raise ValueError(f"latency_ms must be >= 0.0, got {self.latency_ms}")
+        latency = self.latency_ms
+        if isinstance(latency, bool) or not isinstance(latency, (int, float)):
+            raise TypeError(
+                f"latency_ms must be a number, got {type(latency).__name__} {latency!r}"
+            )
+        if not isfinite(latency):
+            raise TypeError(f"latency_ms must be a finite number, got {latency!r}")
+        if latency < 0:
+            raise ValueError(f"latency_ms must be >= 0.0, got {latency}")
+        for name in ("provider", "model", "endpoint"):
+            value = getattr(self, name)
+            if not isinstance(value, str):
+                raise TypeError(
+                    f"{name} must be a str, got {type(value).__name__} {value!r}"
+                )
+            if not value.strip():
+                raise ValueError(f"{name} must be non-empty, got {value!r}")
+        if not isinstance(self.estimated, bool):
+            raise TypeError(
+                f"estimated must be a bool, got {type(self.estimated).__name__} "
+                f"{self.estimated!r}"
+            )
+        if not isinstance(self.attribution, Attribution):
+            raise TypeError(
+                "attribution must be an Attribution, got "
+                f"{type(self.attribution).__name__} {self.attribution!r}"
+            )
+        if not isinstance(self.priority, str):
+            raise TypeError(
+                f"priority must be a str, got {type(self.priority).__name__} "
+                f"{self.priority!r}"
+            )
         if self.priority not in PRIORITIES:
             raise ValueError(
                 f"priority must be one of {list(PRIORITIES)}, got {self.priority!r}"
+            )
+        if not isinstance(self.outcome, str):
+            raise TypeError(
+                f"outcome must be a str, got {type(self.outcome).__name__} {self.outcome!r}"
             )
         if self.outcome not in OUTCOMES:
             raise ValueError(
                 f"outcome must be one of {list(OUTCOMES)}, got {self.outcome!r}"
             )
+        if not isinstance(self.request_id, str) and self.request_id is not None:
+            raise TypeError(
+                "request_id must be a str or None, got "
+                f"{type(self.request_id).__name__} {self.request_id!r}"
+            )
+        if not isinstance(self.event_id, str):
+            raise TypeError(
+                f"event_id must be a str, got {type(self.event_id).__name__} {self.event_id!r}"
+            )
+        if not EVENT_ID_RE.match(self.event_id):
+            raise ValueError(
+                f"event_id must be 32 lowercase hex characters, got {self.event_id!r}"
+            )
+        if not isinstance(self.occurred_at, str):
+            raise TypeError(
+                "occurred_at must be a str, got "
+                f"{type(self.occurred_at).__name__} {self.occurred_at!r}"
+            )
+        if not OCCURRED_AT_RE.match(self.occurred_at):
+            raise ValueError(
+                f"occurred_at must be RFC 3339 UTC with microseconds, got "
+                f"{self.occurred_at!r}"
+            )
+        if not isinstance(self.schema_version, str):
+            raise TypeError(
+                "schema_version must be a str, got "
+                f"{type(self.schema_version).__name__} {self.schema_version!r}"
+            )
+        if self.schema_version != SCHEMA_VERSION:
+            raise ValueError(
+                f"schema_version must be {SCHEMA_VERSION!r}, got {self.schema_version!r}"
+            )
+        # A frozen dataclass refuses assignment, so the normalised endpoint is
+        # written exactly once, here; the record is immutable from this point on
+        # and equals what the caller handed in only when it was already clean.
+        object.__setattr__(self, "endpoint", normalize_endpoint(self.endpoint))
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable mapping in schema order.

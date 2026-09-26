@@ -195,6 +195,138 @@ def test_every_documented_outcome_is_accepted(outcome):
 
 
 # ---------------------------------------------------------------------------
+# SpendEvent type validation
+# ---------------------------------------------------------------------------
+
+COUNT_FIELDS = ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "retries")
+
+
+@pytest.mark.parametrize("name", COUNT_FIELDS)
+def test_a_float_token_count_is_rejected(name):
+    with pytest.raises(TypeError, match=name) as excinfo:
+        make_event(**{name: 1.5})
+    assert "1.5" in str(excinfo.value)
+
+
+@pytest.mark.parametrize("name", COUNT_FIELDS)
+def test_a_bool_token_count_is_rejected_rather_than_billed_as_one(name):
+    with pytest.raises(TypeError, match=name):
+        make_event(**{name: True})
+
+
+@pytest.mark.parametrize("name", COUNT_FIELDS)
+def test_a_string_token_count_is_rejected(name):
+    with pytest.raises(TypeError, match=name):
+        make_event(**{name: "5"})
+
+
+@pytest.mark.parametrize("bad", ["842", None, True, [1]])
+def test_a_non_numeric_latency_is_rejected(bad):
+    with pytest.raises(TypeError, match="latency_ms"):
+        make_event(latency_ms=bad)
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_a_non_finite_latency_is_rejected(bad):
+    with pytest.raises(TypeError, match="latency_ms"):
+        make_event(latency_ms=bad)
+
+
+@pytest.mark.parametrize("bad", ["no", 1, 0, None])
+def test_a_non_bool_estimated_is_rejected(bad):
+    with pytest.raises(TypeError, match="estimated"):
+        make_event(estimated=bad)
+
+
+def test_a_non_string_provider_is_rejected():
+    with pytest.raises(TypeError, match="provider") as excinfo:
+        make_event(provider=None)
+    assert "None" in str(excinfo.value)
+
+
+@pytest.mark.parametrize("name", ["provider", "model", "endpoint"])
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_an_empty_identity_field_is_rejected(name, blank):
+    with pytest.raises(ValueError, match=name):
+        make_event(**{name: blank})
+
+
+@pytest.mark.parametrize("bad", [None, {"team": "payments"}, "payments", 7])
+def test_a_non_attribution_object_is_rejected(bad):
+    with pytest.raises(TypeError, match="attribution"):
+        make_event(attribution=bad)
+
+
+def test_a_malformed_occurred_at_is_rejected():
+    with pytest.raises(ValueError, match="occurred_at") as excinfo:
+        make_event(occurred_at="nope")
+    assert "nope" in str(excinfo.value)
+
+
+def test_a_non_string_occurred_at_is_rejected():
+    with pytest.raises(TypeError, match="occurred_at"):
+        make_event(occurred_at=1758806591)
+
+
+@pytest.mark.parametrize("bad", ["a" * 31, "a" * 33, "A" * 32, "z" * 32, ""])
+def test_a_malformed_event_id_is_rejected(bad):
+    with pytest.raises(ValueError, match="event_id"):
+        make_event(event_id=bad)
+
+
+def test_a_non_string_event_id_is_rejected():
+    with pytest.raises(TypeError, match="event_id"):
+        make_event(event_id=12345)
+
+
+def test_a_non_string_schema_version_is_rejected():
+    with pytest.raises(TypeError, match="schema_version"):
+        make_event(schema_version=1.0)
+
+
+def test_a_wrong_schema_version_string_is_rejected():
+    with pytest.raises(ValueError, match="schema_version"):
+        make_event(schema_version="2.0")
+
+
+def test_a_non_string_request_id_is_rejected():
+    with pytest.raises(TypeError, match="request_id"):
+        make_event(request_id=42)
+
+
+@pytest.mark.parametrize("name", ["priority", "outcome"])
+def test_a_non_string_priority_or_outcome_is_rejected(name):
+    with pytest.raises(TypeError, match=name):
+        make_event(**{name: None})
+
+
+def test_a_well_formed_event_still_constructs():
+    event = make_event(
+        input_tokens=0,
+        output_tokens=0,
+        cache_read_tokens=0,
+        cache_write_tokens=0,
+        latency_ms=0,
+        retries=0,
+        estimated=False,
+        request_id=None,
+        provider="anthropic",
+        model="claude-sonnet-4-5",
+        endpoint="/v1/messages",
+    )
+    assert event.to_dict()["latency_ms"] == 0
+    assert event.request_id is None
+
+
+def test_validation_costs_no_regex_compilation_per_event():
+    import re
+
+    compiled_before = len(re._cache)  # the global pattern cache the stdlib keeps
+    make_event()
+    assert len(re._cache) == compiled_before
+
+
+# ---------------------------------------------------------------------------
 # Endpoint normalisation
 # ---------------------------------------------------------------------------
 
