@@ -1,5 +1,5 @@
-"""Backstop's spend ledger: the token budget ledger, the spend event schema and
-the attribution context.
+"""Backstop's spend ledger: the token budget ledger, the spend event schema, the
+attribution context, and the price catalog.
 
 This package owns the ``backstop.ledger`` import name. The per-tenant token
 budget ledger has held that name since the start (``TenantBudget``,
@@ -8,9 +8,16 @@ budget ledger has held that name since the start (``TenantBudget``,
 name instead of a module and a package of the same name sitting side by side.
 Every existing ``from backstop.ledger import ...`` call site keeps resolving to
 the same live objects, and the module-level ledger singleton stays shared.
+
+The price catalog itself lives one level up, in
+:mod:`backstop.pricing_catalog`, because it is not ledger-internal: the chargeback
+export and the CLI reach for it too. It is re-exported here so a caller holding
+a ``SpendEvent`` has one import for the record and the price that fills its
+``cost``.
 """
 from __future__ import annotations
 
+from ..pricing_catalog import CostBreakdown, PriceCatalog, PriceEntry, compute_cost
 from .budget import (
     BudgetLedger,
     ReservationTicket,
@@ -48,10 +55,14 @@ __all__ = [
     "UNKNOWN_ENDPOINT",
     "Attribution",
     "BudgetLedger",
+    "CostBreakdown",
+    "PriceCatalog",
+    "PriceEntry",
     "ReservationTicket",
     "SpendEvent",
     "TenantBudget",
     "attribution",
+    "compute_cost",
     "cost_from_dict",
     "cost_to_dict",
     "current_attribution",
