@@ -17,6 +17,7 @@ import io
 import json
 import re
 import socket
+import threading
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -752,14 +753,24 @@ def test_a_missing_file_is_an_oserror_not_a_silent_empty_ledger(tmp_path):
 # --------------------------------------------------------------------------
 
 
-class _CountingSink:
-    """A sink that reports its own error counter, the way JsonlSink does."""
+class _StalledSink:
+    """A sink that blocks the drain thread until the test releases it.
+
+    Two events, not a sleep. ``entered`` is set once the drain thread is actually
+    inside ``write``, so the test can know the buffer will not be drained while it
+    submits — which is what makes the drop count deterministic instead of a race
+    against a background thread.
+    """
 
     def __init__(self) -> None:
+        self.entered = threading.Event()
+        self.release = threading.Event()
         self.errors = 0
         self.written = 0
 
     def write(self, event: SpendEvent) -> None:
+        self.entered.set()
+        self.release.wait(timeout=10.0)
         self.written += 1
 
     def flush(self) -> None:
@@ -778,31 +789,42 @@ class _CountingSink:
 
 
 def test_delivery_report_surfaces_the_writers_and_the_sinks_own_counters():
-    sink = _CountingSink()
+    sink = _StalledSink()
     writer = BoundedWriter(sink, maxlen=2)
     events = fixed_events()
-    accepted = [writer.submit(record) for record in events]
-    writer.close()
-    # The buffer is full, so the tail is refused rather than buffered: the
-    # dropped_events a reader wants is the writer's, not the sink's.
-    assert accepted.count(False) == 5
-    assert writer.dropped_events == 5
+    assert writer.submit(events[0]) is True
+    assert sink.entered.wait(10.0)  # the drain thread is now stuck inside write
+
+    # The buffer can hold at most maxlen more, so the tail is refused rather than
+    # buffered: the dropped_events a reader wants is the writer's, not the sink's.
+    refused = [writer.submit(record) for record in events[1:]]
+    accepted = 1 + refused.count(True)
+    assert accepted <= 3
+    assert writer.dropped_events == refused.count(False)
+    assert writer.submitted == len(events)
 
     # A sink that swallows its own failures reports them itself, so a report that
     # only read the writer would say zero for every write failure there was.
     sink.errors = 3
+    sink.release.set()
+    # Close first: close() lets the drain finish, so `written` is a settled number
+    # rather than a snapshot of a thread that is still working.
+    close_report = writer.close()
     report = delivery_report(writer)
+    assert close_report.written == accepted == sink.written
     assert report.submitted == 7
-    assert report.written == 2
-    assert report.dropped_events == 5
+    assert report.written == accepted
+    assert report.dropped_events == refused.count(False)
     assert report.writer_sink_errors == 0
     assert report.sink_sink_errors == 3
     assert report.sink_degraded is True
-    assert report.lost == 8
+    # lost is the sum of the three, and the accounting invariant still closes.
+    assert report.lost == report.dropped_events + 3
+    assert close_report.submitted == close_report.written + close_report.dropped_events
     lines = "\n".join(format_delivery(report))
     assert "dropped_events" in lines
     assert "sink sink_errors" in lines
-    assert "**lost (dropped + writer errors + sink errors): 8**" in lines
+    assert f"**lost (dropped + writer errors + sink errors): {report.lost}**" in lines
 
 
 def test_a_sink_with_no_counter_of_its_own_reports_zero():
