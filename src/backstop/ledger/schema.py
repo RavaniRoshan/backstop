@@ -37,6 +37,7 @@ __all__ = [
     "PRIORITIES",
     "SCHEMA_VERSION",
     "SECRET_QUERY_RE",
+    "UNKNOWN_ENDPOINT",
     "Attribution",
     "SpendEvent",
     "cost_from_dict",

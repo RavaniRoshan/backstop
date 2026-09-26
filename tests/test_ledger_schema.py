@@ -1211,8 +1211,13 @@ def test_the_package_re_exports_the_schema_public_surface():
         "OUTCOMES",
         "OCCURRED_AT_RE",
         "EVENT_ID_RE",
+        "SECRET_QUERY_RE",
+        "UNKNOWN_ENDPOINT",
         "utc_now",
         "normalize_endpoint",
+        "cost_to_dict",
+        "cost_from_dict",
+        "resolve_cost_type",
     ):
         assert getattr(package, name) is getattr(schema_module, name), name
         assert name in package.__all__, name
