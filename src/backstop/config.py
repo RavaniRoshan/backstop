@@ -7,6 +7,16 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
+from .detection.config import (
+    DEFAULT_BASELINE_MULTIPLIER,
+    DEFAULT_CONTEXT_GROWTH_THRESHOLD,
+    DEFAULT_MIN_SAMPLES,
+    DEFAULT_RETRY_RATIO_THRESHOLD,
+    DEFAULT_VELOCITY_THRESHOLD_USD_PER_MIN,
+    DEFAULT_WINDOW_SIZE,
+    DetectionConfig,
+)
+
 if TYPE_CHECKING:
     from .hooks import AfterHookCallback, BeforeHookCallback
 
@@ -202,7 +212,26 @@ class BackstopConfig:
     # --- Runaway-spend detection (Ledger Foundation) ---
     # Off by default, and shadow-first when on: the detector reports what it
     # would have flagged and never blocks a request.
+    #
+    # Every threshold and window bound is a field here rather than a frozen
+    # default inside :class:`~backstop.detection.config.DetectionConfig`,
+    # because a threshold a deployment cannot change is a threshold nobody can
+    # tune, and tuning them against a shadow log *before* they bite is the whole
+    # purpose of the shadow mode. Each field is the ``DetectionConfig`` field of
+    # the same name with a ``detection_`` prefix, which is the convention every
+    # other subsystem on this class already follows (``circuit_*``, ``retry_*``,
+    # ``cache_*``). :attr:`detection_config` is the one place the two are joined,
+    # and therefore the only place the validation rules live.
     detection_enabled: bool = False
+    detection_shadow: bool = True
+    detection_velocity_threshold_usd_per_min: float = (
+        DEFAULT_VELOCITY_THRESHOLD_USD_PER_MIN
+    )
+    detection_baseline_multiplier: float = DEFAULT_BASELINE_MULTIPLIER
+    detection_retry_ratio_threshold: float = DEFAULT_RETRY_RATIO_THRESHOLD
+    detection_context_growth_threshold: float = DEFAULT_CONTEXT_GROWTH_THRESHOLD
+    detection_window_size: int = DEFAULT_WINDOW_SIZE
+    detection_min_samples: int = DEFAULT_MIN_SAMPLES
 
     def __post_init__(self) -> None:
         if self.default_max_output_tokens < 0:
@@ -312,6 +341,11 @@ class BackstopConfig:
                 f"detection_enabled must be a bool, got "
                 f"{type(self.detection_enabled).__name__}"
             )
+        # Building the detector's config is the validation of every other
+        # ``detection_*`` field, so it runs here rather than at the first
+        # request: a threshold that could never fire fails at wrap time, beside
+        # every other configuration error, with a message naming the knob.
+        _detection_config(self)
         if self.fallback_chain is not None:
             if not isinstance(self.fallback_chain, list) or not self.fallback_chain:
                 raise ValueError("fallback_chain must be a non-empty list of {model, base_url?} dicts")
@@ -333,6 +367,22 @@ class BackstopConfig:
                 self.secret_provider = SecretProviderChain(self.virtual_keys)
             except Exception:
                 pass
+
+    # ------------------------------------------------------------------
+    # Runaway-spend detection
+    # ------------------------------------------------------------------
+
+    @property
+    def detection_config(self) -> DetectionConfig:
+        """The resolved :class:`~backstop.detection.config.DetectionConfig`.
+
+        Built from the ``detection_*`` fields, so it cannot disagree with them:
+        there is no second copy of a threshold anywhere. Constructing it is also
+        how a bad knob is refused, which is why ``__post_init__`` calls the same
+        builder — a user sees the error at ``BackstopConfig(...)`` rather than at
+        the first request.
+        """
+        return _detection_config(self)
 
     # ------------------------------------------------------------------
     # Fallback chain resolution
@@ -379,3 +429,32 @@ class BackstopConfig:
         msg = f"{type(self).__name__!r} has no attribute {name!r}"
         raise AttributeError(msg)
 
+
+
+def _detection_config(resolved: BackstopConfig) -> DetectionConfig:
+    """Join a config's ``detection_*`` fields into one frozen ``DetectionConfig``.
+
+    A module-level function rather than a method body so ``__post_init__`` and
+    :attr:`BackstopConfig.detection_config` cannot drift into two different
+    mappings — the mistake this shape exists to prevent, because a threshold set
+    on one path and ignored on the other is a threshold that does not exist.
+
+    The prefix is stripped here and nowhere else, so the two vocabularies meet
+    at exactly one line. Validation is not repeated:
+    :class:`~backstop.detection.config.DetectionConfig` refuses a negative
+    threshold, a multiplier below 1.0, a non-finite number, a zero window, a
+    ``min_samples`` larger than the window and a non-``bool`` switch, with a
+    message naming the knob — so a deployment cannot reach a state the detector
+    module itself considers nonsense, and there is one implementation of that
+    rule rather than two that can disagree.
+    """
+    return DetectionConfig(
+        enabled=resolved.detection_enabled,
+        shadow=resolved.detection_shadow,
+        velocity_threshold_usd_per_min=resolved.detection_velocity_threshold_usd_per_min,
+        baseline_multiplier=resolved.detection_baseline_multiplier,
+        retry_ratio_threshold=resolved.detection_retry_ratio_threshold,
+        context_growth_threshold=resolved.detection_context_growth_threshold,
+        window_size=resolved.detection_window_size,
+        min_samples=resolved.detection_min_samples,
+    )

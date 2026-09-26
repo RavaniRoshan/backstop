@@ -8,7 +8,7 @@ from .audit import AuditLog
 from .budget import Budget
 from .circuit import CircuitBreaker
 from .config import BackstopConfig
-from .detection import DetectionConfig, RunawayDetector
+from .detection import RunawayDetector
 from .ledger import BoundedWriter, JsonlSink, MemorySink, NullSink
 from .metrics import disable_otel, enable_otel
 from .pricing_catalog import PriceCatalog
@@ -89,7 +89,7 @@ class BackstopState:
             audit=audit,
             quota=quota,
             ledger=ledger,
-            detector=RunawayDetector(DetectionConfig(enabled=resolved.detection_enabled)),
+            detector=RunawayDetector(resolved.detection_config),
             prices=prices,
         )
         # Registering here (rather than in wrap()) keeps the built-in dashboard

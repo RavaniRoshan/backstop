@@ -1,6 +1,7 @@
 import pytest
 
 from backstop import BackstopConfig, Priority
+from backstop.detection import DetectionConfig
 
 
 def test_config_defaults_are_valid():
@@ -101,3 +102,76 @@ def test_ledger_and_detection_switches_must_be_bools():
     with pytest.raises(TypeError, match="detection_enabled must be a bool"):
         BackstopConfig(detection_enabled=1)
 
+
+
+# --- Runaway-spend detection: every threshold must be reachable ---------
+#
+# A detector whose knobs are frozen defaults can be switched on but not tuned,
+# and tuning them against a shadow log before they bite is the entire purpose of
+# the shadow mode. So each ``DetectionConfig`` field has a ``BackstopConfig``
+# field of the same name behind a prefix, and this table is the inventory: a
+# field added to one and not the other fails here.
+
+#: ``(config field, DetectionConfig field, a value that is not the default)``
+DETECTION_KNOBS = (
+    ("detection_shadow", "shadow", False),
+    ("detection_velocity_threshold_usd_per_min", "velocity_threshold_usd_per_min", 0.25),
+    ("detection_baseline_multiplier", "baseline_multiplier", 12.5),
+    ("detection_retry_ratio_threshold", "retry_ratio_threshold", 3.5),
+    ("detection_context_growth_threshold", "context_growth_threshold", 0.75),
+    # Above the default min_samples, which a smaller window would trip.
+    ("detection_window_size", "window_size", 9),
+    ("detection_min_samples", "min_samples", 3),
+)
+
+
+@pytest.mark.parametrize(("field", "target", "value"), DETECTION_KNOBS)
+def test_every_detection_knob_is_settable_from_config(field, target, value):
+    config = BackstopConfig(detection_enabled=True, **{field: value})
+    assert getattr(config.detection_config, target) == value
+
+
+def test_the_detector_config_carries_the_enabled_switch_too():
+    assert BackstopConfig(detection_enabled=True).detection_config.enabled is True
+    assert BackstopConfig().detection_config.enabled is False
+    # Shadow-first survives the join: turning the detector on must not turn
+    # enforcement on with it, and the knob is reachable so a deployment can
+    # deliberately choose otherwise.
+    assert BackstopConfig(detection_enabled=True).detection_config.shadow is True
+    assert BackstopConfig(detection_enabled=True, detection_shadow=False).detection_config.shadow is False
+
+
+def test_the_default_detection_config_is_exactly_the_detector_default():
+    """A knob left unset must read as the module default, not as a second default.
+
+    Two default tables would be two things to keep in step; this asserts the
+    config contributes none of its own.
+    """
+    assert BackstopConfig().detection_config == DetectionConfig()
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("detection_velocity_threshold_usd_per_min", -1.0, "velocity_threshold_usd_per_min"),
+        ("detection_baseline_multiplier", 0.5, "baseline_multiplier"),
+        ("detection_retry_ratio_threshold", -0.1, "retry_ratio_threshold"),
+        ("detection_context_growth_threshold", -2.0, "context_growth_threshold"),
+        ("detection_window_size", 0, "window_size"),
+        ("detection_min_samples", 1, "min_samples"),
+        ("detection_shadow", "yes", "shadow"),
+    ],
+)
+def test_an_invalid_detection_knob_is_refused_with_a_message_naming_it(field, value, message):
+    with pytest.raises((TypeError, ValueError), match=message):
+        BackstopConfig(detection_enabled=True, **{field: value})
+
+
+def test_an_unreachable_min_samples_is_refused_at_construction():
+    """A window that can never hold the history it needs is a mute detector.
+
+    It would look exactly like a healthy one, which is why it is a construction
+    error rather than a runtime surprise — and why the error names both bounds.
+    """
+    with pytest.raises(ValueError, match="min_samples must be <= window_size"):
+        BackstopConfig(detection_window_size=4, detection_min_samples=9)

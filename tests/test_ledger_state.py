@@ -80,3 +80,29 @@ def test_detection_enabled_builds_an_enabled_detector_still_in_shadow():
     state = _state(BackstopConfig(detection_enabled=True))
     assert state.detector.config == DetectionConfig(enabled=True, shadow=True)
     assert state.detector.shadow is True
+
+
+def test_the_detector_is_built_from_the_configured_thresholds_not_the_defaults():
+    """The knob survives the trip through ``BackstopState.create``.
+
+    Reachability is only real if the value the user set is the value the running
+    detector compares against, so this reads it back off the detector the state
+    actually holds rather than off the config that produced it.
+    """
+    state = _state(
+        BackstopConfig(
+            detection_enabled=True,
+            detection_velocity_threshold_usd_per_min=0.125,
+            detection_baseline_multiplier=9.0,
+            detection_retry_ratio_threshold=4.0,
+            detection_context_growth_threshold=0.5,
+            detection_window_size=16,
+            detection_min_samples=4,
+        )
+    )
+    config = state.detector.config
+    assert config.velocity_threshold_usd_per_min == 0.125
+    assert config.baseline_multiplier == 9.0
+    assert config.retry_ratio_threshold == 4.0
+    assert config.context_growth_threshold == 0.5
+    assert state.detector.max_window() == 16
