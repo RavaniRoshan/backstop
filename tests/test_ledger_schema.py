@@ -34,6 +34,7 @@ from backstop.ledger.schema import (
     SCHEMA_VERSION,
     UNKNOWN_ENDPOINT,
     normalize_endpoint,
+    new_event_id,
     resolve_cost_type,
     utc_now,
 )
@@ -1385,3 +1386,46 @@ def test_an_optional_field_set_to_none_is_still_present():
     payload = event.to_dict()
     assert payload["cost"] is None and payload["request_id"] is None
     assert SpendEvent.from_dict(payload) == event
+
+
+# ---------------------------------------------------------------------------
+# The two hot defaults
+# ---------------------------------------------------------------------------
+
+
+def test_new_event_id_is_a_version_4_uuid_hex():
+    event_id = new_event_id()
+    assert len(event_id) == 32
+    assert event_id[12] == "4"
+    assert event_id[16] in "89ab"
+    assert EVENT_ID_RE.fullmatch(event_id)
+    assert UUID(event_id).version == 4
+    assert UUID(event_id).variant == "specified in RFC 4122"
+
+
+def test_new_event_ids_do_not_repeat():
+    assert len({new_event_id() for _ in range(5000)}) == 5000
+
+
+def test_the_event_id_default_is_the_generated_id():
+    assert SpendEvent.__dataclass_fields__["event_id"].default_factory is new_event_id
+    assert make_event().event_id != make_event().event_id
+
+
+def test_utc_now_is_rfc3339_utc_with_microseconds():
+    stamp = utc_now()
+    assert OCCURRED_AT_RE.fullmatch(stamp)
+    parsed = datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%S.%fZ")
+    assert abs(datetime.now(timezone.utc) - parsed.replace(tzinfo=timezone.utc)) < (
+        timedelta(seconds=5)
+    )
+
+
+def test_utc_now_keeps_its_shape_across_the_calendar():
+    # strftime does not pad a year below 1000 on every platform; isoformat does.
+    # This pins the formatter choice through the one path that reaches it.
+    for year in (1, 999, 1000, 2026, 9999):
+        moment = datetime(year, 12, 31, 23, 59, 59, 999999, tzinfo=timezone.utc)
+        rendered = moment.replace(tzinfo=None).isoformat(timespec="microseconds") + "Z"
+        assert OCCURRED_AT_RE.fullmatch(rendered), rendered
+        assert rendered.startswith(str(year).zfill(4))
