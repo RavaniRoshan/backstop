@@ -14,6 +14,11 @@ The price catalog itself lives one level up, in
 export and the CLI reach for it too. It is re-exported here so a caller holding
 a ``SpendEvent`` has one import for the record and the price that fills its
 ``cost``.
+
+The sinks — ``LedgerSink`` and its four implementations, plus the
+``BoundedWriter`` that keeps them off the request path — are re-exported for the
+same reason: a caller wiring a ledger needs the event, the price and the place it
+goes, and three imports of the same object is three chances to get one wrong.
 """
 from __future__ import annotations
 
@@ -44,7 +49,7 @@ from .schema import (
     resolve_cost_type,
     utc_now,
 )
-from .sink import JsonlSink, LedgerSink, MemorySink, NullSink
+from .sink import BoundedWriter, JsonlSink, LedgerSink, MemorySink, NullSink
 
 __all__ = [
     "EVENT_ID_RE",
@@ -55,6 +60,7 @@ __all__ = [
     "SECRET_QUERY_RE",
     "UNKNOWN_ENDPOINT",
     "Attribution",
+    "BoundedWriter",
     "BudgetLedger",
     "CostBreakdown",
     "JsonlSink",

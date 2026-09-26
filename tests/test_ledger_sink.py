@@ -20,6 +20,7 @@ import pytest
 
 from backstop.ledger import (
     Attribution,
+    BoundedWriter,
     CostBreakdown,
     JsonlSink,
     LedgerSink,
@@ -29,7 +30,12 @@ from backstop.ledger import (
     SpendEvent,
     compute_cost,
 )
-from backstop.ledger.sink import DEFAULT_MEMORY_EVENTS
+from backstop.ledger.sink import (
+    DEFAULT_MEMORY_EVENTS,
+    DEFAULT_QUEUE_SIZE,
+    DRAIN_THREAD_NAME,
+    CloseReport,
+)
 
 
 def make_event(**overrides: Any) -> SpendEvent:
@@ -541,3 +547,346 @@ def test_a_truncated_final_line_is_detectable_by_the_reader(tmp_path: Any) -> No
     assert SpendEvent.from_dict(json.loads(reread[0])) == good
 
 
+# --- BoundedWriter: the hot path --------------------------------------------
+
+
+def test_a_plain_object_satisfies_the_protocol_without_subclassing() -> None:
+    """The protocol is structural, which is the point of it being a Protocol."""
+
+    class TheirSink:
+        def __init__(self) -> None:
+            self.seen: list[SpendEvent] = []
+
+        def write(self, event: SpendEvent) -> None:
+            self.seen.append(event)
+
+        def flush(self) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    theirs = TheirSink()
+    assert isinstance(theirs, LedgerSink)
+    writer = BoundedWriter(theirs)  # type: ignore[arg-type]
+    assert writer.submit(make_event()) is True
+    writer.close()
+    assert len(theirs.seen) == 1
+
+
+def test_bounded_writer_defaults_to_ten_thousand_queued_events() -> None:
+    writer = BoundedWriter(NullSink())
+    assert writer.backlog == 0
+    writer.close()
+    assert BoundedWriter(NullSink(), maxlen=DEFAULT_QUEUE_SIZE).backlog == 0
+
+
+def prime_stalled_sink(writer: BoundedWriter, sink: _StalledSink) -> None:
+    """Start the drain thread and park it inside the sink's first write.
+
+    Waiting on an ``Event`` the sink sets from inside ``write`` is what makes the
+    arithmetic in the overflow tests exact rather than racy: the caller knows the
+    buffer is empty and one event is in flight before the first measured submit.
+    """
+    assert writer.submit(make_event(model="priming")) is True
+    assert sink.entered.wait(5.0), "the drain thread never started writing"
+    assert writer.backlog == 0, "the priming event was taken off the buffer"
+
+
+def test_ten_thousand_submits_do_not_block_the_caller() -> None:
+    """The headline claim, measured.
+
+    A sink that has been told to stall parks the drain thread inside its first
+    write, so the backlog is the only thing between the caller and the overflow
+    policy. 10,000 submits must return in milliseconds, and must never wait on
+    that stalled write.
+    """
+    sink = _StalledSink()
+    writer = BoundedWriter(sink)
+    events = [make_event(model=f"m{index}") for index in range(10_000)]
+    prime_stalled_sink(writer, sink)
+
+    def burst() -> int:
+        return sum(1 for event in events if writer.submit(event))
+
+    accepted, elapsed = run_bounded(burst, 10.0)
+    try:
+        assert accepted == 10_000
+        assert elapsed < 2.0, (
+            f"10,000 submits took {elapsed * 1000:.1f}ms against a stalled sink; "
+            "the caller waited on the sink"
+        )
+        assert writer.submitted == 10_001
+        assert writer.written == 0, "the sink is stalled, so nothing is written"
+        assert writer.backlog == DEFAULT_QUEUE_SIZE
+        assert writer.dropped_events == 0, (
+            "the default bound is 10,000 and the buffer is empty at the start of "
+            "the burst, so the whole burst fits and nothing may be dropped"
+        )
+    finally:
+        sink.release.set()
+        report = writer.close()
+
+    assert report.drained is True
+    assert report.undrained == 0
+    assert report.submitted == report.written + report.dropped_events
+    assert report.written == 10_001, "the primed event plus the whole burst"
+    assert len(sink.written) == 10_001
+
+
+def test_overflow_refuses_the_incoming_event_and_counts_it_exactly() -> None:
+    """A bounded buffer that grows is a bug; a counted drop is a fact.
+
+    With the drain thread parked in the sink, the bound is fully available to
+    the caller, so the arithmetic is exact rather than racy: ``maxlen`` events
+    buffered, and every submit past that refused with the oldest still queued.
+    """
+    sink = _StalledSink()
+    writer = BoundedWriter(sink, maxlen=8)
+    prime_stalled_sink(writer, sink)
+
+    accepted = 0
+    try:
+        for index in range(50):
+            if writer.submit(make_event(model=f"m{index}")):
+                accepted += 1
+        assert accepted == 8
+        assert writer.backlog == 8
+        assert writer.dropped_events == 42
+        assert writer.submitted == 51
+    finally:
+        sink.release.set()
+        report = writer.close()
+
+    assert report.drained is True
+    assert report.written == 9, "the one in flight plus the eight that were buffered"
+    assert report.dropped_events == 42
+    assert report.submitted == report.written + report.dropped_events
+    assert report.lost == 42
+    # Refused means refused: the survivors are the first eight, and the priming
+    # event, so the events that were turned away are simply not in the file.
+    assert [e.model for e in sink.written] == ["priming"] + [f"m{i}" for i in range(8)]
+
+
+def test_the_buffer_never_exceeds_its_bound_under_a_far_larger_burst() -> None:
+    sink = _StalledSink()
+    writer = BoundedWriter(sink, maxlen=16)
+    prime_stalled_sink(writer, sink)
+    high = [0]
+
+    def burst() -> None:
+        for index in range(20_000):
+            writer.submit(make_event(model=f"m{index}"))
+            depth = writer.backlog
+            if depth > high[0]:
+                high[0] = depth
+
+    try:
+        run_bounded(burst, 30.0)
+        assert high[0] <= 16, f"backlog reached {high[0]}, past the bound of 16"
+        assert writer.backlog <= 16
+        assert writer.dropped_events == 20_000 - 16
+    finally:
+        sink.release.set()
+        report = writer.close()
+
+    assert report.undrained == 0
+    assert report.written == 17, "the priming event plus the sixteen that fit"
+    assert report.submitted == report.written + report.dropped_events
+
+
+def test_a_sink_that_raises_never_reaches_the_submitter() -> None:
+    """A broken sink is counted, not propagated: the request path never sees it."""
+    sink = _ExplodingSink()
+    writer = BoundedWriter(sink)
+
+    def burst() -> int:
+        return sum(1 for _ in range(50) if writer.submit(make_event()))
+
+    try:
+        accepted, _ = run_bounded(burst, 5.0)
+        assert accepted == 50, "a raising sink must not make submit() refuse"
+        assert wait_for(lambda: writer.written + writer.sink_errors == 50)
+        assert writer.written == 0
+        assert writer.sink_errors == 50
+        assert sink.attempts == 50
+        assert writer.dropped_events == 0
+    finally:
+        report = writer.close()
+
+    assert report.submitted == report.written + report.dropped_events + report.sink_errors
+
+
+def test_a_sink_that_raises_on_flush_and_close_still_lets_shutdown_finish() -> None:
+    sink = _ExplodingSink()
+    writer = BoundedWriter(sink)
+    writer.submit(make_event())
+    assert wait_for(lambda: writer.sink_errors == 1)
+    report = writer.close()  # must not raise
+    assert isinstance(report, CloseReport)
+    assert report.drained is True
+    assert report.written == 0
+
+
+def test_close_returns_within_its_bound_when_the_sink_is_stalled() -> None:
+    """Shutdown must not hang on a sink that has stopped responding."""
+    sink = _StalledSink()
+    writer = BoundedWriter(sink, maxlen=4, close_timeout=0.25)
+    prime_stalled_sink(writer, sink)
+    for index in range(4):
+        writer.submit(make_event(model=f"m{index}"))
+    assert writer.backlog == 4
+
+    report, elapsed = run_bounded(writer.close, 5.0)
+    try:
+        assert elapsed < 1.0, (
+            f"close took {elapsed:.3f}s; the stalled sink was waited on rather "
+            "than abandoned"
+        )
+        assert report.drained is False
+        assert report.undrained == 4, "the backlog is discarded, not written late"
+        assert report.dropped_events == 4
+        assert report.lost >= 4
+        assert writer.backlog == 0, "the discarded backlog is gone, not left to grow"
+        assert sink.closed is True
+    finally:
+        sink.release.set()
+
+
+def test_close_reports_every_event_it_never_wrote() -> None:
+    sink = _CountingSink()
+    writer = BoundedWriter(sink)
+    for index in range(20):
+        writer.submit(make_event(model=f"m{index}"))
+
+    report = writer.close()
+    assert report.drained is True
+    assert report.submitted == 20
+    assert report.written == 20
+    assert report.dropped_events == 0
+    assert report.sink_errors == 0
+    assert report.lost == 0
+    assert report.undrained == 0
+    assert writer.backlog == 0
+    assert len(sink.written) == 20
+    assert sink.closed is True
+
+
+def test_close_is_idempotent_and_returns_the_same_report() -> None:
+    writer = BoundedWriter(_CountingSink())
+    writer.submit(make_event())
+    first = writer.close()
+    assert writer.close() is first
+    assert writer.close() == first
+
+
+def test_submitting_after_close_is_refused_and_counted() -> None:
+    writer = BoundedWriter(_CountingSink())
+    writer.submit(make_event())
+    writer.close()
+    assert writer.submit(make_event()) is False
+    assert writer.submit(make_event()) is False
+    assert writer.dropped_events == 2
+
+
+def test_counters_stay_internally_consistent_across_a_mixed_sequence() -> None:
+    """Normal writes, overflow drops and sink failures in one run.
+
+    Every submitted event must end up in exactly one of written, dropped, or
+    errored — none counted twice, none missing. That is the only way an operator
+    can trust ``dropped_events`` as a number.
+    """
+    good = _SwitchableSink()
+    writer = BoundedWriter(good, maxlen=32)
+
+    # Park the drain thread inside its first write, so the bound is fully
+    # available to the caller and the arithmetic below is exact, not racy.
+    good.gate.clear()
+    writer.submit(make_event(model="priming"))
+    assert wait_for(lambda: len(good.written) == 1)
+
+    try:
+        for _ in range(10):
+            assert writer.submit(make_event(model="fine")) is True
+        assert writer.backlog == 10, "the priming event is in flight, not buffered"
+
+        good.doomed.add("doomed")
+        for _ in range(2):
+            assert writer.submit(make_event(model="doomed")) is True
+        assert writer.backlog == 12
+        refused = sum(
+            1 for _ in range(100) if not writer.submit(make_event(model="refused"))
+        )
+        assert writer.backlog == 32, "the buffer is exactly full, nothing overflowed it"
+    finally:
+        good.gate.set()
+        report = writer.close()
+
+    assert refused == 80, "12 of the 32 slots were already taken, so 80 are refused"
+    assert len(good.written) == 31, "the two doomed events never reached the recorder"
+    assert report.submitted == 113
+    assert report.written == 31
+    assert report.sink_errors == 2
+    assert report.dropped_events == 80
+    assert report.lost == 82
+    assert (
+        report.submitted == report.written + report.dropped_events + report.sink_errors
+    ), "an event was counted twice or went missing"
+
+
+def test_the_drain_thread_is_a_named_daemon_started_lazily() -> None:
+    """One thread, started on the first accepted submit, and only one."""
+    before = {t.name for t in threading.enumerate()}
+    assert DRAIN_THREAD_NAME not in before
+
+    writer = BoundedWriter(_CountingSink())
+    assert DRAIN_THREAD_NAME not in {t.name for t in threading.enumerate()}
+
+    writer.submit(make_event())
+    assert DRAIN_THREAD_NAME in {t.name for t in threading.enumerate()}
+    assert wait_for(lambda: writer.written == 1)
+    drain = next(t for t in threading.enumerate() if t.name == DRAIN_THREAD_NAME)
+    assert drain.daemon is True
+
+    for _ in range(50):
+        writer.submit(make_event())
+    assert wait_for(lambda: writer.written == 51)
+    assert sum(1 for t in threading.enumerate() if t.name == DRAIN_THREAD_NAME) == 1
+    writer.close()
+    assert wait_for(lambda: DRAIN_THREAD_NAME not in {t.name for t in threading.enumerate()})
+
+
+def test_the_drain_target_is_a_module_level_function() -> None:
+    """No closure over the writer's state: the thread's target is one function."""
+    from backstop.ledger import sink as sink_module
+
+    assert sink_module._drain.__name__ == "_drain"
+    assert sink_module._drain.__qualname__ == "_drain"
+    assert not getattr(sink_module._drain, "__closure__", None)
+
+
+def test_bounded_writer_rejects_a_bound_it_could_not_honour() -> None:
+    with pytest.raises(ValueError):
+        BoundedWriter(NullSink(), maxlen=0)
+    with pytest.raises(ValueError):
+        BoundedWriter(NullSink(), close_timeout=-1.0)
+    with pytest.raises(TypeError):
+        BoundedWriter(NullSink(), maxlen="lots")  # type: ignore[arg-type]
+
+
+def test_a_writer_with_no_submits_closes_without_a_thread() -> None:
+    sink = _CountingSink()
+    report = BoundedWriter(sink).close()
+    assert report.submitted == 0
+    assert report.written == 0
+    assert report.drained is True
+    assert report.undrained == 0
+    assert sink.closed is True
+
+
+def test_the_ledger_package_exports_every_sink() -> None:
+    import backstop.ledger as ledger
+
+    for name in ("LedgerSink", "NullSink", "MemorySink", "JsonlSink", "BoundedWriter"):
+        assert name in ledger.__all__, f"{name} is not exported from backstop.ledger"
+        assert getattr(ledger, name) is not None

@@ -41,12 +41,18 @@ import json
 import os
 import threading
 from collections import deque
+from dataclasses import dataclass
 from typing import Protocol, TextIO, runtime_checkable
 
 from .schema import SpendEvent
 
 __all__ = [
+    "DEFAULT_CLOSE_TIMEOUT",
     "DEFAULT_MEMORY_EVENTS",
+    "DEFAULT_QUEUE_SIZE",
+    "DRAIN_THREAD_NAME",
+    "BoundedWriter",
+    "CloseReport",
     "JsonlSink",
     "LedgerSink",
     "MemorySink",
@@ -344,3 +350,241 @@ class JsonlSink:
         return f"JsonlSink(path={self._path!r}, fsync={self._fsync})"
 
 
+@dataclass(frozen=True)
+class CloseReport:
+    """What :meth:`BoundedWriter.close` found on the way out.
+
+    The accounting invariant is ``submitted == written + dropped_events +
+    sink_errors`` once the writer is closed and the drain finished: every event
+    that ever entered :meth:`~BoundedWriter.submit` is in exactly one of those
+    three buckets, none is counted twice, and none is missing.
+
+    :attr:`drained` says whether that invariant is being asserted. When it is
+    ``False`` the join timed out, :attr:`undrained` events were discarded, and
+    the abandoned drain thread may still land one more write, so ``written`` is
+    read as "at least this many".
+    """
+
+    submitted: int
+    written: int
+    dropped_events: int
+    sink_errors: int
+    #: Events still buffered when the join timed out, discarded rather than
+    #: written late.
+    undrained: int
+    #: Whether the drain thread finished before the join expired.
+    drained: bool
+    close_timeout_s: float
+
+    @property
+    def lost(self) -> int:
+        """Events that will never be written: refused, discarded, or failed."""
+        return self.dropped_events + self.sink_errors
+
+
+class BoundedWriter:
+    """Hands events to a sink from one background thread, without ever blocking.
+
+    The transport calls :meth:`submit` and returns. Everything slow — the lock
+    contention with other submitters, the sink's own write, the disk — happens on
+    the single daemon thread started lazily by the first accepted submit.
+
+    The buffer is a ``deque(maxlen=N)`` and the fullness check is explicit, so
+    overflow *refuses the incoming event* rather than silently evicting the
+    oldest one: a refused event is counted and reported by ``submit``'s return
+    value, whereas a silent eviction would be a gap with no trace at all. The
+    ``maxlen`` is kept as well, so a bug in the check still cannot grow the
+    buffer.
+
+    Exactly one drain thread exists per writer. It drains until the buffer is
+    empty *and* the writer is closing, so a normal ``close`` loses nothing; a
+    close whose join times out discards the backlog and says so.
+    """
+
+    def __init__(
+        self,
+        sink: LedgerSink,
+        *,
+        maxlen: int = DEFAULT_QUEUE_SIZE,
+        close_timeout: float = DEFAULT_CLOSE_TIMEOUT,
+    ) -> None:
+        for name, value in (("maxlen", maxlen), ("close_timeout", close_timeout)):
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise TypeError(f"{name} must be a number, got {type(value).__name__}")
+        if maxlen < 1:
+            raise ValueError(f"maxlen must be >= 1, got {maxlen}")
+        if close_timeout < 0:
+            raise ValueError(f"close_timeout must be >= 0, got {close_timeout}")
+        self._sink = sink
+        self._buffer: deque[SpendEvent] = deque(maxlen=maxlen)
+        self._condition = threading.Condition(threading.Lock())
+        self._close_timeout = float(close_timeout)
+        self._thread: threading.Thread | None = None
+        self._stopping = False
+        self._report: CloseReport | None = None
+        self._submitted = 0
+        self._written = 0
+        self._dropped_events = 0
+        self._sink_errors = 0
+
+    # --- counters. Each takes the lock, so a single-threaded reader sees a
+    # --- coherent value; a reader wanting all four at once should call close().
+
+    @property
+    def submitted(self) -> int:
+        """Every call to :meth:`submit`, including the ones that were refused."""
+        with self._condition:
+            return self._submitted
+
+    @property
+    def written(self) -> int:
+        """Events the sink accepted."""
+        with self._condition:
+            return self._written
+
+    @property
+    def dropped_events(self) -> int:
+        """Events refused at submit, plus any discarded at an unfinished close."""
+        with self._condition:
+            return self._dropped_events
+
+    @property
+    def sink_errors(self) -> int:
+        """Writes that raised out of the sink.
+
+        A sink that swallows its own failures — as :class:`JsonlSink` must —
+        reports them on its own ``sink_errors`` instead, so this is the count of
+        errors that actually escaped.
+        """
+        with self._condition:
+            return self._sink_errors
+
+    @property
+    def backlog(self) -> int:
+        """Events buffered and not yet handed to the sink.
+
+        Read without the lock: ``len`` on a ``deque`` is a single C call, and a
+        diagnostic that can be blocked by a busy drain thread is no diagnostic.
+        """
+        return len(self._buffer)
+
+    @property
+    def sink(self) -> LedgerSink:
+        """The sink being written to."""
+        return self._sink
+
+    def submit(self, event: SpendEvent) -> bool:
+        """Hand the event to the drain thread. ``True`` if it was accepted.
+
+        Never blocks on the sink and never raises. ``False`` means the event was
+        refused — the buffer was full, or the writer is closed — and
+        :attr:`dropped_events` has been incremented, so a caller that cares can
+        count its own losses and one that does not still leaves a trace.
+        """
+        condition = self._condition
+        try:
+            with condition:
+                self._submitted += 1
+                if self._stopping or len(self._buffer) >= self._buffer.maxlen:
+                    self._dropped_events += 1
+                    return False
+                self._buffer.append(event)
+                if self._thread is None:
+                    self._start_drain_locked()
+                condition.notify()
+                return True
+        except Exception:
+            # Not a path any known input takes: the buffer is bounded and the
+            # lock is held for two dict-free operations. Counted rather than
+            # lost, because an event that vanishes unaccounted for is the one
+            # outcome this component exists to prevent.
+            with condition:
+                self._dropped_events += 1
+            return False
+
+    def close(self) -> CloseReport:
+        """Stop the drain thread with a bounded join, then close the sink.
+
+        Idempotent: the first call does the work and every later call returns the
+        same report. A sink that is mid-write when the join expires is
+        abandoned — the thread is a daemon, so shutdown continues — and its
+        backlog is discarded and reported as :attr:`CloseReport.undrained` rather
+        than written after ``close`` returned.
+        """
+        with self._condition:
+            if self._report is not None:
+                return self._report
+            self._stopping = True
+            self._condition.notify_all()
+            thread = self._thread
+        drained = True
+        if thread is not None:
+            thread.join(self._close_timeout)
+            drained = not thread.is_alive()
+        with self._condition:
+            undrained = len(self._buffer)
+            if undrained:
+                self._buffer.clear()
+                self._dropped_events += undrained
+            report = CloseReport(
+                submitted=self._submitted,
+                written=self._written,
+                dropped_events=self._dropped_events,
+                sink_errors=self._sink_errors,
+                undrained=undrained,
+                drained=drained,
+                close_timeout_s=self._close_timeout,
+            )
+            self._report = report
+        # A sink whose flush/close raises is not counted: these counters describe
+        # events, and shutdown must complete either way.
+        for step in (self._sink.flush, self._sink.close):
+            try:
+                step()
+            except Exception:
+                pass
+        return report
+
+    def _start_drain_locked(self) -> None:
+        """Start the one drain thread. Caller holds the lock."""
+        thread = threading.Thread(
+            target=_drain, args=(self,), name=DRAIN_THREAD_NAME, daemon=True
+        )
+        self._thread = thread
+        thread.start()
+
+    def __repr__(self) -> str:
+        return (
+            f"BoundedWriter(sink={self._sink!r}, submitted={self.submitted}, "
+            f"written={self.written}, dropped={self.dropped_events}, "
+            f"backlog={self.backlog})"
+        )
+
+
+def _drain(writer: BoundedWriter) -> None:
+    """Move ``writer``'s buffered events into its sink until it is closed.
+
+    Module level, and a plain function of one argument, so the thread's target
+    reads on its own and the writer's own state is not captured in a closure.
+
+    The lock is dropped around ``sink.write`` — that is the whole design: a
+    submitter never waits on a slow sink, and a slow sink never holds up the
+    submits behind it. The counters are taken under the lock after each write,
+    which is off the hot path and therefore cheap to be strict about.
+    """
+    condition = writer._condition
+    while True:
+        with condition:
+            while not writer._buffer and not writer._stopping:
+                condition.wait()
+            if not writer._buffer:
+                return
+            event = writer._buffer.popleft()
+        try:
+            writer._sink.write(event)
+        except Exception:
+            with condition:
+                writer._sink_errors += 1
+        else:
+            with condition:
+                writer._written += 1
