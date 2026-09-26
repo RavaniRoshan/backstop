@@ -110,7 +110,22 @@ SHADOW_LOG_SIZE = 256
 UNATTRIBUTED_KEY = "unattributed"
 
 _SECONDS_PER_MINUTE = 60.0
-_MONEY_PLACES = 6
+
+#: Decimal places a *dollar* figure in a detection detail is rendered with. Two,
+#: because a velocity is a currency amount and a currency amount has cents — and
+#: because :attr:`SpendSignal.cost_velocity_usd_per_min` is a binary float, a sum
+#: of floats divided by a float span. Six places of it were not merely more
+#: precision than the arithmetic has: they were a *wrong* digit. Three events of
+#: $12.345670 across exactly 3600 seconds are $0.6172835 per minute, which
+#: rounds to 0.617284, and the float's sixth place printed 0.617283. The
+#: full-precision value is on the signal as ``observed``, which is where a
+#: machine reads it and where nothing is lost by rounding the prose.
+_MONEY_PLACES = 2
+
+#: Decimal places the figures in a detail that are *not* money are rendered
+#: with. A span in minutes is a measurement rather than an amount, and 0.005 of a
+#: minute is a real reading that two places would print as 0.01.
+_SPAN_PLACES = 6
 _RATIO_PLACES = 3
 
 #: The env switch, following ``ShadowCollector``'s ``BACKSTOP_SHADOW``. Reading
@@ -716,7 +731,7 @@ class RunawayDetector:
                 threshold,
                 f"${features.cost_velocity_usd_per_min:.{_MONEY_PLACES}f}/min over "
                 f"{features.samples} events in "
-                f"{reading.span_minutes:.{_MONEY_PLACES}f} min, "
+                f"{reading.span_minutes:.{_SPAN_PLACES}f} min, "
                 f"{reading.priced}/{features.samples} priced",
             ))
 

@@ -24,6 +24,7 @@ from __future__ import annotations
 import threading
 import time
 from decimal import Decimal
+from fractions import Fraction
 from typing import Any, NamedTuple
 
 import pytest
@@ -364,7 +365,45 @@ def test_velocity_fires_on_a_burst_of_expensive_events():
     assert signal.key == signal_key(PAYMENTS)
 
 
+def test_the_velocity_detail_does_not_print_a_float_rate_as_six_place_money():
+    """A rate derived from a float, rendered with the precision of a measurement.
+
+    ``SpendSignal.cost_velocity_usd_per_min`` is a sum of binary floats divided
+    by a float span, so six decimal places of it were not just more precision
+    than the arithmetic has — they were a wrong digit. Three events of
+    $12.345670 across exactly 3600 seconds are $0.6172835 per minute, which
+    rounds to 0.617284, and the float's sixth place printed 0.617283. The
+    detail is prose for a person: it now states the rate at the money precision
+    the rest of this product renders dollars at, and the exact float is still on
+    the signal as ``observed``.
+    """
+    h = harness(
+        DetectionConfig(
+            enabled=True, window_size=8, min_samples=3, velocity_threshold_usd_per_min=0.0
+        )
+    )
+    for moment in (0.0, 1800.0, 3600.0):
+        h.clock.now = moment
+        signals = h.observe(priced_event("12.345670"))
+
+    signal = only(signals, "velocity")
+    # 3 x $12.345670 over 3600 seconds is 60 minutes, so 37.037010 / 60.
+    assert Fraction(Decimal("12.345670") * 3) / 60 == Fraction(3703701, 6_000_000)
+    # The float's own sixth place disagrees with the exact figure, which is the
+    # whole reason the detail does not print one.
+    assert f"{signal.observed:.6f}" == "0.617283"
+    assert Decimal("0.617284") != Decimal(f"{signal.observed:.6f}")
+
+    assert "$0.62/min over 3 events in 60.000000 min, 3/3 priced" == signal.detail
+    # The measurement beside it keeps its places: 0.005 of a minute is real.
+    assert "60.000000 min" in signal.detail
+    # And the machine-readable value is untouched — nothing was rounded away.
+    assert signal.observed == pytest.approx(0.6172835, rel=1e-12)
+    assert signal.observed == signal.observed  # a float, as the dataclass declares
+
+
 def test_velocity_does_not_fire_when_the_same_spend_is_spread_over_time():
+
     """Six $5 requests over fifty minutes is $6/hour, and nobody is in trouble.
 
     This is the pair that makes the detector useful rather than a spend-total
