@@ -10,13 +10,25 @@ test that waits on the clock can pass for the wrong reason.
 """
 from __future__ import annotations
 
+import json
 import threading
 import time
+from decimal import Decimal
 from typing import Any
 
 import pytest
 
-from backstop.ledger import Attribution, LedgerSink, MemorySink, NullSink, SpendEvent
+from backstop.ledger import (
+    Attribution,
+    CostBreakdown,
+    JsonlSink,
+    LedgerSink,
+    MemorySink,
+    NullSink,
+    PriceCatalog,
+    SpendEvent,
+    compute_cost,
+)
 from backstop.ledger.sink import DEFAULT_MEMORY_EVENTS
 
 
@@ -302,5 +314,230 @@ def test_memory_sink_is_thread_safe_under_concurrent_writers() -> None:
     # beyond the documented eviction.
     assert len(sink) == 64
     assert all(isinstance(e, SpendEvent) for e in sink.events)
+
+
+# --- JsonlSink --------------------------------------------------------------
+
+
+def priced_event(**overrides: Any) -> SpendEvent:
+    """An event carrying a real :class:`CostBreakdown` from the bundled catalog.
+
+    It lives in the JSONL section rather than the header because it exists for
+    one reason: money crosses the wire as a *string*, and only an event that
+    carries money makes that observable.
+    """
+    event = make_event(**overrides)
+    cost = compute_cost(event, PriceCatalog())
+    assert cost is not None, "the bundled catalog must price gpt-4o"
+    return make_event(cost=cost, **overrides)
+
+
+def test_jsonl_sink_satisfies_the_ledger_sink_protocol() -> None:
+    assert isinstance(JsonlSink("/tmp/does-not-need-to-exist.jsonl"), LedgerSink)
+
+
+def test_jsonl_sink_round_trips_every_line_including_one_with_a_cost(tmp_path: Any) -> None:
+    """Write, close, read back: every line must rebuild the record it came from.
+
+    One event carries a priced :class:`CostBreakdown`, because money crosses the
+    wire as a *string*. A round trip that passed without it would prove nothing
+    about the part of the record a finance export depends on.
+    """
+    path = tmp_path / "ledger.jsonl"
+    sink = JsonlSink(path)
+    events = [priced_event() if index % 3 == 0 else make_event() for index in range(9)]
+    for event in events:
+        sink.write(event)
+    sink.close()
+
+    assert not sink.degraded
+    assert sink.sink_errors == 0
+
+    lines = path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == len(events)
+    assert all(json.loads(line) for line in lines)
+    rebuilt = [SpendEvent.from_dict(json.loads(line)) for line in lines]
+    assert rebuilt == events
+    priced = next(e for e in rebuilt if e.cost is not None)
+    assert priced.cost is not None
+    assert isinstance(priced.cost, CostBreakdown)
+    assert priced.cost.total_usd == sum(
+        (
+            priced.cost.input_usd,
+            priced.cost.output_usd,
+            priced.cost.cache_read_usd,
+            priced.cost.cache_write_usd,
+        ),
+        Decimal("0.000000"),
+    )
+    # Money really did travel as a string, not as a float that lost its cents.
+    raw = json.loads(lines[0])["cost"]
+    assert isinstance(raw["total_usd"], str)
+    assert raw["total_usd"] == f"{priced.cost.total_usd:f}"
+
+
+def test_jsonl_sink_writes_one_object_per_line_with_sorted_keys(tmp_path: Any) -> None:
+    path = tmp_path / "ledger.jsonl"
+    sink = JsonlSink(path)
+    sink.write(make_event())
+    sink.close()
+
+    text = path.read_text(encoding="utf-8")
+    assert text.endswith("\n")
+    assert text.count("\n") == 1
+    keys = list(json.loads(text.strip()))
+    assert keys == sorted(keys)
+
+
+def test_jsonl_sink_appends_and_never_truncates(tmp_path: Any) -> None:
+    """Two processes on the same file must not erase each other's records."""
+    path = tmp_path / "ledger.jsonl"
+    first = JsonlSink(path)
+    first.write(make_event(model="before-restart"))
+    first.close()
+
+    second = JsonlSink(path)
+    second.write(make_event(model="after-restart"))
+    second.close()
+
+    lines = path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 2
+    assert [SpendEvent.from_dict(json.loads(line)).model for line in lines] == [
+        "before-restart",
+        "after-restart",
+    ]
+
+
+def test_jsonl_sink_creates_missing_parent_directories(tmp_path: Any) -> None:
+    path = tmp_path / "deep" / "nested" / "reports" / "ledger.jsonl"
+    assert not path.parent.exists()
+
+    sink = JsonlSink(path)
+    sink.write(make_event())
+    sink.close()
+
+    assert path.exists()
+    assert len(path.read_text(encoding="utf-8").splitlines()) == 1
+    assert not sink.degraded
+
+
+def test_jsonl_sink_touches_nothing_until_there_is_an_event_to_record(
+    tmp_path: Any,
+) -> None:
+    path = tmp_path / "unwritten" / "ledger.jsonl"
+    sink = JsonlSink(path)
+    assert not path.parent.exists()
+    sink.close()
+    assert not path.parent.exists(), "a sink that recorded nothing made a directory"
+
+
+def test_jsonl_sink_on_an_unwritable_path_degrades_instead_of_raising(
+    tmp_path: Any,
+) -> None:
+    """A path whose parent is a regular file cannot be created, ever."""
+    blocker = tmp_path / "blocker"
+    blocker.write_text("not a directory", encoding="utf-8")
+    path = blocker / "ledger.jsonl"
+
+    sink = JsonlSink(path)
+    sink.write(make_event())  # must not raise
+    sink.write(make_event())
+    sink.flush()
+    sink.close()  # must not raise
+
+    assert sink.degraded is True
+    assert sink.sink_errors == 2, "one per refused write, so the loss is countable"
+    assert not path.exists()
+
+
+def test_jsonl_sink_keeps_counting_losses_while_degraded(tmp_path: Any) -> None:
+    blocker = tmp_path / "blocker"
+    blocker.write_text("not a directory", encoding="utf-8")
+    sink = JsonlSink(blocker / "ledger.jsonl")
+
+    for _ in range(5):
+        sink.write(make_event())
+
+    assert sink.sink_errors == 5
+    assert sink.degraded is True
+
+
+def test_jsonl_sink_fsync_is_off_by_default(tmp_path: Any) -> None:
+    path = tmp_path / "ledger.jsonl"
+    assert JsonlSink(path).fsync is False
+    assert JsonlSink(path, fsync=True).fsync is True
+    sink = JsonlSink(path, fsync=True)
+    sink.write(make_event())
+    sink.close()
+    assert not sink.degraded
+    assert len(path.read_text(encoding="utf-8").splitlines()) == 1
+
+
+def test_jsonl_sink_flushes_every_line_so_a_crash_costs_one_event(
+    tmp_path: Any,
+) -> None:
+    """The buffer is not the durability boundary; a closed file is.
+
+    The test cannot crash a process, so it asserts the mechanism: after a write
+    the line is already in the file, with no ``flush``/``close`` in between.
+    """
+    path = tmp_path / "ledger.jsonl"
+    sink = JsonlSink(path)
+    sink.write(make_event(model="already-there"))
+    assert [SpendEvent.from_dict(json.loads(line)).model
+            for line in path.read_text(encoding="utf-8").splitlines()] == ["already-there"]
+    sink.close()
+
+
+def test_jsonl_sink_rejects_a_path_it_cannot_use() -> None:
+    with pytest.raises(ValueError):
+        JsonlSink("")
+    with pytest.raises(TypeError):
+        JsonlSink(42)  # type: ignore[arg-type]
+
+
+def test_a_truncated_final_line_is_detectable_by_the_reader(tmp_path: Any) -> None:
+    """A torn write is the only corruption this sink can cause, and it is loud.
+
+    :class:`JsonlSink` stops appending after a failed write, so a partial object
+    can only ever be the last line and there can only ever be one. A reader finds
+    it at whichever stage can tell: ``json.loads`` refuses a fragment that is not
+    syntactically whole, and :meth:`SpendEvent.from_dict` refuses one that parses
+    but is missing a declared field, naming the fields it wanted. Neither stage
+    reloads a fragment as plausible-looking data, which is the property that
+    matters — a charge-back built on a silently repaired record is worse than a
+    charge-back with a hole in it.
+    """
+    path = tmp_path / "torn.jsonl"
+    sink = JsonlSink(path)
+    good = make_event(model="intact")
+    sink.write(good)
+    sink.write(make_event(model="torn"))
+    sink.close()
+
+    lines = path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 2
+    head, tail = lines[0], lines[1]
+    assert len(tail) > 200, "the test needs a long enough line to truncate"
+
+    # Stage one: a fragment cut mid-token is not JSON at all.
+    with pytest.raises(json.JSONDecodeError):
+        json.loads(tail[:120])
+    path.write_text(head + "\n" + tail[:120], encoding="utf-8")
+    assert len(path.read_text(encoding="utf-8").splitlines()) == 2
+
+    # Stage two: a fragment that happens to end on a field boundary parses, and
+    # from_dict still refuses it rather than filling the gap with defaults.
+    partial = dict(json.loads(tail))
+    del partial["cost"]
+    del partial["request_id"]
+    path.write_text(head + "\n" + json.dumps(partial), encoding="utf-8")
+    reread = path.read_text(encoding="utf-8").splitlines()
+    with pytest.raises(ValueError) as excinfo:
+        SpendEvent.from_dict(json.loads(reread[1]))
+    assert "cost" in str(excinfo.value) and "request_id" in str(excinfo.value)
+
+    # The intact line still reads, which is the whole recovery procedure.
+    assert SpendEvent.from_dict(json.loads(reread[0])) == good
 
 

@@ -37,14 +37,17 @@ quietly:
 """
 from __future__ import annotations
 
+import json
+import os
 import threading
 from collections import deque
-from typing import Protocol, runtime_checkable
+from typing import Protocol, TextIO, runtime_checkable
 
 from .schema import SpendEvent
 
 __all__ = [
     "DEFAULT_MEMORY_EVENTS",
+    "JsonlSink",
     "LedgerSink",
     "MemorySink",
     "NullSink",
@@ -174,5 +177,170 @@ class MemorySink:
 
     def __repr__(self) -> str:
         return f"MemorySink(maxlen={self._maxlen}, held={len(self)})"
+
+
+class JsonlSink:
+    """Append-only NDJSON: one JSON object per line, one line per event.
+
+    The durable path. Each line is ``json.dumps(event.to_dict(), sort_keys=True)``
+    plus a newline, UTF-8, LF-terminated whatever the platform: ``sort_keys``
+    makes a line byte-stable so two runs diff cleanly, and ``\\n`` keeps the file
+    one-object-per-line rather than one-object-per-platform-line.
+
+    Every line is flushed as it is written, matching the audit log's discipline,
+    so a crash costs the line in flight rather than the whole buffer. ``fsync``
+    is available for the case where losing the tail on a *machine* crash is
+    unacceptable, and is off by default because it costs a real disk round trip
+    per event.
+
+    **Failures degrade, they never raise.** A write that fails increments
+    :attr:`sink_errors`, sets :attr:`degraded`, and stops appending. Nothing is
+    retried: a retry per write turns a broken sink into a syscall per write, and
+    a sink that is broken is a thing an operator fixes, not something the request
+    path should keep discovering. The recovery point is a restart, and the
+    counter is what tells you it happened.
+
+    **A partial final line is possible, and it is the only corruption this sink
+    can cause.** A write interrupted between the kernel accepting part of the
+    line and the file being closed leaves a truncated object at the end of the
+    file. Because a failed sink stops appending, that fragment is always the
+    *last* line and there is exactly one of them. A reader recovers by parsing
+    line by line and treating an unparseable final line as a torn write — which
+    :meth:`~backstop.ledger.SpendEvent.from_dict` makes detectable rather than
+    silent, since a truncated payload is either missing declared fields or fails
+    its pattern checks and is refused with a message naming what was wrong. An
+    unparseable line anywhere *other* than the end is real corruption and must be
+    reported, never skipped.
+    """
+
+    def __init__(self, path: str | os.PathLike[str], *, fsync: bool = False) -> None:
+        try:
+            resolved = os.fspath(path)
+        except TypeError as exc:
+            raise TypeError(
+                f"path must be a str or PathLike, got {type(path).__name__}"
+            ) from exc
+        if not isinstance(resolved, str) or not resolved:
+            raise ValueError(f"path must be a non-empty str, got {resolved!r}")
+        self._path = resolved
+        self._fsync = bool(fsync)
+        self._handle: TextIO | None = None
+        self._errors = 0
+        self._degraded = False
+        self._lock = threading.Lock()
+
+    @property
+    def path(self) -> str:
+        """The file this sink appends to."""
+        return self._path
+
+    @property
+    def fsync(self) -> bool:
+        """Whether every line is also ``os.fsync``-ed. ``False`` by default."""
+        return self._fsync
+
+    @property
+    def sink_errors(self) -> int:
+        """Writes that failed, or were refused because the sink is degraded."""
+        with self._lock:
+            return self._errors
+
+    @property
+    def degraded(self) -> bool:
+        """Whether this sink has stopped appending after a failure.
+
+        ``True`` means the file is no longer a complete record of the events
+        this process submitted, and stays true until a new sink is built.
+        """
+        with self._lock:
+            return self._degraded
+
+    def write(self, event: SpendEvent) -> None:
+        """Append one line. Never raises; a failure degrades and is counted."""
+        try:
+            line = json.dumps(event.to_dict(), sort_keys=True) + "\n"
+        except Exception:
+            # Not an expected path — an event cannot serialise to nothing — but
+            # a caller that passed a non-event must not get an exception here.
+            with self._lock:
+                self._errors += 1
+                self._degraded = True
+            return
+        with self._lock:
+            if self._handle is None:
+                if self._degraded:
+                    self._errors += 1
+                    return
+                self._open_locked()
+                if self._handle is None:
+                    return  # _open_locked counted it
+            try:
+                self._handle.write(line)
+                self._handle.flush()
+                if self._fsync:
+                    os.fsync(self._handle.fileno())
+            except Exception:
+                self._degraded = True
+                self._errors += 1
+                self._drop_handle_locked()
+
+    def flush(self) -> None:
+        """Flush the line buffer, and ``fsync`` when configured. Never raises."""
+        with self._lock:
+            if self._handle is None:
+                return
+            try:
+                self._handle.flush()
+                if self._fsync:
+                    os.fsync(self._handle.fileno())
+            except Exception:
+                self._degraded = True
+                self._errors += 1
+                self._drop_handle_locked()
+
+    def close(self) -> None:
+        """Flush and close. Idempotent, and never raises."""
+        with self._lock:
+            if self._handle is None:
+                return
+            try:
+                self._handle.flush()
+                if self._fsync:
+                    os.fsync(self._handle.fileno())
+            except Exception:
+                self._degraded = True
+                self._errors += 1
+            self._drop_handle_locked()
+
+    def _open_locked(self) -> None:
+        """Open the file, creating parent directories. Caller holds the lock.
+
+        Opened on the first write rather than in ``__init__`` so that building a
+        configured ledger touches no filesystem until there is an event to record,
+        and so a bad path degrades the same way a bad write does. A failure here
+        is counted exactly once, by this method.
+        """
+        try:
+            parent = os.path.dirname(os.path.abspath(self._path))
+            os.makedirs(parent, exist_ok=True)
+            self._handle = open(self._path, "a", encoding="utf-8", newline="\n")
+        except Exception:
+            self._handle = None
+            self._degraded = True
+            self._errors += 1
+
+    def _drop_handle_locked(self) -> None:
+        """Close and forget the handle, so no later write can append after a
+        partial one. Caller holds the lock."""
+        handle, self._handle = self._handle, None
+        if handle is None:
+            return
+        try:
+            handle.close()
+        except Exception:
+            pass
+
+    def __repr__(self) -> str:
+        return f"JsonlSink(path={self._path!r}, fsync={self._fsync})"
 
 

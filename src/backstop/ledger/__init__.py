@@ -44,7 +44,7 @@ from .schema import (
     resolve_cost_type,
     utc_now,
 )
-from .sink import LedgerSink, MemorySink, NullSink
+from .sink import JsonlSink, LedgerSink, MemorySink, NullSink
 
 __all__ = [
     "EVENT_ID_RE",
@@ -57,6 +57,7 @@ __all__ = [
     "Attribution",
     "BudgetLedger",
     "CostBreakdown",
+    "JsonlSink",
     "LedgerSink",
     "MemorySink",
     "NullSink",
