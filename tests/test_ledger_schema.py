@@ -7,8 +7,11 @@ a scope survives an ``asyncio`` task boundary.
 from __future__ import annotations
 
 import asyncio
+import functools
 import inspect
 import json
+from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from dataclasses import FrozenInstanceError
 from datetime import datetime, timedelta, timezone
 
@@ -981,3 +984,72 @@ def test_documented_top_level_import_form_works():
             team="payments", feature="checkout-v2", agent="refund-bot"
         )
         assert current_attribution() == Attribution(team="payments", feature="checkout-v2")
+
+
+# ---------------------------------------------------------------------------
+# Context manager and executor caveats
+# ---------------------------------------------------------------------------
+
+
+def test_a_none_field_means_do_not_override():
+    with attribution(team="payments", feature="checkout-v2"):
+        with attribution(feature=None, agent="refund-bot"):
+            assert current_attribution() == Attribution(
+                team="payments", feature="checkout-v2", agent="refund-bot"
+            )
+
+
+def test_a_none_field_on_the_decorator_means_do_not_override():
+    @with_attribution(feature=None, agent="refund-bot")
+    def handle_refund():
+        return current_attribution()
+
+    with attribution(team="payments", feature="checkout-v2"):
+        assert handle_refund() == Attribution(
+            team="payments", feature="checkout-v2", agent="refund-bot"
+        )
+
+
+def test_the_scope_manager_is_single_use():
+    scope = attribution(team="payments")
+    with scope:
+        assert current_attribution().team == "payments"
+    with pytest.raises(RuntimeError, match="single use"):
+        with scope:
+            pass
+    assert current_attribution() == Attribution()
+
+
+def test_a_fresh_scope_is_built_for_each_block():
+    with attribution(team="payments"):
+        with attribution(feature="refunds"):
+            pass
+    assert current_attribution() == Attribution()
+
+
+def test_copy_context_propagates_attribution_into_a_worker_thread():
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with attribution(team="payments"):
+            bare = pool.submit(current_attribution).result()
+            copied = copy_context().run(current_attribution)
+            submitted = pool.submit(copy_context().run, current_attribution).result()
+    assert bare == Attribution()
+    assert copied == Attribution(team="payments")
+    assert submitted == Attribution(team="payments")
+
+
+def test_run_in_executor_needs_the_copied_context():
+    async def main():
+        loop = asyncio.get_running_loop()
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            with attribution(team="payments"):
+                bare = await loop.run_in_executor(pool, current_attribution)
+                context = copy_context()
+                copied = await loop.run_in_executor(
+                    pool, functools.partial(context.run, current_attribution)
+                )
+        return bare, copied
+
+    bare, copied = asyncio.run(main())
+    assert bare == Attribution()
+    assert copied == Attribution(team="payments")

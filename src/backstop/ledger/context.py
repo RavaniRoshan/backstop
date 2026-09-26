@@ -26,15 +26,23 @@ and the outer value is restored on exit, including when the body raises.
 
 Because it is a ``ContextVar``, an active scope follows ``asyncio`` tasks and
 any thread-pool submission that copies context — which is what the transport
-needs, since it is called from async code. A raw ``loop.run_in_executor`` call
-does *not* copy context; wrap the callable so it copies one.
+needs, since it is called from async code. A bare ``executor.submit`` does
+*not* copy context, and neither does ``loop.run_in_executor``, so the worker
+would record an empty attribution. Copy the context where the work is handed
+over:
+
+.. code-block:: python
+
+    ctx = contextvars.copy_context()
+    loop.run_in_executor(executor, ctx.run, blocking_call, arg)
+    ctx.run(lambda: some_function())
 """
 from __future__ import annotations
 
 import functools
 import inspect
-from collections.abc import Callable, Iterator
-from contextlib import AbstractContextManager, contextmanager
+from collections.abc import Callable
+from contextlib import AbstractContextManager
 from contextvars import ContextVar, Token
 from typing import Any, TypeVar, cast
 
@@ -59,24 +67,52 @@ def _enter(override: Attribution) -> Token:
     return _attribution_var.set(current_attribution().merge(override))
 
 
-def attribution(**fields: str) -> AbstractContextManager[Attribution]:
+class _AttributionScope(AbstractContextManager[Attribution]):
+    """One attribution scope, single use because it holds one token.
+
+    ``contextlib``'s generator context manager answers a re-entry attempt with an
+    ``AttributeError`` out of its own internals, so the scope is spelled out
+    here instead: entering twice says what happened and points at the fix.
+    """
+
+    def __init__(self, override: Attribution) -> None:
+        self._override = override
+        self._entered = False
+        self._token: Token | None = None
+
+    def __enter__(self) -> Attribution:
+        if self._entered:
+            raise RuntimeError(
+                "an attribution scope is single use; call attribution(...) again "
+                "for each block instead of reusing one"
+            )
+        self._entered = True
+        self._token = _enter(self._override)
+        return _attribution_var.get()
+
+    def __exit__(self, *exc_info: Any) -> None:
+        assert self._token is not None
+        _attribution_var.reset(self._token)
+        self._token = None
+
+
+def attribution(**fields: str | None) -> AbstractContextManager[Attribution]:
     """Scope attribution to a block, merging onto whatever is already active.
 
     Entering the scope yields the merged ``Attribution``, so a caller can assert
     on it or pass it on. The previous value is restored on exit, including on
     exception. Field names and value types are checked here, at the call, so a
     typo fails at the call site rather than at the start of the block.
+
+    The returned scope is single use: entering it twice raises ``RuntimeError``,
+    which is the one thing the ``AbstractContextManager`` type cannot say, so
+    build a fresh one per block.
+
+    A field passed as ``None`` means "do not override", so an outer value
+    survives it; an empty or all-whitespace string is likewise treated as unset
+    rather than as an instruction to erase the outer value.
     """
-    return _scope(Attribution.from_fields(**fields))
-
-
-@contextmanager
-def _scope(override: Attribution) -> Iterator[Attribution]:
-    token = _enter(override)
-    try:
-        yield _attribution_var.get()
-    finally:
-        _attribution_var.reset(token)
+    return _AttributionScope(Attribution.from_fields(**fields))
 
 
 def _deferred_decoration_message(kind: str, name: str) -> str:
@@ -120,7 +156,8 @@ def with_attribution(**fields: str | None) -> Callable[[_F], _F]:
     Works on sync and async callables. The merge is resolved per call, not per
     decoration, so a decorated function called inside an outer scope inherits
     that scope and its own fields win. Methods are ordinary functions here: the
-    receiver is passed through untouched.
+    receiver is passed through untouched. A field passed as ``None`` means "do
+    not override".
 
     A callable whose body does not run during the call — a generator function,
     an async generator function, or a plain function that returns a coroutine,
