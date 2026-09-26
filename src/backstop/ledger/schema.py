@@ -478,25 +478,34 @@ class SpendEvent:
     def from_dict(cls, payload: dict[str, Any]) -> "SpendEvent":
         """Rebuild an event from :meth:`to_dict` output, running validation again.
 
-        A key the schema does not declare is an error, not a field to ignore: a
-        typo in a persisted line would otherwise reload as a default and look
-        like real data.
+        The payload must carry exactly the declared fields. An undeclared key is
+        an error rather than a field to ignore, and a missing one is an error
+        rather than a default: a typo in a persisted line, or a truncated one,
+        would otherwise reload as plausible-looking data.
         """
         if not isinstance(payload, dict):
             raise TypeError(f"payload must be a mapping, got {type(payload).__name__}")
-        unknown = sorted(set(payload) - set(cls.__dataclass_fields__))
+        declared = set(cls.__dataclass_fields__)
+        present = set(payload)
+        unknown = sorted(present - declared)
         if unknown:
             raise ValueError(
                 f"unknown SpendEvent field(s) {unknown}; the schema declares "
-                f"{sorted(cls.__dataclass_fields__)}"
+                f"{sorted(declared)}"
             )
-        attribution_payload = payload.get("attribution") or {}
+        missing = sorted(declared - present)
+        if missing:
+            raise ValueError(
+                f"missing SpendEvent field(s) {missing}; every recorded line "
+                f"carries all {len(declared)} fields"
+            )
+        attribution_payload = payload["attribution"] or {}
         if not isinstance(attribution_payload, dict):
             raise TypeError(
                 "attribution must be a mapping, got "
                 f"{type(attribution_payload).__name__}"
             )
-        cost_payload = payload.get("cost")
+        cost_payload = payload["cost"]
         cost: "CostBreakdown | None" = None
         if cost_payload is not None:
             cost = cost_from_dict(cost_payload)

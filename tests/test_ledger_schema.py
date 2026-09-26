@@ -1343,3 +1343,40 @@ def test_a_non_string_field_never_reaches_a_derived_view():
             estimated=False,
             attribution=Attribution(team=1),
         )
+
+
+EVENT_FIELDS = tuple(SpendEvent.__dataclass_fields__)
+
+
+@pytest.mark.parametrize("name", EVENT_FIELDS)
+def test_from_dict_refuses_a_missing_field(name):
+    payload = make_event().to_dict()
+    del payload[name]
+    with pytest.raises(ValueError, match=name) as excinfo:
+        SpendEvent.from_dict(payload)
+    assert str(len(EVENT_FIELDS)) in str(excinfo.value)
+
+
+def test_from_dict_names_every_missing_field():
+    payload = make_event().to_dict()
+    for name in ("event_id", "occurred_at", "cost"):
+        del payload[name]
+    with pytest.raises(ValueError) as excinfo:
+        SpendEvent.from_dict(payload)
+    for name in ("event_id", "occurred_at", "cost"):
+        assert name in str(excinfo.value)
+
+
+def test_a_truncated_line_is_diagnosable_rather_than_a_bare_keyerror():
+    payload = make_event().to_dict()
+    del payload["event_id"]
+    with pytest.raises(ValueError) as excinfo:
+        SpendEvent.from_dict(payload)
+    assert not isinstance(excinfo.value, KeyError)
+
+
+def test_an_optional_field_set_to_none_is_still_present():
+    event = make_event(cost=None, request_id=None)
+    payload = event.to_dict()
+    assert payload["cost"] is None and payload["request_id"] is None
+    assert SpendEvent.from_dict(payload) == event
