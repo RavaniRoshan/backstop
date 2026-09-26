@@ -10,11 +10,10 @@ new event, which is why the endpoint is normalised once during construction and
 never again. :class:`Attribution` is frozen for the same reason plus one more —
 it is used as a dict key for per-attribution aggregation.
 
-``SpendEvent.cost`` is owned by the price catalog task and is left unpriced
-(``None``) until that task lands. The forward reference lives in one named
-place, :func:`resolve_cost_type`, which that task replaces with a plain import;
-``CostBreakdown`` is forward-declared under ``TYPE_CHECKING`` so this module
-stays import-cycle free.
+``SpendEvent.cost`` is owned by :mod:`backstop.pricing_catalog`. The class is
+forward-declared under ``TYPE_CHECKING`` so this module stays import-cycle
+free, and :func:`resolve_cost_type` is the one named place that reaches for it
+at runtime.
 """
 from __future__ import annotations
 
@@ -302,17 +301,18 @@ class Attribution:
         return cls(**values)
 
 
-def resolve_cost_type() -> type | None:
-    """Return the concrete ``CostBreakdown``, or ``None`` while it is pending.
+def resolve_cost_type() -> type:
+    """Return the concrete ``CostBreakdown``.
 
-    ``CostBreakdown`` does not exist yet — the price catalog task owns it, and
-    this is the one place in the module that reaches for it, so that task
-    replaces this function's body with a plain import and nothing else moves.
+    This was a forward reference while the price catalog was pending: it
+    returned ``None`` and the wire form of a cost was carried through as a plain
+    mapping. The catalog has landed, so this now imports the real class and
+    :func:`cost_from_dict` rebuilds it. The function survives as the one named
+    place in this module that reaches for the price catalog, so the dependency
+    stays a single line and the import stays out of module scope.
     """
-    try:
-        from ..pricing_catalog import CostBreakdown
-    except ImportError:
-        return None
+    from ..pricing_catalog import CostBreakdown
+
     return CostBreakdown
 
 
@@ -344,17 +344,14 @@ def cost_to_dict(cost: Any) -> dict[str, Any]:
 def cost_from_dict(payload: Any) -> Any:
     """Rebuild a cost from its wire form, the exact inverse of :func:`cost_to_dict`.
 
-    While ``CostBreakdown`` is still pending there is nothing to reconstruct, so
-    the wire form itself is the record: it is carried through unchanged, which
-    keeps the round trip symmetric and honest instead of failing on a class that
-    has not been written yet.
+    :func:`resolve_cost_type` names the class, so a stored line reloads as the
+    real :class:`~backstop.pricing_catalog.CostBreakdown` rather than as a
+    mapping — ``Decimal`` amounts in, ``Decimal`` amounts out, and the record
+    compares equal to the one that was written.
     """
     if not isinstance(payload, dict):
         raise TypeError(f"cost must be a mapping, got {type(payload).__name__}")
-    cost_type = resolve_cost_type()
-    if cost_type is None:
-        return dict(payload)
-    return cost_type.from_dict(payload)
+    return resolve_cost_type().from_dict(payload)
 
 
 @dataclass(frozen=True)

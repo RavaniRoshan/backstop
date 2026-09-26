@@ -15,6 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
 from dataclasses import FrozenInstanceError
 from datetime import datetime, timedelta, timezone
+from typing import Any
 from uuid import UUID
 
 import pytest
@@ -653,12 +654,12 @@ def test_from_dict_refuses_a_non_mapping_attribution():
 
 
 class CostStub:
-    """Stands in for ``CostBreakdown``, which the price catalog task owns."""
+    """A minimal cost-shaped object, to pin that the wire path is duck-typed."""
 
-    def __init__(self, payload: dict[str, str]) -> None:
+    def __init__(self, payload: dict[str, Any]) -> None:
         self.payload = payload
 
-    def to_dict(self) -> dict[str, str]:
+    def to_dict(self) -> dict[str, Any]:
         return dict(self.payload)
 
 
@@ -671,6 +672,7 @@ COST_WIRE = {
     "currency": "USD",
     "price_source": "bundled",
     "estimated_tokens": False,
+    "priced_components": ["input", "output"],
 }
 
 
@@ -715,9 +717,26 @@ def test_a_non_mapping_cost_on_the_wire_is_refused():
         SpendEvent.from_dict(payload)
 
 
-def test_the_cost_type_hook_is_the_one_thing_the_price_catalog_task_replaces():
-    assert resolve_cost_type() is None  # backstop.pricing_catalog does not exist yet
+def test_the_cost_type_hook_returns_the_real_breakdown():
+    from backstop.pricing_catalog import CostBreakdown
+
+    assert resolve_cost_type() is CostBreakdown
     assert resolve_cost_type.__doc__ and "price catalog" in resolve_cost_type.__doc__
+
+
+def test_a_cost_round_trips_through_the_hook_as_a_real_breakdown():
+    from decimal import Decimal
+
+    from backstop.pricing_catalog import CostBreakdown
+
+    cost = CostBreakdown.from_dict(COST_WIRE)
+    assert isinstance(cost.input_usd, Decimal)
+    assert cost.to_dict() == COST_WIRE
+    event = make_event(cost=cost)
+    reloaded = SpendEvent.from_dict(json.loads(json.dumps(event.to_dict())))
+    assert reloaded == event
+    assert type(reloaded.cost) is CostBreakdown
+    assert reloaded.cost.input_usd == Decimal("0.001000")
 
 
 def test_an_unpriced_event_carries_no_cost():
