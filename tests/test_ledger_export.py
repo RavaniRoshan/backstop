@@ -36,6 +36,7 @@ from backstop.ledger import (
     chargeback_totals,
     compute_cost,
 )
+from backstop.pricing_catalog import LEDGER_CONTEXT
 from backstop.ledger.export import (
     CSV_TERMINATOR,
     DEFAULT_GROUP_BY,
@@ -402,6 +403,45 @@ def test_unattributed_share_counts_only_the_groups_that_declared_nothing():
     teardown = totals.to_markdown()
     assert "is unattributed" in teardown
     assert "carries no price at all" in teardown
+
+
+def test_the_unattributed_percentage_names_the_figures_it_came_from():
+    """The share is computed on exact dollars and printed beside rounded ones.
+
+    ``0.01 / 0.15`` is 6.67%; the share of the exact sums is 4.29%. Computing it
+    from the exact figures is the right convention — rounding first would move
+    the answer by more than two points on a report this small — but printing one
+    figure beside the other without saying so is how a reader concludes the
+    report is wrong. Both the teardown and the JSON now carry the basis.
+    """
+    totals = chargeback_totals(build_chargeback(fixed_events()))
+    # The exact figures the share was actually computed from, kept as fields.
+    assert totals.unattributed_unrounded_usd == Decimal("0.006000")
+    assert totals.unrounded_total_usd == Decimal("0.140000")
+    # 0.006 / 0.140 = 0.042857... -> 0.0429, and 4.29% of it.
+    with decimal.localcontext(LEDGER_CONTEXT):
+        assert totals.unattributed_share == (
+            totals.unattributed_unrounded_usd / totals.unrounded_total_usd
+        ).quantize(Decimal("0.0001"), rounding=decimal.ROUND_HALF_UP)
+    # The printed pair genuinely does not divide to the printed percentage.
+    naive = (Decimal("0.01") / Decimal("0.15") * 100).quantize(Decimal("0.01"))
+    assert naive == Decimal("6.67") != totals.unattributed_share_pct
+
+    teardown = totals.to_markdown()
+    assert "0.006000 of 0.140000 to six decimal places" in teardown
+    assert "will not reproduce it exactly" in teardown
+    payload = json.loads(render_chargeback_json(build_chargeback(fixed_events()[:1]), totals))
+    assert payload["totals"]["unattributed_unrounded_usd"] == "0.006000"
+    assert "will not reproduce it exactly" in payload["totals"]["unattributed_share_basis"]
+
+
+def test_a_fully_attributable_window_does_not_quote_a_basis_it_has_no_gap_for():
+    """A clean window says so, and does not print a caveat about nothing."""
+    totals = chargeback_totals(build_chargeback(fixed_events()[:1]))
+    assert totals.unattributed_requests == 0
+    teardown = totals.to_markdown()
+    assert "is attributable" in teardown
+    assert "will not reproduce it exactly" not in teardown
 
 
 def test_a_clean_window_says_it_is_clean_rather_than_describing_a_gap():
@@ -1006,7 +1046,13 @@ def test_ledger_demo_prices_a_real_table_from_the_bundled_catalog():
     assert "**Total**" in markdown
     assert "of priced spend is" in markdown
     assert "1.54 of 34.56 (4.45%)" in markdown
+    # ...and the percentage says which figures it was computed from, because
+    # 1.54 / 34.56 is 4.46% and a reader who divides the printed dollars would
+    # otherwise conclude the report is wrong.
+    assert "1.539061 of 34.547570 to six decimal places" in markdown
+    assert Decimal("1.54") / Decimal("34.56") * 100 != Decimal("4.45")
     assert result.totals.total_usd == Decimal("34.56")
+    assert result.totals.unattributed_unrounded_usd == Decimal("1.539061")
     # One deliberate row has no price at all, and the demo says which model.
     unpriced = [row for row in result.rows if row.unpriced_requests]
     assert [row.price_source for row in unpriced] == [NO_VALUE]

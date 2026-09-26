@@ -500,7 +500,8 @@ def _teardown(result: LedgerDemoResult) -> str:
             f"unattributed** — {totals.unattributed_requests} of "
             f"{totals.request_count} requests declared no `team` and no `feature`, so "
             "nobody can be charged for that money. It is one row in the table, "
-            f"labelled `{UNATTRIBUTED}`, and it is the row a pivot table drops.",
+            f"labelled `{UNATTRIBUTED}`, and it is the row a pivot table drops. "
+            f"{totals.unattributed_share_basis}",
             f"- **{totals.unpriced_requests} requests "
             f"({totals.unpriced_share_pct}%) have no price at all** — "
             "`vendor-preview-2027` is not in the rate card. Their cost is *absent, "

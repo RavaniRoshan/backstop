@@ -540,6 +540,14 @@ class ChargebackTotals:
     of *priced* spend, because an unpriced request has no dollars to be a
     fraction of; ``unpriced_requests`` is reported next to it so the two gaps are
     never confused.
+
+    ``unattributed_usd`` and ``total_usd`` are the *displayed* cents and
+    ``unattributed_unrounded_usd`` and ``unrounded_total_usd`` the exact sums the
+    share was actually computed from. The two pairs differ by up to half a cent
+    per line, which is enough to move the quotient: dividing the printed 1.54 by
+    the printed 34.56 gives 4.46% where the exact figures give 4.45%.
+    :attr:`unattributed_share_basis` is the sentence that says so, and every
+    renderer that prints the percentage prints it with.
     """
 
     group_by: tuple[str, ...]
@@ -557,10 +565,31 @@ class ChargebackTotals:
     estimated_requests: int
     unattributed_requests: int
     unattributed_usd: Decimal
+    unattributed_unrounded_usd: Decimal
     unattributed_share: Decimal
     unpriced_components: tuple[str, ...]
     first_seen: str
     last_seen: str
+
+    @property
+    def unattributed_share_basis(self) -> str:
+        """The exact figures the unattributed share was computed from.
+
+        The share is ``unattributed_unrounded_usd / unrounded_total_usd`` at six
+        decimal places, while the dollars printed beside it are the displayed
+        cents. Rounding each side to cents first moves the quotient — dividing
+        1.54 by 34.56 gives 4.46% where the exact figures give 4.45% — so a
+        reader who does the arithmetic on the printed numbers concludes the
+        report is wrong. Computing the share from the exact sums is the right
+        convention and the only dishonest thing about it was not saying so, so
+        every renderer that prints the percentage prints this with it.
+        """
+        return (
+            f"The share is computed on the exact totals — "
+            f"{format(self.unattributed_unrounded_usd, 'f')} of "
+            f"{format(self.unrounded_total_usd, 'f')} to six decimal places — so "
+            "dividing the rounded dollars above will not reproduce it exactly."
+        )
 
     @property
     def unpriced_share(self) -> Decimal:
@@ -609,8 +638,10 @@ class ChargebackTotals:
             "estimated_requests": self.estimated_requests,
             "unattributed_requests": self.unattributed_requests,
             "unattributed_usd": money(self.unattributed_usd),
+            "unattributed_unrounded_usd": str(self.unattributed_unrounded_usd),
             "unattributed_share": format(self.unattributed_share, "f"),
             "unattributed_share_pct": format(self.unattributed_share_pct, "f"),
+            "unattributed_share_basis": self.unattributed_share_basis,
             "unpriced_share": format(self.unpriced_share, "f"),
             "unpriced_components": list(self.unpriced_components),
             "first_seen": self.first_seen,
@@ -632,7 +663,8 @@ class ChargebackTotals:
                 f"({self.unattributed_share_pct}%) of priced spend is "
                 f"unattributed** — {self.unattributed_requests} of "
                 f"{self.request_count} requests declared no value on any grouped "
-                "dimension, so nobody can be charged for that money."
+                f"dimension, so nobody can be charged for that money. "
+                f"{self.unattributed_share_basis}"
             )
         else:
             unattributed = (
@@ -918,6 +950,11 @@ def chargeback_totals(
         estimated_requests=estimated,
         unattributed_requests=unattributed_requests,
         unattributed_usd=unattributed_display.quantize(_REPORT_QUANTUM),
+        # The exact figure the share is computed from, kept beside the displayed
+        # one for the same reason ``unrounded_total_usd`` is: a percentage that
+        # cannot be reproduced from the numbers printed beside it invites the
+        # reader to conclude the report is wrong.
+        unattributed_unrounded_usd=unattributed_exact.quantize(_EXACT_QUANTUM),
         unattributed_share=_share(unattributed_exact, exact),
         unpriced_components=tuple(
             component for component in COST_COMPONENTS if component in components
