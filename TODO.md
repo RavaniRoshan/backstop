@@ -5,8 +5,8 @@ Mirrors `docs/planning/_build-plan.md`. Update the checkbox when a task is revie
 ## Tasks
 
 - [x] 1. Correctness fixes (credential leak, gate ticket leak, streaming circuit, async parity, async Redis reconcile)
-- [ ] 2. Truthfulness pass (README, docs, install.sh, llms.txt)
-- [ ] 3. Spend event schema + attribution context
+- [x] 2. Truthfulness pass (README, docs, install.sh, llms.txt)
+- [x] 3. Spend event schema + attribution context
 - [ ] 4. Price catalog + cost computation
 - [ ] 5. Ledger sinks (bounded writer, memory, JSONL)
 - [ ] 6. Transport integration, sync + async
