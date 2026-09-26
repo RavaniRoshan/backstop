@@ -16,6 +16,7 @@ import csv
 import io
 import json
 import re
+import socket
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -824,3 +825,116 @@ def test_a_file_read_says_both_counters_are_unknown_rather_than_zero(tmp_path):
     # Not a zero anywhere: a zero is a claim.
     assert "dropped_events: 0" not in lines
     assert "sink_errors: 0" not in lines
+
+
+# --------------------------------------------------------------------------
+# The demo
+# --------------------------------------------------------------------------
+
+
+def test_ledger_demo_is_byte_identical_across_two_runs():
+    from backstop.ledger.demo import run_demo
+
+    first = run_demo()
+    second = run_demo()
+    assert first.to_markdown() == second.to_markdown()
+    assert first.to_json() == second.to_json()
+    assert first.rows[0].total_usd == second.rows[0].total_usd
+    # And byte for byte, which is the claim the command makes on screen.
+    assert first.to_markdown().encode("utf-8") == second.to_markdown().encode("utf-8")
+
+
+def test_ledger_demo_prices_a_real_table_from_the_bundled_catalog():
+    from backstop.ledger.demo import DEMO_DAY, demo_events, run_demo
+
+    result = run_demo()
+    assert result.simulated is True
+    assert result.network_calls == 0
+    assert result.price_source == "bundled"
+    assert result.catalog_effective_from == DEMO_DAY
+    # Every dollar is Decimal money computed by the catalog, not a literal here.
+    for row in result.rows:
+        assert isinstance(row.total_usd, Decimal)
+        assert row.currency == "USD"
+        assert MONEY_CELL.match(money(row.total_usd))
+    # The rows the profiles describe, in dollars, largest first.
+    assert [(row.keys[0], money(row.total_usd)) for row in result.rows] == [
+        ("payments", "26.21"),
+        ("payments", "3.40"),
+        ("support", "1.76"),
+        ("search", "1.65"),
+        (UNATTRIBUTED, "1.54"),
+        ("search", "0.00"),
+    ]
+    assert result.unpriced_events == 34
+    assert result.priced_events == result.events - 34
+    assert result.delivery["lost"] == 0
+    assert result.delivery["written"] == result.events
+    markdown = result.to_markdown()
+    assert "# Backstop Ledger — Chargeback" in markdown
+    assert "**Total**" in markdown
+    assert "of priced spend is" in markdown
+    assert "1.54 of 34.56 (4.45%)" in markdown
+    assert result.totals.total_usd == Decimal("34.56")
+    # One deliberate row has no price at all, and the demo says which model.
+    unpriced = [row for row in result.rows if row.unpriced_requests]
+    assert [row.price_source for row in unpriced] == [NO_VALUE]
+    assert "vendor-preview-2027" in markdown
+    # The events are fixed, so their ids and timestamps are too.
+    events = demo_events()
+    assert len(events) == result.events
+    assert events[0].event_id == demo_events()[0].event_id
+    assert events[0].occurred_at.startswith(DEMO_DAY)
+
+
+def test_ledger_demo_makes_no_network_call_and_needs_no_key(monkeypatch):
+    from backstop.ledger.demo import run_demo
+
+    for name in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_BASE_URL", "HTTP_PROXY"):
+        monkeypatch.delenv(name, raising=False)
+
+    def refuse(*args: Any, **kwargs: Any):
+        raise AssertionError("the ledger demo must not touch the network")
+
+    monkeypatch.setattr(socket, "socket", refuse)
+    monkeypatch.setattr(socket, "create_connection", refuse)
+    result = run_demo()
+    assert result.events > 0
+    assert result.totals.total_usd == Decimal("34.56")
+
+
+def test_ledger_demo_json_has_money_as_strings_and_no_ansi():
+    from backstop.ledger.demo import run_demo
+
+    text = run_demo().to_json()
+    assert "\x1b[" not in text
+    payload = json.loads(text)
+    assert payload["simulated"] is True
+    assert payload["network_calls"] == 0
+    assert payload["rows"][0]["total_usd"] == "26.21"
+    assert payload["totals"]["total_usd"] == "34.56"
+    assert payload["revenue_rows"][0]["revenue_usd"] == "148230.00"
+    # The join in the demo shows a group missing on either side, visibly.
+    matches = {row["match"] for row in payload["revenue_rows"]}
+    assert matches == {MATCH_BOTH, MATCH_COST_ONLY, MATCH_REVENUE_ONLY}
+    absent = [row for row in payload["revenue_rows"] if row["match"] == MATCH_REVENUE_ONLY]
+    assert absent and absent[0]["margin_usd"] is None
+    assert absent[0]["revenue_usd"] == "12000.00"
+
+
+def test_ledger_demo_honours_a_custom_grouping():
+    from backstop.ledger.demo import run_demo
+
+    result = run_demo(group_by=("team",))
+    assert result.group_by == ("team",)
+    assert all(len(row.keys) == 1 for row in result.rows)
+    # The unattributed dollars are one row whichever way it is grouped.
+    assert result.rows[-1].keys == (UNATTRIBUTED,)
+    assert result.rows[-1].request_count == 69
+    markdown = result.to_markdown()
+    assert "| team | request_count |" in markdown
+    # The revenue map is keyed on team,feature, so a team grouping gets no join
+    # rather than one aggregated by guesswork.
+    assert result.revenue_csv == ""
+    assert "no join for this grouping" in markdown
+    assert result.totals.request_count == result.events
