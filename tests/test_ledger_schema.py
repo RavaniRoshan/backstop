@@ -186,7 +186,8 @@ def test_occurred_at_is_rfc3339_utc_with_microsecond_precision():
     assert event.occurred_at.endswith("Z")
     parsed = datetime.strptime(event.occurred_at, "%Y-%m-%dT%H:%M:%S.%fZ")
     assert parsed.replace(tzinfo=timezone.utc).utcoffset() == timedelta(0)
-    assert abs((datetime.now(timezone.utc) - parsed.replace(tzinfo=timezone.utc))) < timedelta(seconds=5)
+    elapsed = datetime.now(timezone.utc) - parsed.replace(tzinfo=timezone.utc)
+    assert abs(elapsed) < timedelta(seconds=5)
 
 
 def test_occurred_at_matches_the_exported_regex():
@@ -253,7 +254,13 @@ def test_every_documented_outcome_is_accepted(outcome):
 # SpendEvent type validation
 # ---------------------------------------------------------------------------
 
-COUNT_FIELDS = ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "retries")
+COUNT_FIELDS = (
+    "input_tokens",
+    "output_tokens",
+    "cache_read_tokens",
+    "cache_write_tokens",
+    "retries",
+)
 
 
 @pytest.mark.parametrize("name", COUNT_FIELDS)
@@ -1139,3 +1146,36 @@ def test_the_schema_constants_are_reachable_from_the_package():
         "queue_timeout",
         "fallback",
     )
+
+
+def test_the_documented_recipe_for_a_deferred_body_scopes_that_body():
+    def stream_refunds(handle):
+        def events():
+            with attribution(agent="refund-bot"):
+                yield current_attribution()
+
+        return [handle(event) for event in events()]
+
+    seen = stream_refunds(lambda active: active.agent)
+    assert seen == ["refund-bot"]
+    assert current_attribution() == Attribution()
+
+
+def test_the_documented_recipe_for_a_deferred_coroutine_scopes_that_body():
+    async def stream_refunds(handle):
+        async def run():
+            with attribution(agent="refund-bot"):
+                return await handle()
+
+        return asyncio.create_task(run())
+
+    async def main():
+        async def handle():
+            await asyncio.sleep(0)
+            return current_attribution()
+
+        task = await stream_refunds(handle)
+        return await task
+
+    assert asyncio.run(main()) == Attribution(agent="refund-bot")
+    assert current_attribution() == Attribution()

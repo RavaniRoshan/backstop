@@ -134,7 +134,12 @@ def _reject_deferred_body(result: Any, func: Callable[..., Any]) -> None:
     ``asyncio.Future``/``Task`` is allowed through: the work was scheduled
     inside the scope, and the task copied the context there.
     """
-    if not (inspect.iscoroutine(result) or inspect.isgenerator(result) or inspect.isasyncgen(result)):
+    deferred = (
+        inspect.iscoroutine(result)
+        or inspect.isgenerator(result)
+        or inspect.isasyncgen(result)
+    )
+    if not deferred:
         return
     for closer in ("aclose", "close"):
         finish = getattr(result, closer, None)
@@ -162,20 +167,23 @@ def with_attribution(**fields: str | None) -> Callable[[_F], _F]:
     A callable whose body does not run during the call — a generator function,
     an async generator function, or a plain function that returns a coroutine,
     generator or async generator — is refused with ``TypeError`` rather than
-    silently leaving the ledger unattributed. Scope the deferred body itself::
+    silently leaving the ledger unattributed. Scope the deferred body instead of
+    the function that hands it back::
 
-        @with_attribution(agent="refund-bot")
         def stream_refunds(ticket):
             def events():
                 with attribution(agent="refund-bot"):
-                    yield current_attribution()
+                    yield self._handle(ticket)
+
             return events()
     """
     override = Attribution.from_fields(**fields)
 
     def decorate(func: _F) -> _F:
         if inspect.isgeneratorfunction(func):
-            raise TypeError(_deferred_decoration_message("generator function", func.__qualname__))
+            raise TypeError(
+                _deferred_decoration_message("generator function", func.__qualname__)
+            )
         if inspect.isasyncgenfunction(func):
             raise TypeError(
                 _deferred_decoration_message("async generator function", func.__qualname__)
