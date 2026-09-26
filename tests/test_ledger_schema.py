@@ -10,6 +10,7 @@ import asyncio
 import functools
 import inspect
 import json
+import textwrap
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
 from dataclasses import FrozenInstanceError
@@ -1233,17 +1234,47 @@ def test_the_schema_constants_are_reachable_from_the_package():
     )
 
 
-def test_the_documented_recipe_for_a_deferred_body_scopes_that_body():
-    def stream_refunds(handle):
-        def events():
-            with attribution(agent="refund-bot"):
-                yield current_attribution()
+# Anchored on one line of the docstring: a reword that drops the marker fails here.
+RECIPE_MARKER = "the function that hands it back::"
 
-        return [handle(event) for event in events()]
 
-    seen = stream_refunds(lambda active: active.agent)
-    assert seen == ["refund-bot"]
+def docstring_recipe() -> str:
+    """Return the deferred-body recipe from the shipped docstring, verbatim.
+
+    Extracted rather than retyped on purpose: a test that pins a lookalike of
+    the recipe is how the shipped one shipped with a ``self`` in it.
+    """
+    doc = with_attribution.__doc__ or ""
+    assert RECIPE_MARKER in doc, "the recipe marker is gone from with_attribution"
+    block = doc.split(RECIPE_MARKER, 1)[1]
+    lines = block.splitlines()
+    start = next(index for index, line in enumerate(lines) if line.strip())
+    return textwrap.dedent("\n".join(lines[start:])).rstrip() + "\n"
+
+
+def test_the_shipped_recipe_runs_verbatim_and_scopes_the_deferred_body():
+    namespace: dict = {"attribution": attribution}
+    exec(compile(docstring_recipe(), "<with_attribution docstring>", "exec"), namespace)
+    stream_refunds = namespace["stream_refunds"]
+
+    def handle(ticket):
+        return current_attribution(), ticket
+
+    produced = list(stream_refunds(handle, "ticket-1"))
+
+    assert [(active.agent, ticket) for active, ticket in produced] == [
+        ("refund-bot", "ticket-1")
+    ]
     assert current_attribution() == Attribution()
+
+
+def test_the_shipped_recipe_is_a_generator_the_decorator_would_have_refused():
+    namespace: dict = {"attribution": attribution}
+    exec(compile(docstring_recipe(), "<with_attribution docstring>", "exec"), namespace)
+    body = namespace["stream_refunds"](lambda ticket: current_attribution(), "ticket-1")
+
+    with pytest.raises(TypeError, match="generator"):
+        with_attribution(agent="refund-bot")(lambda: body)()
 
 
 def test_the_documented_recipe_for_a_deferred_coroutine_scopes_that_body():

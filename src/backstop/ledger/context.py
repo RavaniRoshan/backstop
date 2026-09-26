@@ -170,10 +170,10 @@ def with_attribution(**fields: str | None) -> Callable[[_F], _F]:
     silently leaving the ledger unattributed. Scope the deferred body instead of
     the function that hands it back::
 
-        def stream_refunds(ticket):
+        def stream_refunds(handle, ticket):
             def events():
                 with attribution(agent="refund-bot"):
-                    yield self._handle(ticket)
+                    yield handle(ticket)
 
             return events()
     """
