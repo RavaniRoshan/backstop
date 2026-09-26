@@ -409,6 +409,15 @@ class ChargebackRow:
     catalog does not know their model. Their tokens are counted and their dollars
     are absent, which is a different thing from a zero.
 
+    ``estimated_requests`` counts events whose token counts are a local estimate
+    rather than a provider report — no usage at all, or only an aggregate — so
+    their cost is a floor rather than a measurement. It covers the same
+    population as :attr:`unpriced_requests` and :attr:`request_count`, and the
+    two may overlap: an estimated request on a model with no rate is in both, and
+    its dollars are absent rather than merely a floor. Counting only the priced
+    ones would make the two columns incomparable, which is the one thing a
+    reader of an honesty column is entitled to assume they are not.
+
     ``unpriced_components`` names the billable components this group carried
     tokens for but had no published rate for — a model with no cache-write rate
     charges the cache write at zero *and says so*. Its members are a subset of
@@ -777,12 +786,21 @@ class _Bucket:
             self.first_seen = event.occurred_at
         if event.occurred_at > self.last_seen:
             self.last_seen = event.occurred_at
+        # Counted before the cost is looked at, and deliberately: an estimated
+        # request is estimated whether or not a rate was found for it, and
+        # counting only the priced ones made this column's population a strict
+        # subset of ``unpriced_requests``. Two honesty columns with two different
+        # denominators is the mistake the columns exist to prevent — a reader
+        # adding them, or dividing one by the other, would be working from two
+        # different populations. They may now overlap: an estimated request with
+        # no published rate is counted in both, and is exactly the request whose
+        # dollars are the weakest figure in the report.
+        if event.estimated:
+            self.estimated += 1
         cost = event.cost
         if cost is None:
             self.unpriced += 1
             return
-        if event.estimated:
-            self.estimated += 1
         self.sources.add(cost.price_source)
         self.exact_total += cost.total_usd
         # A component is a gap only when the request actually carried tokens for
@@ -815,6 +833,10 @@ def build_chargeback(
     whose ``cost.currency`` is not the requested ``currency`` is refused rather
     than summed, because adding two currencies produces a number that is not
     money in either of them.
+
+    ``estimated_requests`` and ``unpriced_requests`` count over the same events
+    and may overlap — see :class:`ChargebackRow` — so both are shares of
+    ``request_count`` and neither is a subset of the other.
 
     Ordering is ``total_usd`` descending with the rendered group key as the
     tie-break, so two runs over the same events produce the same table in the

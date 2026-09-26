@@ -463,11 +463,16 @@ class LedgerDemoResult:
 
 
 def _teardown(result: LedgerDemoResult) -> str:
-    """The three numbers a CFO asks for, phrased as what they are.
+    """The numbers a CFO asks for, phrased as what they are.
 
     The unattributed share is stated as a share of *priced* spend, the unpriced
     count is stated as a hole of unknown size rather than as zero, and the
     unpriced component list is stated as a floor rather than as a measurement.
+
+    The two "weaker than a measurement" counts are said to overlap rather than
+    added: an estimated request whose model has no rate is in both, and its
+    dollars are absent rather than merely a floor. Adding them would double-count
+    exactly the requests whose figures are the least trustworthy.
     """
     totals = result.totals
     gap = (
@@ -489,7 +494,10 @@ def _teardown(result: LedgerDemoResult) -> str:
     estimated = (
         f"{totals.estimated_requests} of {totals.request_count} requests carry tokens "
         "Backstop estimated locally because the provider reported no usage, so "
-        "their cost is a floor too."
+        "their cost is a floor too. That count and the unpriced one are not "
+        "disjoint: a request that is both estimated and unpriced is in each, and "
+        "its cost is absent rather than a floor, which is the weakest figure in "
+        "this report."
         if totals.estimated_requests
         else "No request in this window rests on an estimated token count."
     )
