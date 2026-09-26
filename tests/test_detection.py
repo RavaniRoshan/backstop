@@ -1431,3 +1431,184 @@ def test_observe_returns_a_list_for_a_stream_of_random_malformed_records() -> No
             assert signal.observed > signal.threshold
     assert det.key_count() <= len(teams) + 1
     assert det.sample_count() <= det.key_count() * 8
+
+
+# ---------------------------------------------------------------------------
+# the key bound: LRU eviction, and a counter for it
+# ---------------------------------------------------------------------------
+
+
+def _bounded(max_keys: int = 2, **overrides) -> RunawayDetector:
+    config = DetectionConfig(
+        enabled=True, window_size=4, min_samples=2, max_keys=max_keys, **overrides
+    )
+    return RunawayDetector(config, time_fn=time.monotonic)
+
+
+def test_a_key_beyond_the_bound_is_dropped_rather_than_retained():
+    det = _bounded()
+    for index in range(2):
+        det.observe(priced_event(attribution=Attribution(team=f"team-{index}")))
+    assert det.key_count() == 2
+    det.observe(priced_event(attribution=Attribution(team="team-2")))
+    assert det.key_count() == 2
+    assert det.sample_count() <= 2 * det.max_window()
+
+
+def test_the_evicted_key_is_the_least_recently_observed_one():
+    """LRU, and "observed" is the recency that counts — not insertion order.
+
+    Feeding a, b, a, c leaves b as the key that has gone longest without being
+    seen, so b is what goes.
+    """
+    det = _bounded()
+    a = Attribution(team="a")
+    b = Attribution(team="b")
+    c = Attribution(team="c")
+    det.observe(priced_event(attribution=a))
+    det.observe(priced_event(attribution=b))
+    det.observe(priced_event(attribution=a))  # a is now the most recent
+    det.observe(priced_event(attribution=c))
+    assert det.window_len(a) == 2
+    assert det.window_len(b) == 0
+    assert det.window_len(c) == 1
+
+
+def test_a_read_does_not_make_a_key_recent():
+    """``features`` is documented as a pure read, and eviction now depends on it.
+
+    Same stream as the LRU test except that ``a`` is read rather than re-observed,
+    so ``a`` is still the least recently *observed* key and ``a`` is what goes.
+    If a diagnostic call promoted a key, then whether a baseline survived would
+    depend on who looked at it.
+    """
+    det = _bounded()
+    a = Attribution(team="a")
+    b = Attribution(team="b")
+    det.observe(priced_event(attribution=a))
+    det.observe(priced_event(attribution=b))
+    assert det.features(a) is not None
+    det.observe(priced_event(attribution=Attribution(team="c")))
+    assert det.window_len(a) == 0
+    assert det.window_len(b) == 1
+
+
+def test_every_eviction_is_counted():
+    det = _bounded()
+    assert det.evictions == 0
+    for index in range(5):
+        det.observe(priced_event(attribution=Attribution(team=f"team-{index}")))
+    # Five distinct keys into a bound of two: the first three are dropped.
+    assert det.evictions == 3
+    assert det.key_count() == 2
+
+
+def test_the_key_bound_is_configurable_and_validated():
+    assert DetectionConfig().max_keys == 1024
+    assert _bounded(max_keys=8).max_keys() == 8
+    with pytest.raises(ValueError, match="max_keys must be >= 1"):
+        DetectionConfig(max_keys=0)
+    with pytest.raises(TypeError, match="max_keys must be an int"):
+        DetectionConfig(max_keys=True)
+
+
+def test_a_high_cardinality_stream_stays_bounded():
+    """The reported failure: one attribution per request grew without limit.
+
+    5,000 requests with 5,000 distinct attributions gave 5,000 keys. The bound
+    has to hold for a stream nobody is deduplicating, which is the shape a
+    per-session attribution actually has in production.
+    """
+    det = RunawayDetector(
+        DetectionConfig(enabled=True, window_size=8, min_samples=8, max_keys=64),
+        time_fn=time.monotonic,
+    )
+    for index in range(5_000):
+        det.observe(priced_event(attribution=Attribution(session=f"s-{index}")))
+    assert det.key_count() == 64
+    assert det.sample_count() <= 64 * 8
+    assert det.evictions == 5_000 - 64
+
+
+def test_a_dropped_key_starts_cold_again_rather_than_reporting_on_nothing():
+    """What an eviction costs, asserted: silence until the window refills.
+
+    An evicted key that kept reporting would be worse than one that goes quiet —
+    it would compare this request against a baseline built from a different
+    period of the run.
+    """
+    det = _bounded()
+    cold = Attribution(team="cold")
+    for _ in range(4):
+        det.observe(priced_event(attribution=cold))
+    # Push it out with three other keys, then come back to it.
+    for index in range(3):
+        det.observe(priced_event(attribution=Attribution(team=f"filler-{index}")))
+    assert det.window_len(cold) == 0
+    assert det.observe(priced_event(attribution=cold)) == []
+    assert det.features(cold) is not None
+    assert det.features(cold).samples == 1
+
+
+def test_the_eviction_counter_reaches_the_signal_sink():
+    """A sink that only records signals still works, and one that wants
+    evictions is told about every one of them."""
+    seen: list[object] = []
+
+    class Recorder:
+        def record(self, signal: DetectionSignal) -> None:
+            return None
+
+        def evicted(self, key: Attribution) -> None:
+            seen.append(key)
+
+    det = RunawayDetector(
+        DetectionConfig(enabled=True, window_size=4, min_samples=2, max_keys=1),
+        time_fn=time.monotonic,
+        signal_sink=Recorder(),
+    )
+    det.observe(priced_event(attribution=Attribution(team="a")))
+    det.observe(priced_event(attribution=Attribution(team="b")))
+    assert seen == [Attribution(team="a")]
+    assert det.evictions == 1
+
+
+def test_a_sink_without_the_optional_hook_is_asked_nothing():
+    class Minimal:
+        def __init__(self) -> None:
+            self.recorded: list[DetectionSignal] = []
+
+        def record(self, signal: DetectionSignal) -> None:
+            self.recorded.append(signal)
+
+    sink = Minimal()
+    det = RunawayDetector(
+        DetectionConfig(enabled=True, window_size=4, min_samples=2, max_keys=1),
+        time_fn=time.monotonic,
+        signal_sink=sink,
+    )
+    det.observe(priced_event(attribution=Attribution(team="a")))
+    det.observe(priced_event(attribution=Attribution(team="a")))
+    det.observe(priced_event(attribution=Attribution(team="b")))
+    assert det.evictions == 1
+    assert sink.recorded  # and it still records what it was asked to
+
+
+def test_a_sink_whose_eviction_hook_raises_does_not_fail_a_request():
+    class Hostile:
+        def record(self, signal: DetectionSignal) -> None:
+            return None
+
+        def evicted(self, key: Attribution) -> None:
+            raise RuntimeError("telemetry is down")
+
+    det = RunawayDetector(
+        DetectionConfig(enabled=True, window_size=4, min_samples=2, max_keys=1),
+        time_fn=time.monotonic,
+        signal_sink=Hostile(),
+    )
+    det.observe(priced_event(attribution=Attribution(team="a")))
+    det.observe(priced_event(attribution=Attribution(team="b")))
+    # Counted in the detector even though the reporter never got the news.
+    assert det.evictions == 1
+    assert det.errors == 0

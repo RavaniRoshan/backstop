@@ -54,15 +54,17 @@ no-op when ``enabled`` is false. The work it does when enabled is O(window):
 one pass to reduce, at most two sorts of at most ``window_size`` floats, and the
 mediains that come from them. The clock is read *outside* the lock, so a
 caller-supplied ``time_fn`` cannot serialise requests or deadlock against one.
-Memory is ``window_size`` samples per distinct attribution key and nothing else
-that grows — the shadow log is a bounded ring.
+Memory is ``window_size`` samples for at most ``max_keys`` distinct attribution
+keys and nothing else that grows — the shadow log is a bounded ring, and the key
+count is evicted least-recently-used with every eviction counted, because a
+dropped key is a key whose baseline silently resets.
 """
 from __future__ import annotations
 
 import os
 import threading
 import time
-from collections import deque
+from collections import OrderedDict, deque
 from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal
@@ -408,8 +410,10 @@ class RunawayDetector:
 
     A key's window is a ``deque(maxlen=window_size)``, so per-key memory is
     capped at construction and cannot grow however long the run continues. The
-    number of distinct keys is the one dimension this class does not cap: see
-    :meth:`key_count` for the honest statement of what that means.
+    *number* of keys is capped too, at ``max_keys``, because ``window_size``
+    alone bounds one key and a deployment that attributes per session would
+    otherwise hold one window per request for the life of the process — see
+    :meth:`key_count` and :meth:`evictions`.
     """
 
     def __init__(
@@ -422,11 +426,16 @@ class RunawayDetector:
         self._config = config if config is not None else DetectionConfig()
         self._time_fn = time_fn
         self._signal_sink = signal_sink
-        self._windows: dict[Attribution, deque[_Sample]] = {}
+        # Ordered so the least recently *observed* key can be dropped without a
+        # second structure to keep in step. Recency is advanced by observation
+        # only, so a read (``features``, ``window_len``) never changes what
+        # eviction would drop.
+        self._windows: OrderedDict[Attribution, deque[_Sample]] = OrderedDict()
         self._shadow = self.shadow_enabled(self._config.shadow)
         self._log: deque[DetectionSignal] = deque(maxlen=SHADOW_LOG_SIZE)
         self._counts: dict[str, int] = dict.fromkeys(SIGNAL_KINDS, 0)
         self._errors = 0
+        self._evictions = 0
         self._lock = threading.Lock()
 
     # -- the interface ----------------------------------------------------
@@ -490,17 +499,21 @@ class RunawayDetector:
             return 0 if window is None else len(window)
 
     def key_count(self) -> int:
-        """Return how many attribution keys are being tracked.
+        """Return how many attribution keys are being tracked. Never above ``max_keys``.
 
-        Per-key memory is capped at ``window_size`` samples by construction, so
-        the detector's total footprint is ``window_size`` times this number. A
-        caller with unboundedly many distinct attributions — one per request,
-        say — needs to bound it upstream; this class deliberately does not
-        evict, because a silently dropped key is a key whose baseline silently
-        resets, and a detector that forgets is worse than one that grows.
+        Per-key memory is capped at ``window_size`` samples and the number of keys
+        is capped at :meth:`max_keys`, so the detector's total footprint is
+        ``window_size * max_keys`` events whatever the traffic does. When a
+        caller really does have more live keys than that, the excess is dropped
+        least-recently-used — see :meth:`evictions` for what dropping costs and
+        why it is counted rather than done quietly.
         """
         with self._lock:
             return len(self._windows)
+
+    def max_keys(self) -> int:
+        """Return the key bound: the most distinct attributions held at once."""
+        return self._config.max_keys
 
     def sample_count(self) -> int:
         """Return the total number of retained events across every key.
@@ -537,6 +550,23 @@ class RunawayDetector:
         return self._shadow
 
     @property
+    def evictions(self) -> int:
+        """How many attribution keys have been dropped to stay inside the bound.
+
+        Non-zero means the key bound is below the number of live keys, which has
+        a cost worth knowing about: an evicted key's window is gone, so the next
+        request for it starts a cold window and the detector says nothing about
+        that key again until it has ``min_samples`` events. **This is why the
+        bound is visible rather than silent** — a detector that forgot is
+        indistinguishable from a healthy one, and the two failures look nothing
+        alike in a dashboard. Alert on it (or read it) and raise
+        ``max_keys``; the alternative is a process whose memory grows with its
+        request count.
+        """
+        with self._lock:
+            return self._evictions
+
+    @property
     def errors(self) -> int:
         """How many observations were refused and counted.
 
@@ -567,17 +597,37 @@ class RunawayDetector:
             return []
 
         sample = self._sample(event, now)
+        evicted: list[Attribution] = []
+        cold = False
         with self._lock:
             window = self._windows.get(attribution)
             if window is None:
                 window = deque(maxlen=self._config.window_size)
                 self._windows[attribution] = window
+                # The bound holds on *keys*, so it can only be crossed by the
+                # insert above, and it is enforced here rather than at the end of
+                # the measurement: a window that has just been dropped must not
+                # be measured once on the way out.
+                evicted = self._evict_locked()
+            else:
+                # Observation is what makes a key recent. Reads deliberately do
+                # not promote, so ``features`` stays a pure read of what the
+                # detector knows and cannot change what eviction would drop.
+                self._windows.move_to_end(attribution)
             window.append(sample)
             if len(window) < self._config.min_samples:
                 # A cold detector is silent. Nothing is measured and nothing is
                 # allocated past the sample itself.
-                return []
-            reading = self._measure(window)
+                cold = True
+            else:
+                reading = self._measure(window)
+
+        # Reported outside the lock, like the signal sink below: eviction is
+        # bookkeeping and a reporter that blocks must not hold the one lock
+        # every other request needs.
+        self._notify_evicted(evicted)
+        if cold:
+            return []
 
         # Signals and the shadow bookkeeping are built outside the lock: signal
         # construction touches a caller-supplied sink, and the lock is the one
@@ -586,6 +636,46 @@ class RunawayDetector:
         if signals:
             self._record(signals)
         return signals
+
+    def _evict_locked(self) -> list[Attribution]:
+        """Drop least-recently-observed keys until the key bound holds.
+
+        Caller holds the lock. Returns the keys dropped, so the caller can report
+        them from outside it: the count is what makes the bound's cost visible,
+        and reporting it is a telemetry call that a sink may block on.
+
+        A dropped key's window goes with it, which is the whole cost of the
+        policy: that key is cold again and silent until it has ``min_samples``
+        events. Counting every drop is the price of being allowed to do it.
+        """
+        dropped: list[Attribution] = []
+        bound = self._config.max_keys
+        while len(self._windows) > bound:
+            key, _window = self._windows.popitem(last=False)
+            self._evictions += 1
+            dropped.append(key)
+        return dropped
+
+    def _notify_evicted(self, keys: list[Attribution]) -> None:
+        """Hand evicted keys to a signal sink that asked for them.
+
+        ``evicted`` is the optional second half of the sink contract, read with
+        ``getattr`` and defaulted, for the same reason ``sink_errors`` is an
+        optional member of a ledger sink: the detector has to keep working with a
+        sink that only knows how to record signals. A sink that raises is
+        swallowed here too — an eviction that fails to be reported is still
+        counted in :attr:`evictions`, so nothing is lost but the alert.
+        """
+        if not keys or self._signal_sink is None:
+            return
+        notify = getattr(self._signal_sink, "evicted", None)
+        if notify is None:
+            return
+        for key in keys:
+            try:
+                notify(key)
+            except Exception:
+                pass
 
     @staticmethod
     def _sample(event: Any, at: float) -> _Sample:

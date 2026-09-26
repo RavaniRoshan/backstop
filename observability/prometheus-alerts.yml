@@ -36,3 +36,35 @@ groups:
         annotations:
           summary: Backstop retry rate is elevated
           description: Provider errors, rate limits, or timeouts may be increasing.
+
+      # A detection signal at critical severity is a runaway, or a threshold
+      # that is too tight. The counter carries detector and severity as labels
+      # and deliberately not the attribution key, so this stays one series
+      # whatever the number of tenants.
+      - alert: BackstopRunawaySpendSignal
+        expr: sum by (severity) (increase(backstop_detection_signals_total{severity="critical"}[15m])) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: Backstop raised a critical runaway-spend signal
+          description: >-
+            A key crossed a detection threshold by more than 4x. Read
+            backstop_detection_signal_observed to see by how much, and raise or
+            lower the matching threshold in BackstopConfig.
+
+      # Eviction means the key bound is below the number of live attribution
+      # keys: those keys are now cold, so the detector has stopped reporting on
+      # them until each one refills its window. Silent without this rule.
+      - alert: BackstopDetectionKeyEvictions
+        expr: sum(increase(backstop_detection_evictions_total[15m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Backstop is evicting attribution keys from the detector
+          description: >-
+            The runaway-spend detector dropped a key to stay inside
+            detection_max_keys, which resets that key's baseline and silences
+            the detector for it until it refills. Raise detection_max_keys if
+            this is not expected.

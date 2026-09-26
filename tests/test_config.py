@@ -122,6 +122,7 @@ DETECTION_KNOBS = (
     # Above the default min_samples, which a smaller window would trip.
     ("detection_window_size", "window_size", 9),
     ("detection_min_samples", "min_samples", 3),
+    ("detection_max_keys", "max_keys", 64),
 )
 
 
@@ -159,6 +160,7 @@ def test_the_default_detection_config_is_exactly_the_detector_default():
         ("detection_context_growth_threshold", -2.0, "context_growth_threshold"),
         ("detection_window_size", 0, "window_size"),
         ("detection_min_samples", 1, "min_samples"),
+        ("detection_max_keys", 0, "max_keys"),
         ("detection_shadow", "yes", "shadow"),
     ],
 )

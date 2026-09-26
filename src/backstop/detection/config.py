@@ -30,6 +30,19 @@ quiet. A ``baseline_multiplier`` below 1.0 does not mean "alert earlier", it
 means "alert when tokens *fall*". A ``min_samples`` larger than the window is
 not a slow detector, it is a detector that can never speak, and it would look
 exactly like a healthy one. Each of those is refused at construction.
+``max_keys`` is ``DEFAULT_MAX_KEYS``
+    The number of distinct attribution keys the detector will track at once.
+    ``window_size`` bounds the samples in one key's window; this bounds the
+    *number of keys*, which is the only other thing that grows. A deployment
+    that attributes per session — one ``Attribution(session=uuid())`` per
+    request — would otherwise accumulate one window per request forever, and
+    pay the most for it: a signal's key percent-encodes the whole attribution on
+    every firing, so an unbounded key count is also an unbounded scrape cost.
+    The bound is LRU and the eviction is *counted* rather than silent, because a
+    dropped key is a key whose baseline restarts from cold and stops reporting
+    for ``min_samples`` requests. A deployment with more live keys than the
+    bound should raise it: the cost of the bound is measured in ``evictions``,
+    and the cost of no bound is memory that only ends with the process.
 """
 from __future__ import annotations
 
@@ -40,6 +53,7 @@ from typing import Any
 __all__ = [
     "DEFAULT_BASELINE_MULTIPLIER",
     "DEFAULT_CONTEXT_GROWTH_THRESHOLD",
+    "DEFAULT_MAX_KEYS",
     "DEFAULT_MIN_SAMPLES",
     "DEFAULT_RETRY_RATIO_THRESHOLD",
     "DEFAULT_VELOCITY_THRESHOLD_USD_PER_MIN",
@@ -66,8 +80,18 @@ DEFAULT_RETRY_RATIO_THRESHOLD = 0.5
 #: before a context-growth signal is raised.
 DEFAULT_CONTEXT_GROWTH_THRESHOLD = 2.0
 
-#: Events retained per attribution key. Also the memory bound.
+#: Events retained per attribution key. Also the per-key memory bound.
 DEFAULT_WINDOW_SIZE = 50
+
+#: Distinct attribution keys tracked at once. The other half of the memory
+#: bound, and the one that matters when attributions are per-session: 1,024 keys
+#: at the default window is roughly 50,000 retained events — the same order as
+#: the in-memory ledger ring — rather than one window per request, forever.
+DEFAULT_MAX_KEYS = 1024
+
+#: One tracked key is a legal bound; the eviction counter is what makes a tight
+#: one visible.
+MIN_MAX_KEYS = 1
 
 #: Events required before any detector may speak.
 DEFAULT_MIN_SAMPLES = 8
@@ -144,6 +168,10 @@ class DetectionConfig:
     #: by construction rather than by accident.
     min_samples: int = DEFAULT_MIN_SAMPLES
 
+    #: Distinct attribution keys held at once, evicted least-recently-used. See
+    #: the module docstring: the bound is not free, it is *counted*.
+    max_keys: int = DEFAULT_MAX_KEYS
+
     def __post_init__(self) -> None:
         _check_flag("shadow", self.shadow)
         _check_flag("enabled", self.enabled)
@@ -157,6 +185,7 @@ class DetectionConfig:
         _check_number("context_growth_threshold", self.context_growth_threshold, MIN_RATIO)
         _check_count("window_size", self.window_size, MIN_WINDOW_SIZE)
         _check_count("min_samples", self.min_samples, MIN_MIN_SAMPLES)
+        _check_count("max_keys", self.max_keys, MIN_MAX_KEYS)
         if self.min_samples > self.window_size:
             raise ValueError(
                 f"min_samples must be <= window_size, got min_samples={self.min_samples} "

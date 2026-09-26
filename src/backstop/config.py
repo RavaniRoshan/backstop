@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 from .detection.config import (
     DEFAULT_BASELINE_MULTIPLIER,
     DEFAULT_CONTEXT_GROWTH_THRESHOLD,
+    DEFAULT_MAX_KEYS,
     DEFAULT_MIN_SAMPLES,
     DEFAULT_RETRY_RATIO_THRESHOLD,
     DEFAULT_VELOCITY_THRESHOLD_USD_PER_MIN,
@@ -232,6 +233,7 @@ class BackstopConfig:
     detection_context_growth_threshold: float = DEFAULT_CONTEXT_GROWTH_THRESHOLD
     detection_window_size: int = DEFAULT_WINDOW_SIZE
     detection_min_samples: int = DEFAULT_MIN_SAMPLES
+    detection_max_keys: int = DEFAULT_MAX_KEYS
 
     def __post_init__(self) -> None:
         if self.default_max_output_tokens < 0:
@@ -457,4 +459,5 @@ def _detection_config(resolved: BackstopConfig) -> DetectionConfig:
         context_growth_threshold=resolved.detection_context_growth_threshold,
         window_size=resolved.detection_window_size,
         min_samples=resolved.detection_min_samples,
+        max_keys=resolved.detection_max_keys,
     )

@@ -316,3 +316,37 @@ def test_the_snapshot_carries_the_detection_view():
     snapshot = build_snapshot(Sampler(interval=0.25), mode="test")
     assert snapshot["detection"]["by_kind"] == detection_view()["by_kind"]
     assert snapshot["detection"]["session_count"] == 1
+
+
+# ---------------------------------------------------------------------------
+# The bound is visible
+# ---------------------------------------------------------------------------
+
+
+def test_an_eviction_reaches_the_metric_surface_so_it_can_be_alerted_on():
+    """A bound nobody can see is a detector that quietly stops reporting.
+
+    Two attribution keys into a bound of one: the first is dropped, and the drop
+    is countable from outside the detector.
+    """
+    from backstop.ledger import attribution
+
+    sink = install_sink()
+    state = _state(detection_max_keys=1)
+    client = httpx.Client(
+        transport=BackstopTransport(state, httpx.MockTransport(_handler(OPENAI_RESPONSE))),
+        base_url="https://api.openai.com",
+    )
+    with client:
+        for team in ("payments", "support"):
+            with attribution(team=team):
+                client.post("/v1/chat/completions", json=OPENAI_BODY)
+
+    assert state.detector.evictions == 1
+    assert sink.counter_total("detection_evictions") == 1
+    # The eviction is a count, not a label: naming the key would put a team in a
+    # label, which is the one thing these instruments may not do.
+    assert _recorded(sink) == [("detection_evictions", ())]
+    view = detection_view()
+    assert view["evictions"] == 1
+    assert view["sessions"][0]["max_keys"] == 1
