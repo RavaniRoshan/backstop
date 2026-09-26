@@ -406,8 +406,13 @@ class ChargebackRow:
 
     @property
     def key_dict(self) -> dict[str, str]:
-        """The group keys as a mapping, for a caller joining on them."""
-        return dict(zip(self.group_by, self.keys))
+        """The group keys as a mapping, for a caller joining on them.
+
+        ``strict=True`` because the two are the same list by construction: a row
+        whose ``keys`` did not line up with its ``group_by`` would quietly drop a
+        dimension here, and a dropped dimension is an unattributed dollar.
+        """
+        return dict(zip(self.group_by, self.keys, strict=True))
 
     @property
     def is_unattributed(self) -> bool:
@@ -479,7 +484,7 @@ class ChargebackRow:
         ``KeyError`` naming it, because a silently dropped column is the one bug
         this module exists to prevent.
         """
-        available = dict(zip(columns(self.group_by), self.cells()))
+        available = dict(zip(columns(self.group_by), self.cells(), strict=True))
         missing = [name for name in names if name not in available]
         if missing:
             raise KeyError(
@@ -1011,7 +1016,7 @@ class RevenueRow:
 
     @property
     def key_dict(self) -> dict[str, str]:
-        return dict(zip(self.group_by, self.keys))
+        return dict(zip(self.group_by, self.keys, strict=True))
 
     def to_dict(self) -> dict[str, Any]:
         """The JSON form, with an absent amount as ``None`` and never as ``0``."""
