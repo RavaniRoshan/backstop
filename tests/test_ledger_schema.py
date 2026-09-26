@@ -1295,3 +1295,51 @@ def test_the_documented_recipe_for_a_deferred_coroutine_scopes_that_body():
 
     assert asyncio.run(main()) == Attribution(agent="refund-bot")
     assert current_attribution() == Attribution()
+
+
+# ---------------------------------------------------------------------------
+# Attribution field validation
+# ---------------------------------------------------------------------------
+
+
+ATTRIBUTION_FIELDS = tuple(Attribution.__dataclass_fields__)
+
+
+@pytest.mark.parametrize("name", ATTRIBUTION_FIELDS)
+@pytest.mark.parametrize("bad", [1, 3.5, True, ["t"], {"a": 1}])
+def test_a_non_string_attribution_field_is_rejected_at_construction(name, bad):
+    with pytest.raises(TypeError, match=repr(name)) as excinfo:
+        Attribution(**{name: bad})
+    assert type(bad).__name__ in str(excinfo.value)
+
+
+@pytest.mark.parametrize("name", ATTRIBUTION_FIELDS)
+def test_every_attribution_field_accepts_a_string_and_none(name):
+    assert getattr(Attribution(**{name: "payments"}), name) == "payments"
+    assert getattr(Attribution(**{name: None}), name) is None
+
+
+@pytest.mark.parametrize("name", ["team", "feature", "gl_code"])
+@pytest.mark.parametrize("bad", [1, 2.5, object()])
+def test_the_public_api_refuses_a_non_string_field(name, bad):
+    with pytest.raises(TypeError, match=repr(name)):
+        attribution(**{name: bad})
+    with pytest.raises(TypeError, match=repr(name)):
+        with_attribution(**{name: bad})
+
+
+def test_a_non_string_field_never_reaches_a_derived_view():
+    # The failure used to be an AttributeError from keys() at read time, well
+    # after the record had been built and stored.
+    with pytest.raises(TypeError, match="team"):
+        SpendEvent(
+            provider="openai",
+            model="gpt-4o",
+            endpoint="/v1/chat",
+            priority="default",
+            outcome="success",
+            input_tokens=1,
+            output_tokens=1,
+            estimated=False,
+            attribution=Attribution(team=1),
+        )

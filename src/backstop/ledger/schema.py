@@ -187,6 +187,15 @@ class Attribution:
     gl_code: str | None = None
     currency: str | None = None
 
+    def __post_init__(self) -> None:
+        for spec in fields(self):
+            value = getattr(self, spec.name)
+            if value is not None and not isinstance(value, str):
+                raise TypeError(
+                    f"attribution field {spec.name!r} must be a string or None, got "
+                    f"{type(value).__name__} {value!r}"
+                )
+
     def merge(self, override: "Attribution") -> "Attribution":
         """Return a new ``Attribution`` where ``override``'s set fields win.
 
@@ -247,23 +256,17 @@ class Attribution:
     def from_fields(cls, **values: str | None) -> "Attribution":
         """Build an ``Attribution`` from keyword fields.
 
-        Type hints cannot describe keyword arguments, so the two ways a call
-        site can get this wrong are rejected explicitly here: an unknown name
-        and a non-string value both raise ``TypeError`` rather than being
+        Type hints cannot describe keyword arguments, so an unknown name is
+        rejected here with the legal names, and the field types are checked by
+        ``__post_init__``. A wrong field raises ``TypeError`` rather than being
         silently dropped from the ledger.
         """
-        known = frozenset(cls.__dataclass_fields__)
-        unknown = sorted(set(values) - known)
+        unknown = sorted(set(values) - set(cls.__dataclass_fields__))
         if unknown:
             raise TypeError(
-                f"unknown attribution field(s) {unknown}; valid fields are {sorted(known)}"
+                f"unknown attribution field(s) {unknown}; valid fields are "
+                f"{sorted(cls.__dataclass_fields__)}"
             )
-        for name, value in values.items():
-            if value is not None and not isinstance(value, str):
-                raise TypeError(
-                    f"attribution field {name!r} must be a string or None, "
-                    f"got {type(value).__name__}"
-                )
         return cls(**values)
 
 
