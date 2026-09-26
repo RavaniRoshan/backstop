@@ -9,6 +9,7 @@ literal.
 """
 from __future__ import annotations
 
+import decimal
 import json
 import os
 import re
@@ -774,6 +775,121 @@ def test_compute_cost_never_mutates_its_inputs():
     compute_cost(event, catalog)
     assert event.to_dict() == before_event
     assert dict(BUNDLED_PRICES) == before_prices
+
+
+# ---------------------------------------------------------------------------
+# compute_cost: independence from the ambient decimal context
+# ---------------------------------------------------------------------------
+#
+# A ``decimal`` context is PROCESS-GLOBAL. A host application that tightens
+# ``prec`` — which accounting code does, to keep a float-heavy report tidy —
+# used to void every cost this module computes: the request still returned 200,
+# ``state.ledger_errors`` climbed once per event, and the ledger stayed empty.
+# These tests install a hostile context and assert the exact figure, because a
+# cost that is merely *approximately* right under a hostile context is the
+# failure, not a smaller version of it.
+
+#: The event both hostile-context tests price: four components, six decimal
+#: places, and a total that needs more significant digits than ``prec=6`` allows.
+#: claude-sonnet-4-5: 3.00 in, 15.00 out, 0.30 cache read, 3.75 cache write.
+HOSTILE_CONTEXT_EVENT = {
+    "input_tokens": 1_234_567,
+    "output_tokens": 89_012,
+    "cache_read_tokens": 400_000,
+    "cache_write_tokens": 7_777,
+}
+# 1,234,567 * 3.00 = 3.703701; 89,012 * 15.00 = 1.335180;
+# 400,000 * 0.30 = 0.120000; 7,777 * 3.75 = 0.02916375 -> 0.029164.
+HOSTILE_CONTEXT_TOTAL = Decimal("5.188045")
+
+
+def _hostile_event() -> SpendEvent:
+    return make_event(**HOSTILE_CONTEXT_EVENT)
+
+
+def test_a_tight_process_prec_does_not_change_or_break_a_cost(monkeypatch):
+    """The reproduction: ``prec=6`` set by a host app before Backstop loads.
+
+    Under the old arithmetic the divide and the quantise both ran at six
+    significant digits, so ``quantize`` raised ``InvalidOperation`` on every
+    event. The figure has to come out identical to the default context's, not
+    merely be close to it.
+    """
+    context = decimal.getcontext()
+    assert compute_cost(_hostile_event(), PriceCatalog()).total_usd == HOSTILE_CONTEXT_TOTAL
+    monkeypatch.setattr(context, "prec", 6)
+
+    cost = compute_cost(_hostile_event(), PriceCatalog())
+    assert cost is not None
+    assert cost.total_usd == HOSTILE_CONTEXT_TOTAL
+    assert cost.input_usd == Decimal("3.703701")
+    assert cost.output_usd == Decimal("1.335180")
+    assert cost.cache_read_usd == Decimal("0.120000")
+    assert cost.cache_write_usd == Decimal("0.029164")
+    # The invariant, checked the way a caller would have to under a hostile
+    # context: with the ledger's own context, because the sum below is itself
+    # decimal arithmetic and would otherwise round at six digits.
+    with decimal.localcontext(pricing_catalog.LEDGER_CONTEXT):
+        assert cost.total_usd == (
+            cost.input_usd + cost.output_usd + cost.cache_read_usd + cost.cache_write_usd
+        )
+
+
+def test_a_hostile_rounding_and_trap_set_does_not_change_a_cost(monkeypatch):
+    """The other half of the same bug: a context that rounds the wrong way.
+
+    ``ROUND_UP`` with ``Inexact`` and ``Rounded`` trapped would make every
+    divide an exception under the old arithmetic, and a silent round-up without
+    the traps. Neither may reach the ledger's money.
+    """
+    context = decimal.getcontext()
+    monkeypatch.setattr(context, "prec", 2)
+    monkeypatch.setattr(context, "rounding", decimal.ROUND_UP)
+    monkeypatch.setitem(context.traps, decimal.Inexact, True)
+    monkeypatch.setitem(context.traps, decimal.Rounded, True)
+    monkeypatch.setattr(context, "Emax", 9)
+    monkeypatch.setattr(context, "Emin", -9)
+
+    cost = compute_cost(_hostile_event(), PriceCatalog())
+    assert cost is not None
+    assert cost.total_usd == HOSTILE_CONTEXT_TOTAL
+    assert str(cost.total_usd) == "5.188045", "the rounding mode the host chose is not ours"
+
+
+def test_the_ledger_context_is_the_28_digit_default_named_in_full():
+    """The guarantee is unconditional, so the context cannot be a ``DefaultContext``.
+
+    ``Context(...)`` copies every field it is not given from
+    :data:`decimal.DefaultContext`, so a context that named only ``prec`` would
+    still be reachable by a host that tightened the default's traps. Every field
+    that can change a result is therefore written down.
+    """
+    context = pricing_catalog.LEDGER_CONTEXT
+    assert context.prec == pricing_catalog.MONEY_PRECISION == 28
+    assert context.rounding == decimal.ROUND_HALF_UP
+    assert context.Emin == -999_999
+    assert context.Emax == 999_999
+    assert context.clamp == 0
+    trapped = {signal for signal, on in context.traps.items() if on}
+    assert trapped == {decimal.InvalidOperation, decimal.DivisionByZero, decimal.Overflow}
+
+
+def test_pricing_leaves_the_ambient_context_exactly_as_it_found_it(monkeypatch):
+    """The arithmetic is context-local, so a host's context survives a call.
+
+    Setting a thread context and forgetting to put it back is how a library
+    corrupts the process it was imported into; ``localcontext`` is the
+    discipline that prevents it, and a priced event must not be the thing that
+    changes a host's rounding mode.
+    """
+    context = decimal.getcontext()
+    monkeypatch.setattr(context, "prec", 9)
+    monkeypatch.setattr(context, "rounding", decimal.ROUND_DOWN)
+
+    compute_cost(_hostile_event(), PriceCatalog())
+
+    assert context.prec == 9
+    assert context.rounding == decimal.ROUND_DOWN
 
 
 # ---------------------------------------------------------------------------

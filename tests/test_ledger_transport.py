@@ -532,12 +532,38 @@ def test_a_sink_that_raises_never_breaks_the_request():
 
 
 def test_a_ledger_failure_is_counted_and_never_reaches_the_caller():
+
     state = _state(_ledger_config())
     state.ledger = "not a writer at all"
     with _sync_client(state, _handler(OPENAI_RESPONSE)) as client:
         response = client.post("/v1/chat/completions", json=OPENAI_BODY)
     assert response.status_code == 200
     assert state.ledger_errors == 1
+
+
+def test_a_host_process_decimal_precision_does_not_void_the_ledger(monkeypatch):
+    """The reproduction: ``prec=6`` in the host app, before Backstop is imported.
+
+    A ``decimal`` context is process-global, and the cost arithmetic used to run
+    in whatever context it found. The request still returned 200 — the ledger is
+    never allowed to fail a request — and ``compute_cost`` raised
+    ``InvalidOperation`` on every event, so ``state.ledger_errors`` climbed once
+    per request and **no events were recorded at all**: a permanently empty
+    ledger with no explanation and no wrong money. That is the whole symptom, and
+    the counters are the only place it was ever going to show up.
+    """
+    import decimal
+
+    monkeypatch.setattr(decimal.getcontext(), "prec", 6)
+    state = _state(_ledger_config())
+    with _sync_client(state, _handler(OPENAI_CACHED_RESPONSE)) as client:
+        response = client.post("/v1/chat/completions", json=OPENAI_BODY)
+
+    assert response.status_code == 200
+    assert state.ledger_errors == 0, "the request path raised inside the ledger"
+    (event,) = _events(state)
+    assert event.cost is not None
+    assert str(event.cost.total_usd) == "2.591418", "the same figure as any other context"
 
 
 def test_the_ledger_off_path_records_nothing_and_opens_no_file(monkeypatch):

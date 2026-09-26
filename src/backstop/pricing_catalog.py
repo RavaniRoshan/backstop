@@ -34,9 +34,16 @@ Every amount is a :class:`~decimal.Decimal` quantised to exactly
 :data:`MONEY_PLACES` decimal places with ``ROUND_HALF_UP``. A binary float never
 touches a price, an amount, or a wire form: on the wire money is a *string*, so
 a JSON reader cannot reinterpret a charge as a float and lose the cents.
-Arithmetic is exact under any decimal context with at least 20 significant
-digits — the 28-digit default is far more than six decimal places of money
-needs — so the same inputs always give the same breakdown.
+
+The arithmetic runs under this module's own :data:`LEDGER_CONTEXT` rather than
+the decimal context the host process happens to have installed, because a
+``decimal`` context is **process-global** and a library cannot ask the host to
+leave it alone. Accounting code that tightens ``prec`` to tidy up a
+float-heavy application would otherwise void every cost computed here — the
+request still succeeds, the ledger records nothing, and every total is wrong by
+a rounding step nobody asked for. So the guarantee is unconditional: the same
+inputs give the same breakdown whatever the ambient ``prec``, ``rounding``,
+``traps`` or ``Emax`` are, because none of them are read.
 
 Precedence
 ----------
@@ -72,7 +79,15 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import (
+    ROUND_HALF_UP,
+    Context,
+    Decimal,
+    DivisionByZero,
+    InvalidOperation,
+    Overflow,
+    localcontext,
+)
 from functools import lru_cache
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
@@ -80,6 +95,12 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from .ledger.schema import SpendEvent
 
+#: Deliberately not in ``__all__``: this module's four exported names are its
+#: API, and its constants — :data:`COST_COMPONENTS`, :data:`CURRENCY`,
+#: :data:`MONEY_PLACES`, :data:`BUNDLED_PRICES` — have always been public by name
+#: without being re-exported. :data:`LEDGER_CONTEXT` is public the same way:
+#: :mod:`backstop.ledger.export` imports it, because the charge-back has to total
+#: money under the same context the catalog priced it in.
 __all__ = ["CostBreakdown", "PriceCatalog", "PriceEntry", "compute_cost"]
 
 #: The only currency a breakdown is denominated in. A future non-USD breakdown
@@ -88,6 +109,33 @@ CURRENCY = "USD"
 
 #: Decimal places every money value is quantised to.
 MONEY_PLACES = 6
+
+#: Significant digits the ledger's money arithmetic runs at. 28 is CPython's own
+#: default, chosen here so that the answers are the ones every existing figure in
+#: this repository was computed at: holding the ambient context fixed changes
+#: *when* the arithmetic is immune to the host, never *what* it produces.
+#: Six decimal places of money needs 8 digits to be exact, and the widest single
+#: operand here is a token count times a three-figure rate, so 28 leaves more
+#: than an order of magnitude of headroom over any count a request can carry.
+MONEY_PRECISION = 28
+
+#: The context every cost is computed in, named in full rather than built from
+#: :data:`decimal.DefaultContext`, because ``Context(...)`` copies any field left
+#: unspecified from the default context — and the whole point of this object is
+#: that a host which tightened *that* cannot reach the arithmetic either.
+#: ``flags=[]`` starts with no sticky condition recorded, and ``traps`` is the
+#: default set spelled out: an inexact, invalid or overflowing price is an error
+#: here rather than a quietly rounded dollar.
+LEDGER_CONTEXT = Context(
+    prec=MONEY_PRECISION,
+    rounding=ROUND_HALF_UP,
+    Emin=-999_999,
+    Emax=999_999,
+    capitals=1,
+    clamp=0,
+    flags=[],
+    traps=[InvalidOperation, DivisionByZero, Overflow],
+)
 
 _QUANTUM = Decimal("0.000001")
 _ZERO = Decimal("0.000000")
@@ -826,6 +874,14 @@ def _amount(tokens: int, rate: Decimal | None) -> Decimal:
     Zero when the rate is unknown *or* the token count is zero. The unknown rate
     is the caller's problem to record: it returns zero here and
     :func:`compute_cost` leaves the component out of ``priced_components``.
+
+    **Read :data:`LEDGER_CONTEXT` from the caller.** The multiply, the divide and
+    the quantise are all context-sensitive, and ``quantize`` raises
+    ``InvalidOperation`` outright once the ambient precision is shorter than the
+    result — which is the entire failure this module now guards against. Its one
+    caller, :func:`_breakdown`, installs :data:`LEDGER_CONTEXT` once around all
+    four components, because four context switches per request would cost four
+    times what one does and this runs on the hot path.
     """
     if not tokens or rate is None:
         return _ZERO
@@ -920,27 +976,32 @@ def _breakdown(
     event: "SpendEvent", entry: PriceEntry, price_source: str
 ) -> CostBreakdown:
     """Bill one event against one winning price, and record what it covered."""
-    amounts: dict[str, Decimal] = {}
-    priced: set[str] = set()
-    for component in COST_COMPONENTS:
-        rate = entry.rate(component)
-        if rate is not None:
-            priced.add(component)
-        amounts[component] = _amount(getattr(event, _TOKEN_FIELDS[component]), rate)
-    # Summing the four quantised components is exact at six decimal places, so
-    # requantising is a no-op and the total always equals its parts.
-    total = sum(amounts.values(), _ZERO)
-    return CostBreakdown(
-        input_usd=amounts["input"],
-        output_usd=amounts["output"],
-        cache_read_usd=amounts["cache_read"],
-        cache_write_usd=amounts["cache_write"],
-        total_usd=total.quantize(_QUANTUM, rounding=ROUND_HALF_UP),
-        currency=CURRENCY,
-        price_source=price_source,
-        estimated_tokens=event.estimated,
-        priced_components=frozenset(priced),
-    )
+    # One context for all four components and the total, rather than one each:
+    # ``localcontext`` costs about three quarters of a microsecond to enter and
+    # leave, which is 5% of a ``compute_cost`` call, and four of them would be
+    # 20% of a figure this product promises not to change on the request path.
+    with localcontext(LEDGER_CONTEXT):
+        amounts: dict[str, Decimal] = {}
+        priced: set[str] = set()
+        for component in COST_COMPONENTS:
+            rate = entry.rate(component)
+            if rate is not None:
+                priced.add(component)
+            amounts[component] = _amount(getattr(event, _TOKEN_FIELDS[component]), rate)
+        # Summing the four quantised components is exact at six decimal places, so
+        # requantising is a no-op and the total always equals its parts.
+        total = sum(amounts.values(), _ZERO)
+        return CostBreakdown(
+            input_usd=amounts["input"],
+            output_usd=amounts["output"],
+            cache_read_usd=amounts["cache_read"],
+            cache_write_usd=amounts["cache_write"],
+            total_usd=total.quantize(_QUANTUM, rounding=ROUND_HALF_UP),
+            currency=CURRENCY,
+            price_source=price_source,
+            estimated_tokens=event.estimated,
+            priced_components=frozenset(priced),
+        )
 
 
 def compute_cost(
