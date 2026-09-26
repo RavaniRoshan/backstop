@@ -28,11 +28,19 @@ if TYPE_CHECKING:
     from ..pricing_catalog import CostBreakdown
 
 __all__ = [
+    "EVENT_ID_RE",
+    "OCCURRED_AT_RE",
     "OUTCOMES",
     "PRIORITIES",
     "SCHEMA_VERSION",
+    "SECRET_QUERY_RE",
     "Attribution",
     "SpendEvent",
+    "cost_from_dict",
+    "cost_to_dict",
+    "normalize_endpoint",
+    "resolve_cost_type",
+    "utc_now",
 ]
 
 SCHEMA_VERSION = "1.0"

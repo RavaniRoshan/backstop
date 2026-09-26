@@ -14,10 +14,12 @@ from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
 from dataclasses import FrozenInstanceError
 from datetime import datetime, timedelta, timezone
+from uuid import UUID
 
 import pytest
 
 from backstop.ledger import (
+    EVENT_ID_RE,
     Attribution,
     SpendEvent,
     attribution,
@@ -170,6 +172,12 @@ def test_event_id_is_a_uuid4_hex_and_unique_per_event():
     assert len(first.event_id) == 32
     assert int(first.event_id, 16) >= 0
     assert first.event_id != second.event_id
+    # "a" * 32 and any MD5 are 32 hex characters too, so pin the uuid4 layout:
+    # the version nibble is 4, and the variant nibble is one of 8, 9, a, b.
+    assert first.event_id[12] == "4"
+    assert first.event_id[16] in "89ab"
+    assert UUID(first.event_id).version == 4
+    assert EVENT_ID_RE.match(first.event_id)
 
 
 def test_occurred_at_is_rfc3339_utc_with_microsecond_precision():
@@ -1096,3 +1104,38 @@ def test_run_in_executor_needs_the_copied_context():
     bare, copied = asyncio.run(main())
     assert bare == Attribution()
     assert copied == Attribution(team="payments")
+
+
+def test_the_package_re_exports_the_schema_public_surface():
+    import backstop.ledger as package
+    import backstop.ledger.schema as schema_module
+
+    for name in (
+        "Attribution",
+        "SpendEvent",
+        "SCHEMA_VERSION",
+        "PRIORITIES",
+        "OUTCOMES",
+        "OCCURRED_AT_RE",
+        "EVENT_ID_RE",
+        "utc_now",
+        "normalize_endpoint",
+    ):
+        assert getattr(package, name) is getattr(schema_module, name), name
+        assert name in package.__all__, name
+        assert name in schema_module.__all__, name
+
+
+def test_the_schema_constants_are_reachable_from_the_package():
+    import backstop.ledger as package
+
+    assert package.SCHEMA_VERSION == "1.0"
+    assert package.PRIORITIES == ("critical", "default", "background")
+    assert package.OUTCOMES == (
+        "success",
+        "error",
+        "circuit_open",
+        "budget_denied",
+        "queue_timeout",
+        "fallback",
+    )

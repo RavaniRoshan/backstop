@@ -21,9 +21,24 @@ from .budget import (
     with_budget,
 )
 from .context import attribution, current_attribution, with_attribution
-from .schema import Attribution, SpendEvent
+from .schema import (
+    EVENT_ID_RE,
+    OCCURRED_AT_RE,
+    OUTCOMES,
+    PRIORITIES,
+    SCHEMA_VERSION,
+    Attribution,
+    SpendEvent,
+    normalize_endpoint,
+    utc_now,
+)
 
 __all__ = [
+    "EVENT_ID_RE",
+    "OCCURRED_AT_RE",
+    "OUTCOMES",
+    "PRIORITIES",
+    "SCHEMA_VERSION",
     "Attribution",
     "BudgetLedger",
     "ReservationTicket",
@@ -33,7 +48,9 @@ __all__ = [
     "current_attribution",
     "get_current_tenant",
     "get_ledger",
+    "normalize_endpoint",
     "reset_ledger",
+    "utc_now",
     "with_attribution",
     "with_budget",
 ]
