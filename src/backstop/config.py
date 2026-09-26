@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -179,6 +180,30 @@ class BackstopConfig:
     shadow: bool = False
     shadow_policy: Any = None
 
+    # --- Spend ledger (Ledger Foundation) ---
+    # Off by default, so a process that has not opted in pays one boolean test
+    # per request and records nothing. When on, one ``SpendEvent`` is built per
+    # completed provider request and handed to a background writer; the request
+    # path never touches a file, a socket or a sink. ``ledger_path`` writes
+    # append-only NDJSON; without it the events are kept in a bounded in-memory
+    # ring of ``ledger_memory_events``, which is what ``backstop ledger demo``
+    # and the tests read.
+    ledger_enabled: bool = False
+    ledger_path: str | None = None
+    ledger_memory_events: int = 10_000
+
+    # --- Price catalog (Ledger Foundation) ---
+    # A JSON file of negotiated rates, layered over the bundled list prices by
+    # ``PriceCatalog.from_file``. Checked for existence here, at construction, so
+    # a typo fails at wrap time rather than silently pricing every event at the
+    # bundled rate — or at nothing — from the first request onwards.
+    price_catalog_path: str | None = None
+
+    # --- Runaway-spend detection (Ledger Foundation) ---
+    # Off by default, and shadow-first when on: the detector reports what it
+    # would have flagged and never blocks a request.
+    detection_enabled: bool = False
+
     def __post_init__(self) -> None:
         if self.default_max_output_tokens < 0:
             raise ValueError("default_max_output_tokens must be >= 0")
@@ -244,6 +269,49 @@ class BackstopConfig:
             raise ValueError("cache_semantic requires cache_embedder (an embedding callable)")
         if not 0.0 < self.cache_similarity_threshold <= 1.0:
             raise ValueError("cache_similarity_threshold must be in (0, 1]")
+        if not isinstance(self.ledger_enabled, bool):
+            raise TypeError(
+                f"ledger_enabled must be a bool, got {type(self.ledger_enabled).__name__}"
+            )
+        if self.ledger_path is not None and not isinstance(self.ledger_path, str):
+            raise TypeError(
+                f"ledger_path must be a string or None, got "
+                f"{type(self.ledger_path).__name__}"
+            )
+        if self.ledger_path == "":
+            raise ValueError("ledger_path must be a non-empty path when set")
+        # ``bool`` is an ``int`` subclass, so a stray True would otherwise be
+        # read as a ring of one event.
+        if isinstance(self.ledger_memory_events, bool) or not isinstance(
+            self.ledger_memory_events, int
+        ):
+            raise TypeError(
+                f"ledger_memory_events must be an int, got "
+                f"{type(self.ledger_memory_events).__name__}"
+            )
+        if self.ledger_memory_events < 1:
+            raise ValueError(f"ledger_memory_events must be >= 1, got {self.ledger_memory_events}")
+        if self.price_catalog_path is not None:
+            if not isinstance(self.price_catalog_path, str):
+                raise TypeError(
+                    f"price_catalog_path must be a string or None, got "
+                    f"{type(self.price_catalog_path).__name__}"
+                )
+            if not os.path.isfile(self.price_catalog_path):
+                # Loudly, and here. Loading this file is the first thing
+                # BackstopState.create does when a ledger is on, so a bad path
+                # found any later would surface as an exception on a request
+                # path or — worse — as every event silently priced from the
+                # bundled table instead of the rates the user negotiated.
+                raise ValueError(
+                    f"price_catalog_path does not exist or is not a file: "
+                    f"{self.price_catalog_path!r}"
+                )
+        if not isinstance(self.detection_enabled, bool):
+            raise TypeError(
+                f"detection_enabled must be a bool, got "
+                f"{type(self.detection_enabled).__name__}"
+            )
         if self.fallback_chain is not None:
             if not isinstance(self.fallback_chain, list) or not self.fallback_chain:
                 raise ValueError("fallback_chain must be a non-empty list of {model, base_url?} dicts")
