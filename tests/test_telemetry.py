@@ -59,13 +59,50 @@ def _exercise(state: BackstopState, *, status: int = 200) -> None:
 # --- label schema contract ----------------------------------------------------
 
 
-def test_label_schema_covers_every_labelled_transport_call_site():
-    """LABEL_NAMES cannot drift from the events transports.py actually emits.
+def _detection_sink_instruments() -> set[str]:
+    """Instrument names the runaway-spend sink emits, read off the sink itself.
+
+    Probed rather than listed. A hard-coded set would only assert that this test
+    agrees with itself, and the drift this guards against is a *producer* that
+    grew a label the map does not know about — so the names come from the real
+    sink fed by the real reporter, one signal per detector and per severity.
+    """
+    from dataclasses import replace
+
+    from backstop.detection import SEVERITIES, SIGNAL_KINDS, DetectionSignal
+    from backstop.ledger import Attribution
+    from backstop.state import DetectionSignalSink
+
+    sink = install_sink()
+    reporter = DetectionSignalSink()
+    sample = DetectionSignal(
+        kind=SIGNAL_KINDS[0],
+        severity=SEVERITIES[0],
+        key="team=payments",
+        observed=2.0,
+        threshold=1.0,
+        detail="",
+        occurred_at="2026-09-26T00:00:00.000000Z",
+    )
+    for kind in SIGNAL_KINDS:
+        for severity in SEVERITIES:
+            reporter.record(replace(sample, kind=kind, severity=severity))
+    reporter.evicted(Attribution(team="payments"))
+    return sink.names(labelled_only=True)
+
+
+def test_label_schema_covers_every_labelled_call_site_backstop_makes():
+    """LABEL_NAMES cannot drift from the events Backstop actually emits.
 
     A call is "labelled" when its first argument after the metric name is
     positional rather than a keyword such as ``method=`` or ``value=``. The
     lookahead must span the whole identifier so ``method=`` never passes as a
     label by backtracking into a shorter match.
+
+    Two producers feed this choke point, not one: the transports emit their own
+    call sites, and the runaway-spend sink reports signals from wherever the
+    detector noticed them. Both are covered, so a label the map does not declare
+    cannot arrive from either, and a map entry neither producer emits is caught.
     """
     source = _TRANSPORTS.read_text(encoding="utf-8")
     labelled = set(
@@ -75,6 +112,7 @@ def test_label_schema_covers_every_labelled_transport_call_site():
         )
     )
     assert labelled, "expected to find instrumented call sites with labels"
+    labelled |= _detection_sink_instruments()
     missing = sorted(labelled - set(LABEL_NAMES))
     stale = sorted(set(LABEL_NAMES) - labelled)
     assert not missing, f"telemetry.LABEL_NAMES is missing labels for: {missing}"

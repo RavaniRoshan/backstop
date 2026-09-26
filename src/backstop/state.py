@@ -8,13 +8,61 @@ from .audit import AuditLog
 from .budget import Budget
 from .circuit import CircuitBreaker
 from .config import BackstopConfig
-from .detection import RunawayDetector
-from .ledger import BoundedWriter, JsonlSink, MemorySink, NullSink
-from .metrics import disable_otel, enable_otel
+from .detection import DetectionSignal, RunawayDetector
+from .ledger import Attribution, BoundedWriter, JsonlSink, MemorySink, NullSink
+from .metrics import disable_otel, enable_otel, get_metrics
 from .pricing_catalog import PriceCatalog
 from .quotas import QuotaMonitor
 from .state_backends import BudgetBackend, build_backend
 from .telemetry import get_registry
+
+
+class DetectionSignalSink:
+    """Where a detection signal goes: the metric surface, and nothing else.
+
+    The detector already takes a ``signal_sink`` and calls ``record`` on it from
+    outside its own lock, swallowing whatever it raises (:meth:`RunawayDetector`
+    documents both). This is that sink, and it exists because a signal nobody
+    receives is a signal nobody can tune against — which is the whole argument
+    for the shadow mode. The alternative, reporting each signal at the transport
+    call site, would put a per-signal loop and a per-signal metric dispatch on
+    the request path; this keeps both where the rest of the enforcement
+    telemetry already is, and keeps the hot path to the ``observe`` call it
+    already had.
+
+    Two instruments and no more: a counter so a dashboard and an alert can see
+    that a key is misbehaving, and a histogram of the observed value so the
+    threshold can be set from the distribution of what crossed it rather than
+    from a count. **The attribution is not a label** — see the label rule in
+    :mod:`backstop.metrics` — so a process watching ten thousand sessions
+    produces the same four-by-three series as one watching ten.
+
+    Stateless and shared by every state: the metric surface is a process-wide
+    singleton, so a per-session sink would be a copy of nothing.
+    """
+
+    __slots__ = ()
+
+    def record(self, signal: DetectionSignal) -> None:
+        """Report one signal. Called off the detector's lock; never raises here."""
+        metrics = get_metrics()
+        metrics.call("detection_signals", signal.kind, signal.severity)
+        metrics.call(
+            "detection_signal_magnitude",
+            signal.kind,
+            method="observe",
+            amount=float(signal.observed),
+        )
+
+    def evicted(self, key: Attribution) -> None:
+        """Report that a key left the detector to stay inside its bound.
+
+        The key is accepted and ignored: what makes an eviction worth counting is
+        *that* it happened, not which tenant it happened to, and naming the tenant
+        here would be the cardinality trap this sink exists to avoid. The detector
+        documents why the eviction is visible at all.
+        """
+        get_metrics().call("detection_evictions")
 
 
 @dataclass
@@ -80,6 +128,7 @@ class BackstopState:
         audit = AuditLog(resolved.audit_sink, resolved.audit_hmac_key) if resolved.audit_enabled else None
         quota = QuotaMonitor() if resolved.quota_aware else None
         ledger, prices = _build_ledger(resolved)
+        signal_sink = DetectionSignalSink()
         state = cls(
             config=resolved,
             budget=budget_obj,
@@ -89,7 +138,7 @@ class BackstopState:
             audit=audit,
             quota=quota,
             ledger=ledger,
-            detector=RunawayDetector(resolved.detection_config),
+            detector=RunawayDetector(resolved.detection_config, signal_sink=signal_sink),
             prices=prices,
         )
         # Registering here (rather than in wrap()) keeps the built-in dashboard

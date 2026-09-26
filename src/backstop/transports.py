@@ -337,6 +337,12 @@ def _record_spend(
                 # ``SpendEvent.__post_init__`` writes its normalised endpoint the
                 # same way, for the same reason.
                 object.__setattr__(event, "cost", priced)
+        # The return value is deliberately not consumed here: a detection
+        # signal leaves through the detector's own ``signal_sink``
+        # (``backstop.state.DetectionSignalSink``), which reports it to the
+        # metric surface from outside the detector's lock. Iterating the list on
+        # this path would put a per-signal loop and a metric dispatch on the
+        # request path to learn nothing this does not already record.
         state.detector.observe(event)
         if state.config.ledger_enabled:
             state.ledger.submit(event)

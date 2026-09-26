@@ -1,3 +1,21 @@
+"""The metric surface every instrumented decision in Backstop reports through.
+
+One object, one choke point: :meth:`Metrics.call` is fed by the transports, the
+admission gate, the circuit breaker and the runaway-spend detector, and it fans
+out to three consumers in one place — the optional Prometheus registry, the
+optional OTel mirror, and the dependency-free :class:`~backstop.telemetry.TelemetrySink`
+the built-in dashboard reads. A new instrument is declared here and nowhere
+else, so a signal that is not on this surface is a signal nobody polls.
+
+**The label rule, because it is the one that bites:** a label is a fixed,
+bounded vocabulary, never a user-supplied string. ``endpoint``/``priority``/
+``outcome`` and ``kind``/``severity`` are drawn from closed sets the code
+declares; the attribution a runaway detector fired on is *not*, because a
+per-team or per-session label multiplies the time series by the number of teams
+or sessions — a cardinality explosion in the scrape, and a user identifier in a
+label is a user identifier in everyone's monitoring storage. The offending key
+belongs in the detector's own bounded ring and in the log line, not in a label.
+"""
 from __future__ import annotations
 
 from typing import Any
@@ -116,6 +134,30 @@ class Metrics:
             "backstop_tenant_budget_exceeded_total",
             "Requests blocked by per-tenant budget.",
             ["tenant_id"],
+        )
+        # --- Runaway-spend detection ---
+        # ``kind`` and ``severity`` are the two closed sets
+        # ``backstop.detection.SIGNAL_KINDS`` and ``SEVERITIES``, so the series
+        # count is fixed at four by three however many attribution keys fire.
+        # The key itself is deliberately absent: see the label rule in the module
+        # docstring.
+        self.detection_signals = Counter(
+            "backstop_detection_signals_total",
+            "Runaway-spend signals raised, by detector and severity.",
+            ["kind", "severity"],
+        )
+        # The magnitude that crossed the threshold, so a threshold can be tuned
+        # against the distribution of what actually crossed it rather than
+        # against a count that says only that something did.
+        self.detection_signal_magnitude = Histogram(
+            "backstop_detection_signal_observed",
+            "The observed value that raised a runaway-spend signal.",
+            ["kind"],
+        )
+        self.detection_evictions = Counter(
+            "backstop_detection_evictions_total",
+            "Attribution keys dropped from the runaway-spend detector to stay "
+            "within its key bound. Each one is a key whose baseline was reset.",
         )
 
     def call(self, name: str, *args: Any, method: str = "inc", **kwargs: Any) -> None:

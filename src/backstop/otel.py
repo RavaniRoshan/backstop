@@ -74,6 +74,19 @@ class OtelMetrics:
             "backstop_tenant_budget_exceeded_total",
             description="Requests blocked by per-tenant budget.",
         )
+        self.detection_signals = meter.create_counter(
+            "backstop_detection_signals_total",
+            description="Runaway-spend signals raised, by detector and severity.",
+        )
+        self.detection_signal_magnitude = meter.create_histogram(
+            "backstop_detection_signal_observed",
+            description="The observed value that raised a runaway-spend signal.",
+        )
+        self.detection_evictions = meter.create_counter(
+            "backstop_detection_evictions_total",
+            description="Attribution keys dropped from the runaway-spend detector "
+            "to stay within its key bound.",
+        )
 
         for name, desc in (
             ("backstop_budget_remaining_tokens", "Remaining token budget."),
@@ -137,6 +150,8 @@ class OtelMetrics:
                 "queue_wait": ["priority"],
                 "retry_attempts": ["endpoint"],
                 "aimd_changes": ["direction"],
+                "detection_signals": ["kind", "severity"],
+                "detection_signal_magnitude": ["kind"],
             }.get(name)
             if attr_keys:
                 for key, value in zip(attr_keys, args, strict=False):
@@ -165,6 +180,14 @@ class OtelMetrics:
                 self._inc_counter(self.rate_limited, 1, attrs)
             elif name == "tenant_budget_exceeded":
                 self._inc_counter(self.tenant_budget_exceeded, 1, attrs)
+            elif name == "detection_signals":
+                self._inc_counter(self.detection_signals, 1, attrs)
+            elif name == "detection_signal_magnitude":
+                self._record_hist(
+                    self.detection_signal_magnitude, float(kwargs.get("amount", 0)), attrs
+                )
+            elif name == "detection_evictions":
+                self._inc_counter(self.detection_evictions, 1, attrs)
             elif name == "budget_remaining":
                 self._set_gauge("backstop_budget_remaining_tokens", float(kwargs.get("value", 0)))
             elif name == "queue_depth":

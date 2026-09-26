@@ -39,10 +39,16 @@ MAX_EVENT_ROWS = 200
 MAX_LATENCY_SAMPLES = 512
 MAX_AUDIT_TAIL_BYTES = 64 * 1024
 DEFAULT_SAMPLE_INTERVAL = 2.0
+#: Recent detection signals carried in a snapshot. Bounded because the source is
+#: a ring per session and a fleet of sessions would otherwise multiply it.
+MAX_DETECTION_ROWS = 20
 
 # Label positions for each instrumented event, mirroring the declarations in
 # ``backstop.metrics``. ``tests/test_telemetry.py`` asserts that this covers
-# every call site in ``backstop.transports``, so the two cannot drift.
+# every labelled call site in ``backstop.transports`` *and* every instrument the
+# runaway-spend sink emits, so the two cannot drift. A label is a position in a
+# closed vocabulary; a user identifier is not one, which is why no detection
+# instrument here is labelled by the key a signal fired on.
 LABEL_NAMES: dict[str, tuple[str, ...]] = {
     "requests": ("endpoint", "priority", "outcome"),
     "duration": ("endpoint", "priority"),
@@ -50,6 +56,18 @@ LABEL_NAMES: dict[str, tuple[str, ...]] = {
     "retry_attempts": ("endpoint",),
     "aimd_changes": ("direction",),
     "tenant_budget_exceeded": ("tenant_id",),
+    "detection_signals": ("kind", "severity"),
+    "detection_signal_magnitude": ("kind",),
+}
+
+#: Which histogram an ``observe`` call belongs in. The two latency buckets are
+#: percentiled together into one request-latency figure, so anything else that
+#: arrives through the same choke point — a detection signal's observed value —
+#: has to have a bucket of its own or it would be read as request latency.
+_OBSERVE_BUCKETS: dict[str, str] = {
+    "duration": "durations",
+    "queue_wait": "queue_waits",
+    "detection_signal_magnitude": "magnitudes",
 }
 
 # Outcomes recorded by ``transports.py``: "success", "error", "fallback",
@@ -93,6 +111,8 @@ class TelemetrySink:
         self._gauges: dict[tuple[str, tuple[str, ...]], float] = {}
         self._durations: deque[float] = deque(maxlen=MAX_LATENCY_SAMPLES)
         self._queue_waits: deque[float] = deque(maxlen=MAX_LATENCY_SAMPLES)
+        self._magnitudes: deque[float] = deque(maxlen=MAX_LATENCY_SAMPLES)
+        self._observed: set[tuple[str, tuple[str, ...]]] = set()
 
     # --- write side (called once per instrumented event) ---
     def record(
@@ -103,9 +123,10 @@ class TelemetrySink:
             amount = kwargs.get("amount")
             if amount is None:
                 return
-            target = self._queue_waits if name == "queue_wait" else self._durations
+            bucket = _OBSERVE_BUCKETS.get(name, "durations")
             with self._lock:
-                target.append(float(amount))
+                self._observed.add(key)
+                getattr(self, f"_{bucket}").append(float(amount))
             return
         if method == "set":
             value = kwargs.get("value")
@@ -159,12 +180,47 @@ class TelemetrySink:
         with self._lock:
             return list(self._queue_waits)
 
+    def names(self, *, labelled_only: bool = False) -> set[str]:
+        """Every instrument name this sink has seen, whatever its shape.
+
+        The read side of "which producers feed this", used by the test that keeps
+        :data:`LABEL_NAMES` honest. A name here that the map does not declare is a
+        label this sink cannot filter on; a name there that nothing emits is a
+        map entry that has drifted away from the code.
+
+        ``labelled_only`` drops the instruments that arrived with no labels at
+        all, which is what makes this comparable to a scan of the transports'
+        call sites: a call with no positional argument after the name is
+        unlabelled by definition, whatever else it is.
+        """
+        with self._lock:
+            rows = (
+                [(name, labels) for name, labels in self._counters]
+                + [(name, labels) for name, labels in self._gauges]
+                + list(self._observed)
+            )
+        return {
+            name for name, labels in rows if labels or not labelled_only
+        }
+
+    def detection_magnitude_snapshot(self) -> list[float]:
+        """Observed values of the runaway-spend signals seen so far.
+
+        Kept apart from :meth:`latency_snapshot` because the two are different
+        quantities in different units, and merging them would make the request
+        latency percentiles a number about nothing.
+        """
+        with self._lock:
+            return list(self._magnitudes)
+
     def reset(self) -> None:
         with self._lock:
             self._counters.clear()
             self._gauges.clear()
             self._durations.clear()
             self._queue_waits.clear()
+            self._magnitudes.clear()
+            self._observed.clear()
 
 
 @dataclass
@@ -391,6 +447,90 @@ def session_view() -> dict[str, Any]:
         "concurrency_limit": capacity,
         "queued": queued,
         "circuit": worst,
+    }
+
+
+def detection_view(limit: int = MAX_DETECTION_ROWS) -> dict[str, Any]:
+    """Every live detector, read from the state that owns it.
+
+    The other number an operator needs that a counter cannot give: the
+    *threshold* a signal crossed and *which* key crossed it. A process-wide
+    counter says that a velocity signal fired; with several ``wrap()`` sessions
+    in one process it cannot say which one, and it never carries the observed
+    value or the key. So the signals are read from the live detectors, for the
+    same reason :func:`session_view` reads budgets directly.
+
+    A key that reads as ``key`` here is a user identifier, and it is
+    deliberately present: the operator's next move is to find out *whose* spend
+    is running away, and a signal with no key cannot be acted on. It stays out
+    of the metric labels (``backstop.metrics`` documents why) and out of the
+    time series; it appears in this operator-facing payload only, bounded to
+    ``limit`` rows.
+    """
+    sessions: list[dict[str, Any]] = []
+    by_kind: dict[str, int] = {}
+    by_severity: dict[str, int] = {}
+    recent: list[dict[str, Any]] = []
+    keys = 0
+    samples = 0
+    evictions = 0
+    errors = 0
+    enabled = False
+    shadow = True
+
+    for row, state in get_registry().states():
+        detector = getattr(state, "detector", None)
+        if detector is None:
+            continue
+        config = getattr(detector, "config", None)
+        counts = detector.counts()
+        for kind, value in counts.items():
+            by_kind[kind] = by_kind.get(kind, 0) + int(value)
+        enabled = enabled or bool(getattr(config, "enabled", False))
+        shadow = shadow and bool(getattr(detector, "shadow", True))
+        keys += int(detector.key_count())
+        samples += int(detector.sample_count())
+        evictions += int(getattr(detector, "evictions", 0))
+        errors += int(detector.errors)
+        for signal in detector.recorded():
+            by_severity[signal.severity] = by_severity.get(signal.severity, 0) + 1
+        recent.extend(
+            {
+                "kind": signal.kind,
+                "severity": signal.severity,
+                "key": signal.key,
+                "observed": signal.observed,
+                "threshold": signal.threshold,
+                "occurred_at": signal.occurred_at,
+            }
+            for signal in detector.recorded()
+        )
+        sessions.append(
+            {
+                "session_id": row.session_id,
+                "enabled": bool(getattr(config, "enabled", False)),
+                "shadow": bool(getattr(detector, "shadow", True)),
+                "keys": int(detector.key_count()),
+                "max_keys": int(getattr(config, "max_keys", 0) or 0),
+                "window_size": int(detector.max_window()),
+                "samples": int(detector.sample_count()),
+                "signals": sum(int(value) for value in counts.values()),
+            }
+        )
+
+    recent.sort(key=lambda signal: signal["occurred_at"], reverse=True)
+    return {
+        "enabled": enabled,
+        "shadow": shadow,
+        "sessions": sessions,
+        "session_count": len(sessions),
+        "by_kind": by_kind,
+        "by_severity": by_severity,
+        "keys": keys,
+        "samples": samples,
+        "evictions": evictions,
+        "errors": errors,
+        "recent": recent[:limit],
     }
 
 
@@ -804,6 +944,7 @@ def build_snapshot(
             "burn_tokens_per_min": _rate_series(samples, "budget_spent", 60.0),
             "concurrency_active": [int(sample.concurrency_active) for sample in samples],
         },
+        "detection": detection_view(),
         "sessions": view["sessions"],
         "tenants": tenant_view(),
         "events": audit_events(resolved_audit),
