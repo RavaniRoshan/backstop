@@ -571,7 +571,7 @@ class BackstopTransport(httpx.BaseTransport):
             wait = self._acquire_gate(meta.priority, deadline)
             admitted = True
             tracker.queue_entered_at = time.monotonic()
-            self._observe_queue(wait, meta.priority)
+            self._observe_queue(wait, meta.priority, tenant_id)
             if self._shadow is None:
                 circuit.before_request()
             else:
@@ -710,7 +710,7 @@ class BackstopTransport(httpx.BaseTransport):
         finally:
             if admitted:
                 self.state.gate.release()
-                self._observe_gauges(circuit)
+                self._observe_gauges(circuit, tenant_id)
 
     def close(self) -> None:
         self._transport.close()
@@ -899,9 +899,11 @@ class BackstopTransport(httpx.BaseTransport):
             if self.state.aimd.record_pressure():
                 self._metrics.call("aimd_changes", "decrease")
 
-    def _observe_queue(self, wait: float, priority: Priority) -> None:
+    def _observe_queue(
+        self, wait: float, priority: Priority, tenant_id: str | None = None
+    ) -> None:
         self._metrics.call("queue_wait", priority.value, method="observe", amount=wait)
-        self._observe_gauges()
+        self._observe_gauges(tenant_id=tenant_id)
 
     def _observe_request(
         self, endpoint: str, priority: Priority, started: float, outcome: str
@@ -911,8 +913,23 @@ class BackstopTransport(httpx.BaseTransport):
             "duration", endpoint, priority.value, method="observe", amount=time.monotonic() - started
         )
 
-    def _observe_gauges(self, circuit: CircuitBreaker | None = None) -> None:
-        tenant_id = get_current_tenant()
+    def _observe_gauges(
+        self, circuit: CircuitBreaker | None = None, tenant_id: str | None = None
+    ) -> None:
+        """Publish the gauges. ``tenant_id`` is the *resolved* tenant.
+
+        The tenant is resolved once, at the top of ``handle_request``, from the
+        ambient context **or** from the virtual-key header, and the request is
+        then budgeted against whichever it resolved to. Re-reading the ContextVar
+        here reported the global ``budget_remaining`` for every request made with
+        a virtual key, so a per-tenant deployment saw a gauge that described a
+        budget none of its requests were spending — a number that looks plausible
+        and is about the wrong thing.
+
+        The caller passes the resolved tenant rather than this re-deriving it,
+        because re-deriving it is the bug. ``None`` means "no tenant resolved",
+        which is the global budget, and is the same answer as before.
+        """
         if tenant_id is not None:
             tb = get_ledger().get(tenant_id)
             remaining = tb.remaining if tb is not None else None
@@ -1104,7 +1121,7 @@ class AsyncBackstopTransport(httpx.AsyncBaseTransport):
             wait = await self._aacquire_gate(meta.priority, deadline)
             admitted = True
             tracker.queue_entered_at = time.monotonic()
-            self._observe_queue(wait, meta.priority)
+            self._observe_queue(wait, meta.priority, tenant_id)
             if self._shadow is None:
                 circuit.before_request()
             else:
@@ -1231,7 +1248,7 @@ class AsyncBackstopTransport(httpx.AsyncBaseTransport):
         finally:
             if admitted:
                 await self.state.gate.arelease()
-                self._observe_gauges(circuit)
+                self._observe_gauges(circuit, tenant_id)
 
     async def aclose(self) -> None:
         await self._transport.aclose()
@@ -1410,9 +1427,11 @@ class AsyncBackstopTransport(httpx.AsyncBaseTransport):
             if self.state.aimd.record_pressure():
                 self._metrics.call("aimd_changes", "decrease")
 
-    def _observe_queue(self, wait: float, priority: Priority) -> None:
+    def _observe_queue(
+        self, wait: float, priority: Priority, tenant_id: str | None = None
+    ) -> None:
         self._metrics.call("queue_wait", priority.value, method="observe", amount=wait)
-        self._observe_gauges()
+        self._observe_gauges(tenant_id=tenant_id)
 
     def _observe_request(
         self, endpoint: str, priority: Priority, started: float, outcome: str
@@ -1422,8 +1441,23 @@ class AsyncBackstopTransport(httpx.AsyncBaseTransport):
             "duration", endpoint, priority.value, method="observe", amount=time.monotonic() - started
         )
 
-    def _observe_gauges(self, circuit: CircuitBreaker | None = None) -> None:
-        tenant_id = get_current_tenant()
+    def _observe_gauges(
+        self, circuit: CircuitBreaker | None = None, tenant_id: str | None = None
+    ) -> None:
+        """Publish the gauges. ``tenant_id`` is the *resolved* tenant.
+
+        The tenant is resolved once, at the top of ``handle_request``, from the
+        ambient context **or** from the virtual-key header, and the request is
+        then budgeted against whichever it resolved to. Re-reading the ContextVar
+        here reported the global ``budget_remaining`` for every request made with
+        a virtual key, so a per-tenant deployment saw a gauge that described a
+        budget none of its requests were spending — a number that looks plausible
+        and is about the wrong thing.
+
+        The caller passes the resolved tenant rather than this re-deriving it,
+        because re-deriving it is the bug. ``None`` means "no tenant resolved",
+        which is the global budget, and is the same answer as before.
+        """
         if tenant_id is not None:
             tb = get_ledger().get(tenant_id)
             remaining = tb.remaining if tb is not None else None

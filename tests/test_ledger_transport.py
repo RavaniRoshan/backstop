@@ -655,3 +655,224 @@ async def _wait_async(event: threading.Event) -> bool:
         while not event.is_set():
             await anyio.sleep(0.005)
     return event.is_set()
+
+
+# ---------------------------------------------------------------------------
+# The gauge must describe the tenant the request was actually billed against
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def recorded_metrics():
+    """Capture every ``Metrics.call`` this process makes, and restore after."""
+    from backstop.metrics import set_telemetry_sink
+
+    calls: list[tuple] = []
+    set_telemetry_sink(lambda name, args, method, kwargs: calls.append((name, args, method, kwargs)))
+    try:
+        yield calls
+    finally:
+        set_telemetry_sink(None)
+
+
+def _budget_remaining_values(calls) -> list[float]:
+    return [
+        kwargs["value"]
+        for name, _args, method, kwargs in calls
+        if name == "budget_remaining" and method == "set"
+    ]
+
+
+def test_the_budget_gauge_reports_the_virtual_key_tenant_not_the_global(
+    recorded_metrics,
+):
+    from backstop.ledger import TenantBudget, get_current_tenant, get_ledger, reset_ledger
+
+    reset_ledger()
+    try:
+        get_ledger().register({"acme": TenantBudget(tenant_id="acme", limit_tokens=1_000)})
+        state = _state(
+            BackstopConfig(
+                default_max_output_tokens=8,
+                virtual_keys={"sk-acme": "acme"},
+            ),
+            budget=5_000,
+        )
+        with _sync_client(state, _handler(OPENAI_RESPONSE)) as client:
+            response = client.post(
+                "/v1/chat/completions",
+                headers={"X-Backstop-Key": "sk-acme"},
+                json=OPENAI_BODY,
+            )
+        assert response.status_code == 200
+        # The tenant came from the header, not the context: nothing set a tenant
+        # ContextVar, which is the whole point of the virtual-key path.
+        assert get_current_tenant() is None
+
+        tenant_remaining = get_ledger().get("acme").remaining
+        reported = _budget_remaining_values(recorded_metrics)
+        assert reported, "the budget_remaining gauge was never published"
+        # The gauge is published twice per request — on admission and again on
+        # release — so the last one is the settled figure.
+        assert reported[-1] == tenant_remaining
+        # Reporting the global budget here is the bug this pins: a plausible
+        # number about a budget this request never spent. The tenant's cap is
+        # 1,000 and the global one is 5,000, so a global-sized figure is
+        # unmistakable.
+        assert max(reported) <= 1_000
+        assert tenant_remaining < state.budget.remaining
+    finally:
+        reset_ledger()
+
+
+def test_the_budget_gauge_reports_the_global_budget_with_no_tenant(recorded_metrics):
+    state = _state(BackstopConfig(default_max_output_tokens=8), budget=5_000)
+    with _sync_client(state, _handler(OPENAI_RESPONSE)) as client:
+        client.post("/v1/chat/completions", json=OPENAI_BODY)
+    reported = _budget_remaining_values(recorded_metrics)
+    assert reported, "the budget_remaining gauge was never published"
+    # No tenant resolved, so the global budget is still the right answer — this
+    # guards the fix against breaking the case it was not aimed at.
+    assert reported[-1] == state.budget.remaining
+
+
+@pytest.mark.anyio
+async def test_async_the_budget_gauge_reports_the_virtual_key_tenant_not_the_global(
+    recorded_metrics,
+):
+    from backstop.ledger import TenantBudget, get_current_tenant, get_ledger, reset_ledger
+
+    reset_ledger()
+    try:
+        get_ledger().register({"acme": TenantBudget(tenant_id="acme", limit_tokens=1_000)})
+        state = _state(
+            BackstopConfig(
+                default_max_output_tokens=8,
+                virtual_keys={"sk-acme": "acme"},
+            ),
+            budget=5_000,
+        )
+        async with _async_client(state, _handler(OPENAI_RESPONSE)) as client:
+            response = await client.post(
+                "/v1/chat/completions",
+                headers={"X-Backstop-Key": "sk-acme"},
+                json=OPENAI_BODY,
+            )
+        assert response.status_code == 200
+        assert get_current_tenant() is None
+        tenant_remaining = get_ledger().get("acme").remaining
+        reported = _budget_remaining_values(recorded_metrics)
+        assert reported[-1] == tenant_remaining
+        assert max(reported) <= 1_000
+        assert tenant_remaining < state.budget.remaining
+    finally:
+        reset_ledger()
+
+
+# ---------------------------------------------------------------------------
+# A fallback that succeeded is a request that cost money
+# ---------------------------------------------------------------------------
+
+
+def _fallback_config(**overrides) -> BackstopConfig:
+    return BackstopConfig(
+        default_max_output_tokens=8,
+        retry_max_attempts=1,
+        aimd_adjustment_interval=0,
+        circuit_min_requests=1,
+        circuit_failure_threshold=1.0,
+        circuit_cooldown_seconds=60.0,
+        **overrides,
+    )
+
+
+def test_a_successful_fallback_is_billed_as_its_own_fallback_event():
+    # One 503 opens the circuit; the cooldown keeps it open, so the next request
+    # must take the fallback chain.
+    state = _state(_fallback_config(ledger_enabled=True, fallback_model="gpt-4o-mini"))
+    with _sync_client(state, _handler(OPENAI_RESPONSE, status=503)) as client:
+        assert client.post("/v1/chat/completions", json=OPENAI_BODY).status_code == 503
+    assert state.circuit.state is CircuitState.OPEN
+
+    def fallback_handler(request: httpx.Request) -> httpx.Response:
+        assert json.loads(request.content)["model"] == "gpt-4o-mini"
+        return httpx.Response(200, json={**OPENAI_RESPONSE, "model": "gpt-4o-mini"})
+
+    with _sync_client(state, fallback_handler) as client:
+        response = client.post("/v1/chat/completions", json=OPENAI_BODY)
+    assert response.status_code == 200
+    # The 503 that opened the circuit is recorded as an error; the fallback that
+    # answered the next request is recorded separately, under the model that
+    # actually served it.
+    outcomes = [event.outcome for event in _events(state)]
+    assert outcomes == ["error", "fallback"]
+    assert [event.model for event in _events(state)][-1] == "gpt-4o-mini"
+
+
+@pytest.mark.anyio
+async def test_async_a_successful_fallback_is_billed_as_its_own_fallback_event():
+    state = _state(_fallback_config(ledger_enabled=True, fallback_model="gpt-4o-mini"))
+    async with _async_client(state, _handler(OPENAI_RESPONSE, status=503)) as client:
+        assert (await client.post("/v1/chat/completions", json=OPENAI_BODY)).status_code == 503
+    assert state.circuit.state is CircuitState.OPEN
+
+    def fallback_handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={**OPENAI_RESPONSE, "model": "gpt-4o-mini"})
+
+    async with _async_client(state, fallback_handler) as client:
+        response = await client.post("/v1/chat/completions", json=OPENAI_BODY)
+    assert response.status_code == 200
+    assert [event.outcome for event in _events(state)] == ["error", "fallback"]
+
+
+# ---------------------------------------------------------------------------
+# The one-wrap-call adoption property, with the ledger off
+# ---------------------------------------------------------------------------
+
+
+def test_one_wrap_call_still_works_with_the_ledger_off():
+    """The adoption property is one call. This task must not have changed it.
+
+    ``Backstop.wrap(client, budget=...)`` is the whole integration story, and it
+    is asserted here with the ledger at its default of off, because that is the
+    configuration every existing user is on.
+    """
+    openai = pytest.importorskip("openai")
+    from backstop import Backstop
+    from backstop._httpcompat import compat_for
+
+    probe = openai.OpenAI(api_key="sk-test")
+    compat = compat_for(probe._client)
+    probe._client.close()
+
+    seen: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json=OPENAI_RESPONSE)
+
+    raw = compat.Client(
+        transport=BackstopTransport(_state(BackstopConfig()), compat.MockTransport(handle)),
+        base_url="https://api.openai.com/v1",
+    )
+    client = openai.OpenAI(api_key="sk-test", http_client=raw)
+    wrapped = Backstop.wrap(client, budget=100_000)
+    try:
+        assert wrapped.__class__ is openai.OpenAI
+        completion = wrapped.chat.completions.create(
+            model="gpt-4o", messages=[{"role": "user", "content": "hi"}]
+        )
+        assert completion.id == "chatcmpl-ledger-1"
+        assert len(seen) == 1
+
+        state = wrapped._backstop_state
+        assert state.config.ledger_enabled is False
+        # The default path: a NullSink writer that was never asked for anything.
+        assert isinstance(state.ledger.sink, NullSink)
+        assert state.ledger.submitted == 0
+        assert state.ledger_errors == 0
+        # And enforcement is untouched: the reservation was made and reconciled.
+        assert state.budget.spent == 150
+    finally:
+        raw.close()
+        client.close()
