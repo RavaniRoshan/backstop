@@ -1166,3 +1166,34 @@ def test_an_unpriced_estimated_request_is_in_both_columns_of_every_renderer():
     # rendering artefact of one output.
     assert "1" in render_chargeback_markdown([row], chargeback_totals([row]))
     assert row.to_dict()["estimated_requests"] == 1
+
+
+def test_every_billable_component_has_a_token_column_and_a_real_field():
+    """The invariant ``_COMPONENT_TOKENS`` claims a test holds, now held.
+
+    A new billable component with no column here would silently under-count a
+    row: the money would be right, the volume beside it wrong, and nothing in the
+    report would say so. Enforced by shape today — the map is iterated in
+    ``COST_COMPONENTS`` order to build the token columns — and enforced here, so
+    the shape is a decision rather than an accident.
+    """
+    from dataclasses import fields
+
+    from backstop.ledger.export import _COMPONENT_TOKENS, _TOKEN_COLUMNS, columns
+    from backstop.pricing_catalog import COST_COMPONENTS
+
+    assert set(_COMPONENT_TOKENS) == set(COST_COMPONENTS)
+    assert _TOKEN_COLUMNS == tuple(_COMPONENT_TOKENS[name] for name in COST_COMPONENTS)
+
+    names = {field.name for field in fields(SpendEvent)}
+    for component, column in _COMPONENT_TOKENS.items():
+        assert column in names, f"{component} maps to {column}, which SpendEvent lacks"
+        # And the column is a real one on a charge-back row, or the count has
+        # nowhere to land.
+        assert column in columns()
+        assert column in ROW_COLUMNS
+
+    # A component added to the catalog without a mapping fails here rather than
+    # at the first export of the month that uses it.
+    with pytest.raises(AssertionError):
+        assert set(_COMPONENT_TOKENS) == set(COST_COMPONENTS) - {"cache_write"}

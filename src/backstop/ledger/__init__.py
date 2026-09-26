@@ -54,6 +54,7 @@ from .export import (
     write_chargeback_csv,
 )
 from .schema import (
+    EMITTED_OUTCOMES,
     EVENT_ID_RE,
     OCCURRED_AT_RE,
     OUTCOMES,
@@ -81,6 +82,7 @@ from .sink import (
 
 __all__ = [
     "DRAIN_THREAD_NAME",
+    "EMITTED_OUTCOMES",
     "EVENT_ID_RE",
     "OCCURRED_AT_RE",
     "OUTCOMES",

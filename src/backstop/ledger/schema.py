@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from ..pricing_catalog import CostBreakdown
 
 __all__ = [
+    "EMITTED_OUTCOMES",
     "EVENT_ID_RE",
     "OCCURRED_AT_RE",
     "OUTCOMES",
@@ -49,6 +50,11 @@ __all__ = [
 
 SCHEMA_VERSION = "1.0"
 PRIORITIES: tuple[str, ...] = ("critical", "default", "background")
+
+#: Every outcome a spend event is allowed to carry. This is the *vocabulary*, and
+#: it is deliberately wider than what Backstop produces — see
+#: :data:`EMITTED_OUTCOMES` for the three that reach a ledger today, and for why
+#: the rest are reserved rather than emitted.
 OUTCOMES: tuple[str, ...] = (
     "success",
     "error",
@@ -57,6 +63,31 @@ OUTCOMES: tuple[str, ...] = (
     "queue_timeout",
     "fallback",
 )
+
+#: The outcomes the transports actually write: a provider answered
+#: (``success``/``error``), or the fallback chain answered instead
+#: (``fallback``).
+#:
+#: **The other three are reserved, not missing.** A budget-denied, queue-timed-out
+#: or circuit-open request is a request that never reached a provider, so it has
+#: no usage report and no dollars. Recording one would put a zero-cost row into a
+#: charge-back whose token counts could only be the local pre-flight estimate —
+#: a floor for money that was never spent — and it would feed that same floor
+#: into the runaway detector's window, where it would contaminate the drift and
+#: context-growth ratios the four detectors exist to measure. Spend *avoided* is
+#: already visible where an operator already looks, and on a different surface
+#: with the right vocabulary: the ``budget_exceeded`` / ``rate_limited`` counters
+#: and the ``requests{outcome=circuit_open|exception}`` breakdown on
+#: :class:`~backstop.metrics.Metrics`, plus the audit log's ``deny`` records.
+#: Duplicating that into the ledger would be a second telemetry system counting
+#: the same events differently.
+#:
+#: The values stay in :data:`OUTCOMES` so a durable NDJSON file written by a
+#: future build, or by a user's own producer, still validates against this
+#: schema. :data:`backstop.ledger.export` cannot group on ``outcome`` at all —
+#: ``group_by`` is validated against the :class:`Attribution` fields — so no
+#: export carries an empty bucket for them.
+EMITTED_OUTCOMES: tuple[str, ...] = ("success", "error", "fallback")
 
 #: ``occurred_at`` wire form: RFC 3339 UTC with exactly six fractional digits.
 OCCURRED_AT_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$")

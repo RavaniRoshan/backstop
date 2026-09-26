@@ -23,8 +23,10 @@ import pytest
 from backstop import BackstopConfig
 from backstop.circuit import CircuitState
 from backstop.detection import DetectionConfig, RunawayDetector
-from backstop.exceptions import BudgetExceededError
+from backstop.exceptions import BudgetExceededError, CircuitBreakerOpenError
 from backstop.ledger import (
+    EMITTED_OUTCOMES,
+    OUTCOMES,
     Attribution,
     BoundedWriter,
     JsonlSink,
@@ -1013,3 +1015,119 @@ def test_one_wrap_call_still_works_with_the_ledger_off():
     finally:
         raw.close()
         client.close()
+
+
+# ---------------------------------------------------------------------------
+# Which outcomes reach a durable ledger, and which are reserved
+# ---------------------------------------------------------------------------
+
+
+def _open_circuit_config(**overrides) -> BackstopConfig:
+    """One 503 opens the circuit and the cooldown keeps it open."""
+    return BackstopConfig(
+        default_max_output_tokens=8,
+        retry_max_attempts=1,
+        aimd_adjustment_interval=0,
+        circuit_min_requests=1,
+        circuit_failure_threshold=1.0,
+        circuit_cooldown_seconds=60.0,
+        ledger_enabled=True,
+        **overrides,
+    )
+
+
+def test_the_ledger_records_only_outcomes_that_reached_a_provider():
+    """Pin the decision that ``EMITTED_OUTCOMES`` documents.
+
+    ``SpendEvent.OUTCOMES`` carries six values; three of them name requests the
+    guardrails stopped before dispatch. Those are *reserved*, not produced, and
+    this test is why: it drives a success, an error and a circuit-open denial
+    through the transport and asserts the ledger contains exactly the first two.
+    If someone starts emitting ``circuit_open`` or ``budget_denied`` rows, this
+    fails and the reason has to be argued — a blocked request has no provider
+    usage and no dollars, so the row would carry a pre-flight floor for spend
+    that never happened, and it would feed that floor into the detector's window.
+    """
+    answered = _state(_open_circuit_config())
+    with _sync_client(answered, _handler(OPENAI_RESPONSE)) as client:
+        assert client.post("/v1/chat/completions", json=OPENAI_BODY).status_code == 200
+    with _sync_client(answered, _handler(OPENAI_RESPONSE, status=500)) as client:
+        assert client.post("/v1/chat/completions", json=OPENAI_BODY).status_code == 500
+    assert {event.outcome for event in _events(answered)} == {"success", "error"}
+
+    # A fresh state, because the circuit's window counts the successes above.
+    denied = _state(_open_circuit_config())
+    with _sync_client(denied, _handler(OPENAI_RESPONSE, status=503)) as client:
+        client.post("/v1/chat/completions", json=OPENAI_BODY)
+    assert denied.circuit.state is CircuitState.OPEN
+    with pytest.raises(CircuitBreakerOpenError):
+        with _sync_client(denied, _handler(OPENAI_RESPONSE)) as client:
+            client.post("/v1/chat/completions", json=OPENAI_BODY)
+    # The 503 is a provider call and is billed as one; the denial that followed
+    # is not in the ledger at all.
+    assert [event.outcome for event in _events(denied)] == ["error"]
+
+    # The three reserved outcomes are still valid schema values, so a file
+    # written by another producer still loads against this schema.
+    assert set(EMITTED_OUTCOMES) < set(OUTCOMES)
+    for reserved in ("circuit_open", "budget_denied", "queue_timeout"):
+        assert reserved in OUTCOMES
+        assert reserved not in EMITTED_OUTCOMES
+        assert _event_with_outcome(reserved).outcome == reserved
+
+
+def test_the_fallback_outcome_is_one_of_the_three_that_are_emitted():
+    """The other half of the set, asserted rather than assumed."""
+    state = _state(_fallback_config(ledger_enabled=True, fallback_model="gpt-4o-mini"))
+    with _sync_client(state, _handler(OPENAI_RESPONSE, status=503)) as client:
+        client.post("/v1/chat/completions", json=OPENAI_BODY)
+
+    def fallback_handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={**OPENAI_RESPONSE, "model": "gpt-4o-mini"})
+
+    with _sync_client(state, fallback_handler) as client:
+        assert client.post("/v1/chat/completions", json=OPENAI_BODY).status_code == 200
+    outcomes = [event.outcome for event in _events(state)]
+    assert outcomes == ["error", "fallback"]
+    assert set(outcomes) <= set(EMITTED_OUTCOMES)
+
+
+def _event_with_outcome(outcome: str) -> SpendEvent:
+    return SpendEvent(
+        provider="openai",
+        model="gpt-4o",
+        endpoint="/v1/chat/completions",
+        priority="default",
+        outcome=outcome,
+        input_tokens=1,
+        output_tokens=1,
+        estimated=False,
+        attribution=Attribution(team="payments"),
+    )
+
+
+def test_a_denied_request_is_still_visible_where_it_has_always_been_visible():
+    """The blocked-request evidence lives on the enforcement surface, not here.
+
+    A circuit-open denial costs no tokens and no dollars, so it must not appear
+    in a charge-back — but it must not vanish either, and it does not: the
+    request counter carries the outcome, while the ledger's own counters show no
+    loss, because the transport never offered it an event to lose.
+    """
+    from backstop.telemetry import install_sink, reset_telemetry
+
+    reset_telemetry()
+    try:
+        sink = install_sink()
+        state = _state(_open_circuit_config())
+        with _sync_client(state, _handler(OPENAI_RESPONSE, status=503)) as client:
+            client.post("/v1/chat/completions", json=OPENAI_BODY)
+        with pytest.raises(CircuitBreakerOpenError):
+            with _sync_client(state, _handler(OPENAI_RESPONSE)) as client:
+                client.post("/v1/chat/completions", json=OPENAI_BODY)
+        assert sink.counter_total("requests", {"outcome": "circuit_open"}) == 1
+        assert [event.outcome for event in _events(state)] == ["error"]
+        report = state.ledger.close()
+        assert report.lost == 0
+    finally:
+        reset_telemetry()
