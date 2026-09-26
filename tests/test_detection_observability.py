@@ -295,13 +295,17 @@ def test_the_detection_view_covers_every_live_session_separately():
     view reads the states rather than the sink.
     """
     first = _state()
-    # a second live state, so the view has two sessions to tell apart
-    _state()
+    # The binding is load-bearing, not decorative: the session registry holds
+    # WEAK references, so an unreferenced state is collected immediately and
+    # there would be only one session to report. Asserting on `second` below
+    # also keeps ruff honest about why the name exists.
+    second = _state()
     _burst(first, count=2)
     view = detection_view()
     assert view["session_count"] == 2
     # the untouched state is reported, with a signal count of its own
     assert any(int(row["signals"]) == 0 for row in view["sessions"])
+    assert second.detector is not first.detector
     assert {row["session_id"] for row in view["sessions"]} == {
         row.session_id for row, _ in get_registry().states()
     }
