@@ -25,6 +25,36 @@ from .verify import run_verify
 SCENARIOS = ["burst", "steady-state", "error-storm", "budget-hit"]
 
 
+def _group_by_arg(value: str) -> tuple[str, ...]:
+    """Parse a ``--group-by`` value into a validated tuple of dimensions.
+
+    A ``type=`` hook on the argument, so an unknown dimension is argparse's usage
+    error — a message and exit 2 — rather than a ``ValueError`` traceback out of
+    the aggregator three frames later. The message lists the dimensions that do
+    exist, because the useful part of a usage error is what to type.
+    """
+    from .ledger.export import DEFAULT_GROUP_BY
+    from .ledger.schema import Attribution
+
+    if not value.strip():
+        raise argparse.ArgumentTypeError(
+            "--group-by must name at least one dimension; try "
+            f"{','.join(DEFAULT_GROUP_BY)}"
+        )
+    names = tuple(part.strip() for part in value.split(","))
+    fields = tuple(Attribution.__dataclass_fields__)
+    unknown = [name for name in names if name not in fields]
+    if unknown:
+        raise argparse.ArgumentTypeError(
+            f"--group-by does not know {unknown}; the ledger groups on {list(fields)}"
+        )
+    if len(set(names)) != len(names):
+        raise argparse.ArgumentTypeError(
+            f"--group-by names the same dimension twice: {list(names)}"
+        )
+    return names
+
+
 def _format_benchmark(results: list) -> str:
     overhead = _measure_overhead()
     lines = [
@@ -277,6 +307,13 @@ def _run_doctor() -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Imported here rather than at module scope: every other subcommand in this
+    # dispatcher works without the ledger, and an operator running `backstop
+    # doctor` should not pay for importing the export module. The ledger commands
+    # need three names and the validation the parser shares, so they are pulled in
+    # once, here, where they are used.
+    from .ledger.export import DEFAULT_GROUP_BY as DEFAULT_LEDGER_GROUP_BY
+
     parser = argparse.ArgumentParser(prog="backstop")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -413,6 +450,45 @@ def main(argv: list[str] | None = None) -> int:
     real_anthropic.add_argument("--async-client", action="store_true", help="use AsyncAnthropic")
     real_anthropic.add_argument("--json", action="store_true", help="emit JSON instead of Markdown")
 
+    ledger = subparsers.add_parser(
+        "ledger", help="inspect and export the priced spend ledger"
+    )
+    ledger_commands = ledger.add_subparsers(dest="ledger_command", required=True)
+
+    ledger_demo = ledger_commands.add_parser(
+        "demo", help="print a priced chargeback table from fixed, offline events"
+    )
+    ledger_demo.add_argument(
+        "--group-by", type=_group_by_arg, default=DEFAULT_LEDGER_GROUP_BY,
+        help="comma-separated attribution dimensions (default: team,feature)",
+    )
+    ledger_demo.add_argument("--json", action="store_true", help="emit JSON instead of Markdown")
+
+    ledger_show = ledger_commands.add_parser(
+        "show", help="report a JSONL ledger's integrity and chargeback"
+    )
+    ledger_show.add_argument("--path", required=True, help="path to a JSONL ledger file")
+    ledger_show.add_argument(
+        "--limit", type=int, default=20,
+        help="maximum rows to print; 0 for every row (default: 20)",
+    )
+    ledger_show.add_argument(
+        "--group-by", type=_group_by_arg, default=DEFAULT_LEDGER_GROUP_BY,
+        help="comma-separated attribution dimensions (default: team,feature)",
+    )
+    ledger_show.add_argument("--json", action="store_true", help="emit JSON instead of Markdown")
+
+    ledger_export = ledger_commands.add_parser(
+        "export", help="write a chargeback CSV from a JSONL ledger"
+    )
+    ledger_export.add_argument("--path", required=True, help="path to a JSONL ledger file")
+    ledger_export.add_argument("--out", required=True, help="path of the CSV to write")
+    ledger_export.add_argument(
+        "--group-by", type=_group_by_arg, default=DEFAULT_LEDGER_GROUP_BY,
+        help="comma-separated attribution dimensions (default: team,feature)",
+    )
+    ledger_export.add_argument("--json", action="store_true", help="emit JSON instead of Markdown")
+
     args = parser.parse_args(argv)
 
     if args.command == "harness":
@@ -521,6 +597,9 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         return 0 if (result.success or not args.strict) else 1
 
+    if args.command == "ledger":
+        return _run_ledger(args)
+
     if args.command == "real-openai":
         try:
             result = run_real_openai_smoke(
@@ -551,6 +630,128 @@ def main(argv: list[str] | None = None) -> int:
             return 1
 
     return 2
+
+
+def _run_ledger(args: argparse.Namespace) -> int:
+    """Dispatch ``backstop ledger demo|show|export``.
+
+    Three subcommands, no framework. The work is in
+    :mod:`backstop.ledger.export` and :mod:`backstop.ledger.demo`; what is left
+    here is the part a CLI owns: argument plumbing, a readable summary, and an
+    exit code.
+
+    Exit codes carry meaning. ``0`` means the report is complete: every line in
+    the file was read, and any loss is a torn final line that is *named* in the
+    output. ``1`` means the report would be wrong or absent — a file that will not
+    open, or a corrupt line, which raises :class:`LedgerCorruptionError` naming the
+    line and is never skipped. Silently dropping a line to produce a plausible
+    total is the one outcome this refuses.
+    """
+    from .ledger import export as ledger_export
+    from .ledger.demo import run_demo as run_ledger_demo
+
+    if args.ledger_command == "demo":
+        result = run_ledger_demo(group_by=tuple(args.group_by))
+        print(result.to_json() if args.json else result.to_markdown())
+        return 0
+
+    try:
+        read = ledger_export.read_ledger(args.path)
+    except ledger_export.LedgerCorruptionError as exc:
+        # stderr, and exit 1: a charge-back over a ledger with a hole in the middle
+        # is not a charge-back. The message names the line, so the operator can go
+        # and look at it.
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    except OSError as exc:
+        print(f"error: cannot read ledger {args.path!r}: {exc}", file=sys.stderr)
+        return 1
+
+    rows = ledger_export.build_chargeback(
+        read.events, tuple(args.group_by), ledger_export.Period.all()
+    )
+    totals = ledger_export.chargeback_totals(rows, tuple(args.group_by))
+
+    if args.ledger_command == "show":
+        shown = list(rows) if args.limit == 0 else list(rows)[: max(args.limit, 0)]
+        if args.json:
+            payload = json.loads(
+                ledger_export.render_chargeback_json(shown, totals)
+            )
+            payload["file"] = read.to_dict()
+            payload["rows_total"] = len(rows)
+            payload["limit"] = args.limit
+            # Both loss counters, as null rather than as 0: a JSONL line records an
+            # event, never a counter, so the file cannot answer this and a reader
+            # of the JSON deserves the same sentence a reader of the table gets.
+            payload["delivery"] = {
+                "dropped_events": None,
+                "sink_errors": None,
+                "note": ledger_export.FILE_DELIVERY_NOTE,
+            }
+            print(json.dumps(payload, indent=2, sort_keys=True))
+            return 0
+        print(_ledger_show_markdown(read, shown, totals, len(rows)))
+        return 0
+
+    written = ledger_export.write_chargeback_csv(
+        rows, args.out, group_by=tuple(args.group_by)
+    )
+    if args.json:
+        payload = json.loads(ledger_export.render_chargeback_json(rows, totals))
+        payload["file"] = read.to_dict()
+        payload["out"] = str(args.out)
+        payload["rows_written"] = written
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
+    print(
+        f"wrote {written} row(s) to {args.out} from {len(read.events)} event(s) "
+        f"in {args.path} — {ledger_export.money(totals.total_usd)} "
+        f"{totals.currency} total, {totals.unpriced_requests} unpriced, "
+        f"{ledger_export.money(totals.unattributed_usd)} unattributed"
+    )
+    return 0
+
+
+def _ledger_show_markdown(read, shown, totals, rows_total: int) -> str:
+    """The ``ledger show`` report: the file's integrity, then its chargeback.
+
+    The integrity report comes first and unconditionally. A reader who only looks
+    at the total still cannot miss that a line was lost, because the sentence
+    about it is the first thing on the screen.
+    """
+    from .ledger import export as ledger_export
+
+    lines = [
+        f"# Ledger: {read.path}",
+        "",
+        f"- events: **{len(read.events)}** from {read.lines_seen} line(s), "
+        f"{read.bytes_read} bytes",
+        f"- window: {totals.first_seen or '(no events)'} → "
+        f"{totals.last_seen or '(no events)'}",
+        "",
+    ]
+    lines.extend(ledger_export.format_file_delivery(read))
+    lines.extend(
+        [
+            "",
+            "## Chargeback",
+            "",
+            ledger_export.render_chargeback_markdown(shown, totals),
+        ]
+    )
+    if len(shown) < rows_total:
+        lines.extend(
+            [
+                "",
+                f"_{rows_total - len(shown)} further row(s) not shown; `--limit 0` "
+                "prints all, and `backstop ledger export` writes every row. The "
+                f"totals line and the teardown below cover all {rows_total} rows of "
+                "the file, not only the ones printed here._",
+            ]
+        )
+    lines.extend(["", "## What a CFO reads first", "", totals.to_markdown()])
+    return "\n".join(lines)
 
 
 def result_to_json(result) -> str:
