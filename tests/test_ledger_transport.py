@@ -986,14 +986,17 @@ def test_one_wrap_call_still_works_with_the_ledger_off():
 
     seen: list[httpx.Request] = []
 
-    def handle(request: httpx.Request) -> httpx.Response:
+    def handle(request):
         seen.append(request)
-        return httpx.Response(200, json=OPENAI_RESPONSE)
+        # Must be the RESPONSE CLASS OF THE RESOLVED FAMILY. Returning a classic
+        # `httpx.Response` into a handler that may be installed in an `httpx2`
+        # transport is a type mismatch, and it surfaces as a connection error
+        # (the request then escapes to the real network) rather than as a type
+        # error. This is why `verify._mock_provider_handler` returns
+        # `compat.Response` for the same reason.
+        return compat.Response(200, json=OPENAI_RESPONSE)
 
-    raw = compat.Client(
-        transport=BackstopTransport(_state(BackstopConfig()), compat.MockTransport(handle)),
-        base_url="https://api.openai.com/v1",
-    )
+    raw = compat.Client(transport=compat.MockTransport(handle))
     client = openai.OpenAI(api_key="sk-test", http_client=raw)
     wrapped = Backstop.wrap(client, budget=100_000)
     try:
