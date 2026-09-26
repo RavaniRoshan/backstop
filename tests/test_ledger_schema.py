@@ -7,6 +7,7 @@ a scope survives an ``asyncio`` task boundary.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 from dataclasses import FrozenInstanceError
 from datetime import datetime, timedelta, timezone
@@ -399,6 +400,104 @@ def test_decorator_refuses_a_generator_function():
         @with_attribution(agent="refund-bot")
         def stream():
             yield current_attribution()
+
+
+def test_decorator_refuses_an_async_generator_function():
+    with pytest.raises(TypeError, match="async generator function"):
+
+        @with_attribution(agent="refund-bot")
+        async def stream():
+            yield current_attribution()
+
+
+def test_decorator_refuses_a_function_that_returns_a_coroutine():
+    @with_attribution(agent="refund-bot")
+    def bridge():
+        async def body():
+            return current_attribution()
+
+        return body()
+
+    with pytest.raises(TypeError, match="coroutine"):
+        bridge()
+
+    with pytest.raises(TypeError, match="coroutine"):
+        asyncio.run(bridge())
+
+
+def test_decorator_refuses_a_function_that_returns_a_generator():
+    @with_attribution(agent="refund-bot")
+    def bridge():
+        def body():
+            yield current_attribution()
+
+        return body()
+
+    with pytest.raises(TypeError, match="generator"):
+        bridge()
+
+
+def test_decorator_refuses_a_coroutine_returned_from_a_coroutine_function():
+    @with_attribution(agent="refund-bot")
+    async def bridge():
+        async def body():
+            return current_attribution()
+
+        return body()
+
+    with pytest.raises(TypeError, match="coroutine"):
+        asyncio.run(bridge())
+
+
+def test_a_refused_deferred_body_leaves_the_scope_clean():
+    @with_attribution(agent="refund-bot")
+    def bridge():
+        async def body():
+            return current_attribution()
+
+        return body()
+
+    with pytest.raises(TypeError):
+        bridge()
+    assert current_attribution() == Attribution()
+
+
+def test_a_refused_deferred_body_is_closed_so_it_never_warns():
+    captured: list[object] = []
+
+    @with_attribution(agent="refund-bot")
+    def bridge():
+        async def body():
+            return current_attribution()
+
+        coroutine = body()
+        captured.append(coroutine)
+        return coroutine
+
+    with pytest.raises(TypeError, match="coroutine"):
+        bridge()
+    assert inspect.getcoroutinestate(captured[0]) == inspect.CORO_CLOSED
+
+
+def test_a_scheduled_future_is_allowed_because_its_context_was_copied():
+    async def work():
+        await asyncio.sleep(0)
+        return current_attribution()
+
+    @with_attribution(agent="refund-bot")
+    async def gatherer():
+        return await asyncio.gather(work())
+
+    assert asyncio.run(gatherer()) == [Attribution(agent="refund-bot")]
+
+
+def test_a_plain_value_result_is_allowed():
+    @with_attribution(agent="refund-bot")
+    def compute():
+        return [current_attribution(), current_attribution()]
+
+    assert compute() == [Attribution(agent="refund-bot")] * 2
+    assert current_attribution() == Attribution()
 
 
 # ---------------------------------------------------------------------------

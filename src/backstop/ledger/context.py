@@ -79,22 +79,69 @@ def _scope(override: Attribution) -> Iterator[Attribution]:
         _attribution_var.reset(token)
 
 
-def with_attribution(**fields: str) -> Callable[[_F], _F]:
+def _deferred_decoration_message(kind: str, name: str) -> str:
+    return (
+        f"with_attribution cannot decorate {kind} {name!r}: the body would run "
+        "after the scope had already been restored. Use `with attribution(...)` "
+        "in the body."
+    )
+
+
+def _reject_deferred_body(result: Any, func: Callable[..., Any]) -> None:
+    """Refuse a result whose body has not run yet.
+
+    A decorated plain function is indistinguishable, before it is called, from
+    one that defers its work, so the check happens on what it returned. A
+    coroutine, a generator, or an async generator has not started, so running it
+    after the scope is restored would record an un-attributed event — a silent
+    hole in a charge-back, which is worse than a loud refusal. An
+    ``asyncio.Future``/``Task`` is allowed through: the work was scheduled
+    inside the scope, and the task copied the context there.
+    """
+    if not (inspect.iscoroutine(result) or inspect.isgenerator(result) or inspect.isasyncgen(result)):
+        return
+    for closer in ("aclose", "close"):
+        finish = getattr(result, closer, None)
+        if callable(finish):
+            # The result is being discarded; close it so a never-awaited
+            # coroutine or never-started generator does not warn on collection.
+            finish()
+            break
+    raise TypeError(
+        f"with_attribution cannot scope {func.__qualname__!r}: it returned "
+        f"{type(result).__name__}, whose body runs after the scope is restored. "
+        "Use `with attribution(...)` in the body."
+    )
+
+
+def with_attribution(**fields: str | None) -> Callable[[_F], _F]:
     """Decorate a function or method so every call runs under these fields.
 
     Works on sync and async callables. The merge is resolved per call, not per
     decoration, so a decorated function called inside an outer scope inherits
     that scope and its own fields win. Methods are ordinary functions here: the
     receiver is passed through untouched.
+
+    A callable whose body does not run during the call — a generator function,
+    an async generator function, or a plain function that returns a coroutine,
+    generator or async generator — is refused with ``TypeError`` rather than
+    silently leaving the ledger unattributed. Scope the deferred body itself::
+
+        @with_attribution(agent="refund-bot")
+        def stream_refunds(ticket):
+            def events():
+                with attribution(agent="refund-bot"):
+                    yield current_attribution()
+            return events()
     """
     override = Attribution.from_fields(**fields)
 
     def decorate(func: _F) -> _F:
         if inspect.isgeneratorfunction(func):
+            raise TypeError(_deferred_decoration_message("generator function", func.__qualname__))
+        if inspect.isasyncgenfunction(func):
             raise TypeError(
-                "with_attribution cannot decorate generator function "
-                f"{func.__qualname__!r}: the body would run after the scope had "
-                "already been restored. Use `with attribution(...)` in the body."
+                _deferred_decoration_message("async generator function", func.__qualname__)
             )
         if inspect.iscoroutinefunction(func):
 
@@ -102,7 +149,9 @@ def with_attribution(**fields: str) -> Callable[[_F], _F]:
             async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
                 token = _enter(override)
                 try:
-                    return await func(*args, **kwargs)
+                    result = await func(*args, **kwargs)
+                    _reject_deferred_body(result, func)
+                    return result
                 finally:
                     _attribution_var.reset(token)
 
@@ -112,7 +161,9 @@ def with_attribution(**fields: str) -> Callable[[_F], _F]:
         def wrapper(*args: Any, **kwargs: Any) -> Any:
             token = _enter(override)
             try:
-                return func(*args, **kwargs)
+                result = func(*args, **kwargs)
+                _reject_deferred_body(result, func)
+                return result
             finally:
                 _attribution_var.reset(token)
 
