@@ -6,12 +6,15 @@ only shape the ledger stores, exports, and prices, so its wire form
 JSONL sink in a later task writes it one object per line and reads it back.
 
 Records are frozen. Nothing in the ledger mutates an event; a correction is a
-new event. :class:`Attribution` is frozen for the same reason plus one more —
+new event, which is why the endpoint is normalised once during construction and
+never again. :class:`Attribution` is frozen for the same reason plus one more —
 it is used as a dict key for per-attribution aggregation.
 
-``SpendEvent.cost`` is owned by the price catalog task and is deliberately left
-unpriced (``None``) until that task lands. It is forward-declared under
-``TYPE_CHECKING`` so this module stays import-cycle free.
+``SpendEvent.cost`` is owned by the price catalog task and is left unpriced
+(``None``) until that task lands. The forward reference lives in one named
+place, :func:`resolve_cost_type`, which that task replaces with a plain import;
+``CostBreakdown`` is forward-declared under ``TYPE_CHECKING`` so this module
+stays import-cycle free.
 """
 from __future__ import annotations
 
