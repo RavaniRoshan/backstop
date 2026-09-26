@@ -87,13 +87,34 @@ class TokenUsage(NamedTuple):
     always returned for the same response, so the reconciliation number cannot
     drift when the split is read too.
 
-    Cache tokens are kept out of :attr:`input_tokens` and in their own fields.
-    Anthropic counts ``cache_creation_input_tokens`` and
-    ``cache_read_input_tokens`` *in addition to* ``input_tokens``, and a price
-    card charges a cached read at a fraction of a fresh input, so folding them
-    into one number would both overstate the fresh-token count and lose the
-    cheaper rate. :attr:`total` still adds them, because that is what the
-    reservation being reconciled was about.
+    **The convention, which is not the providers'.** The two providers count
+    cached tokens on opposite sides of the number they call the input, and this
+    record normalises them to one meaning:
+
+    * :attr:`input_tokens` is the **fresh** input — the tokens that were *not*
+      served from a cache. It is the count a price card charges at the full
+      input rate, and nothing else is.
+    * :attr:`cache_read_tokens` is the count a price card charges at the
+      cache-read rate, and :attr:`cache_write_tokens` the count it charges at
+      the cache-write rate.
+    * :attr:`total` is the sum of all four, which is the number the reservation
+      was made against — so it is unchanged by this normalisation, and
+      ``input_tokens + output_tokens + cache_read_tokens + cache_write_tokens``
+      equals it for every body either provider sends.
+
+    The normalisation is the whole point, because the two shapes need opposite
+    arithmetic and getting either wrong moves real money. Anthropic's
+    ``input_tokens`` counts fresh tokens *only* and publishes cache counts
+    **in addition to** it, so the count arrives ready to bill. OpenAI's
+    ``prompt_tokens`` counts **every** prompt token with the cached ones *inside*
+    it, so the fresh count is the difference; reading OpenAI's number as if it
+    were Anthropic's charges 400,000 cached tokens at the full input rate, and
+    subtracting from Anthropic's would bill a fraction of them twice. The reader
+    takes the inclusion from the *key* the number arrived under rather than from
+    the field's name, because OpenAI publishes the inclusive count under two
+    different names — ``prompt_tokens`` on ``/v1/chat/completions`` and
+    ``input_tokens`` on ``/v1/responses`` — and an Anthropic ``input_tokens`` is
+    the other convention entirely. See :func:`_split_usage`.
 
     :attr:`split` says whether the provider reported the parts at all. It is
     ``False`` for the aggregate-only shapes (``total_tokens`` /
@@ -124,6 +145,11 @@ class TokenUsage(NamedTuple):
 #: ``prompt_token_count``/``candidates_token_count``, and every one of them may
 #: publish an aggregate ``total_tokens``/``total_token_count`` instead of a split.
 #: A new shape is added in :func:`_split_usage` and nowhere else.
+
+#: The two names OpenAI nests its cached-prompt count under, one per API, in
+#: the order they are tried. Spelled out in one place for the same reason the
+#: field names are: a new provider shape is added here and nowhere else.
+_OPENAI_DETAIL_KEYS = ("prompt_tokens_details", "input_tokens_details")
 
 
 def response_usage_tokens(response: httpx.Response) -> int | None:
@@ -215,13 +241,31 @@ def _split_usage(usage: Mapping[str, Any]) -> tuple[int, int, int, int, int | No
 
     Returns ``(input, output, cache_read, cache_write, total, split)``, or
     ``None`` when the object carried no usage at all — which is different from
-    carrying zeros. Cache counts come back separate from ``input``, because
-    Anthropic publishes them *in addition to* it.
+    carrying zeros.
+
+    **Cache tokens are counted in two incompatible ways and this is where they
+    are reconciled.** Anthropic publishes ``cache_read_input_tokens`` and
+    ``cache_creation_input_tokens`` *in addition to* ``input_tokens``, so
+    ``input_tokens`` is already the fresh count and nothing is subtracted.
+    OpenAI nests its cached count under ``prompt_tokens_details`` (or
+    ``input_tokens_details`` on the Responses API) as a count that is a *subset*
+    of the prompt count beside it, so the fresh count is the difference and the
+    cached count is a component of its own. Taking the inclusion from the key
+    rather than the field's name is what makes one rule cover both: OpenAI ships
+    the inclusive count under two names, and Anthropic's ``input_tokens`` is the
+    opposite convention under the same name OpenAI's Responses API uses.
+
+    A cached count larger than the prompt count it claims to be part of is a body
+    no provider sends. It is **not** clamped: the negative remainder is recorded
+    as reported, so the split sums to what the provider said and
+    :class:`~backstop.ledger.schema.SpendEvent` refuses the impossible count by
+    name rather than a price card quietly charging a clamped one.
 
     ``total`` is the provider's own aggregate when it published one, and ``None``
     otherwise so the caller sums the parts rather than mistaking a missing total
     for a measured zero. ``split`` is ``True`` when the parts are a measurement
-    rather than the zeros that stand in for an absent split.
+    rather than the zeros that stand in for an absent split. Both hold for an
+    OpenAI body whether or not it published a cached count.
 
     The split is read even when an aggregate is present, because OpenAI publishes
     both and a ledger that billed the aggregate as if it were all input would
@@ -233,21 +277,33 @@ def _split_usage(usage: Mapping[str, Any]) -> tuple[int, int, int, int, int | No
     ``_int_or_zero`` measured half a microsecond more per call than passing the
     three ``get``s as arguments, twice.
     """
-    input_tokens = _int_or_zero(
-        usage.get("input_tokens"),
-        usage.get("prompt_tokens"),
-        usage.get("prompt_token_count"),
-    )
     output_tokens = _int_or_zero(
         usage.get("output_tokens"),
         usage.get("completion_tokens"),
         usage.get("completion_token_count"),
         usage.get("candidates_token_count"),
     )
+    # The count that names the input. Anthropic's and OpenAI's Responses API's
+    # ``input_tokens`` and OpenAI's chat ``prompt_tokens`` all live here, which is
+    # why the cached count is looked up separately and its subtraction applied
+    # here rather than inside the per-provider read.
+    counted = _int_or_zero(usage.get("input_tokens"), usage.get("prompt_tokens"))
+    # A subset only exists to be taken out of the count that contains it, so a
+    # body that published no such count reports the cached tokens as they came
+    # and invents no fresh input to subtract them from.
+    nested_cache = _nested_cached_tokens(usage) if counted is not None else None
+    if counted is None:
+        # Vertex and Gemini: a prompt count with no cache detail anywhere near it.
+        input_tokens = _int_or_zero(usage.get("prompt_token_count"))
+    elif nested_cache is None:
+        # Anthropic: ``input_tokens`` is the fresh count already.
+        input_tokens = counted
+    else:
+        input_tokens = counted - nested_cache
     # A cache count is additive, so an unusable one is worth nothing rather than
     # fatal: a body that puts a string where a count belongs costs the cached
     # read its rate and says so by being absent, rather than failing the request
-    # that carried it.
+    # that carried it. The nested count has already been validated by its reader.
     cache_read = usage.get("cache_read_input_tokens")
     cache_write = usage.get("cache_creation_input_tokens")
     # ``bool`` is an ``int``, and a JSON ``true`` read as a token count is a body
@@ -265,11 +321,38 @@ def _split_usage(usage: Mapping[str, Any]) -> tuple[int, int, int, int, int | No
     return (
         input_tokens or 0,
         output_tokens or 0,
-        cache_read if type(cache_read) is int and cache_read >= 0 else 0,
+        (cache_read if type(cache_read) is int and cache_read >= 0 else 0)
+        + (nested_cache or 0),
         cache_write if type(cache_write) is int and cache_write >= 0 else 0,
         total,
         True,
     )
+
+
+def _nested_cached_tokens(usage: Mapping[str, Any]) -> int | None:
+    """OpenAI's cached-prompt count, or ``None`` when the body nests no detail.
+
+    Two names for one number, because OpenAI's two APIs differ:
+    ``/v1/chat/completions`` publishes ``usage.prompt_tokens_details`` beside
+    ``prompt_tokens`` and ``/v1/responses`` publishes
+    ``usage.input_tokens_details`` beside ``input_tokens``. In both the nested
+    ``cached_tokens`` is a **subset** of the count beside it — the opposite of
+    Anthropic's flat additive fields — which is why it is read here and never
+    added to ``cache_read_input_tokens`` without the subtraction in
+    :func:`_split_usage`.
+
+    ``None`` rather than zero for a body with no detail, so the caller can tell
+    "this provider published no cache count" from "it published zero cached
+    tokens"; the two bill the same and mean different things to a reader.
+    """
+    for key in _OPENAI_DETAIL_KEYS:
+        details = usage.get(key)
+        if isinstance(details, Mapping):
+            cached = details.get("cached_tokens")
+            # ``bool`` is an ``int``; a JSON ``true`` here is not a token count.
+            if type(cached) is int and cached >= 0:
+                return cached
+    return None
 
 
 def _token_usage(usage: Mapping[str, Any], model: Any) -> TokenUsage | None:
@@ -281,8 +364,12 @@ def _token_usage(usage: Mapping[str, Any], model: Any) -> TokenUsage | None:
     if reported_total is not None:
         total = reported_total
     else:
-        # The arithmetic total, as it has always been computed: cache counts are
-        # added to the fresh input, because that is what the reservation covers.
+        # The arithmetic total, as it has always been computed: the cache counts
+        # are added to the fresh input, because that is what the reservation
+        # covers. It is also what both providers published as their aggregate,
+        # whichever side of the split they count cache on — the arithmetic total
+        # is invariant across the two conventions, so nothing downstream of
+        # :func:`response_usage_tokens` can tell the normalisation happened.
         total = input_tokens + output_tokens + cache_read + cache_write
     return TokenUsage(
         input_tokens,

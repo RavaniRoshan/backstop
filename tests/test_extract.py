@@ -227,6 +227,195 @@ def test_response_usage_marks_an_aggregate_only_report_as_not_split():
     assert usage.output_tokens == 0
 
 
+# --- The two cache conventions ----------------------------------------------
+#
+# Anthropic counts cached tokens *in addition to* its ``input_tokens``; OpenAI
+# counts them *inside* its prompt count and nests the cached figure. Both are
+# real response shapes, and a test that only carries one of them cannot catch a
+# reader that got the other wrong — which is the bug this pair exists to pin.
+
+#: A real ``/v1/chat/completions`` body with prompt caching. The numbers are the
+#: reviewer's reproduction: 1,234,567 prompt tokens of which 400,000 were served
+#: from the cache.
+OPENAI_CACHED_RESPONSE = {
+    "id": "chatcmpl-cache-1",
+    "object": "chat.completion",
+    "model": "gpt-4o-2024-08-06",
+    "usage": {
+        "prompt_tokens": 1_234_567,
+        "completion_tokens": 500,
+        "total_tokens": 1_235_067,
+        "prompt_tokens_details": {"cached_tokens": 400_000, "audio_tokens": 0},
+    },
+}
+
+#: The same thing on ``/v1/responses``, where the inclusive count is *named*
+#: ``input_tokens`` — the name Anthropic uses for the opposite convention.
+OPENAI_RESPONSES_CACHED_RESPONSE = {
+    "id": "resp-cache-1",
+    "object": "response",
+    "model": "gpt-4o-2024-08-06",
+    "usage": {
+        "input_tokens": 1_234_567,
+        "input_tokens_details": {"cached_tokens": 400_000},
+        "output_tokens": 500,
+        "total_tokens": 1_235_067,
+    },
+}
+
+#: A real ``/v1/messages`` body, where ``input_tokens`` is the fresh count and
+#: the cache counts are published beside it.
+ANTHROPIC_CACHED_RESPONSE = {
+    "id": "msg_cache_1",
+    "type": "message",
+    "model": "claude-sonnet-4-5",
+    "usage": {
+        "input_tokens": 1_234_567,
+        "output_tokens": 500,
+        "cache_creation_input_tokens": 7_000,
+        "cache_read_input_tokens": 400_000,
+    },
+}
+
+
+def test_openai_cached_prompt_tokens_are_taken_out_of_the_fresh_input():
+    usage = response_usage(httpx.Response(200, json=OPENAI_CACHED_RESPONSE))
+    # OpenAI's prompt_tokens INCLUDES the 400,000 cached tokens, so the fresh
+    # count is the difference. Billing prompt_tokens as the input would charge
+    # 400,000 tokens at the full input rate that the provider gave at the
+    # cache-read rate — an overcharge, on the most common caching shape there is.
+    assert usage.input_tokens == 834_567
+    assert usage.cache_read_tokens == 400_000
+    assert usage.output_tokens == 500
+    assert usage.cache_write_tokens == 0
+    # OpenAI publishes no cache-write count, and the absence is a zero rather
+    # than an invented one.
+    assert usage.split is True, "the cached count is a measurement, not a guess"
+    # The parts sum to the aggregate the provider published beside them.
+    assert usage.total == 1_235_067
+    assert usage.input_tokens + usage.output_tokens + usage.cache_read_tokens == usage.total
+
+
+def test_openai_responses_api_cached_tokens_are_read_under_their_own_name():
+    usage = response_usage(httpx.Response(200, json=OPENAI_RESPONSES_CACHED_RESPONSE))
+    # Same numbers, same split: the Responses API nests the count under
+    # ``input_tokens_details`` and names the inclusive count ``input_tokens``, the
+    # very name Anthropic uses for the *exclusive* count. The reader takes the
+    # convention from the nesting, not from the name.
+    assert usage.input_tokens == 834_567
+    assert usage.cache_read_tokens == 400_000
+    assert usage.output_tokens == 500
+    assert usage.total == 1_235_067
+
+
+def test_anthropic_cache_tokens_stay_additive_to_its_fresh_input():
+    usage = response_usage(httpx.Response(200, json=ANTHROPIC_CACHED_RESPONSE))
+    # The opposite convention: Anthropic's input_tokens already excludes the
+    # cached tokens, so subtracting here would bill a fraction of them twice and
+    # drop 400,000 tokens out of the reservation on the way past.
+    assert usage.input_tokens == 1_234_567
+    assert usage.cache_read_tokens == 400_000
+    assert usage.cache_write_tokens == 7_000
+    assert usage.output_tokens == 500
+    assert usage.split is True
+    # No aggregate is published, so the total is the sum of the parts — and it is
+    # the same magnitude either convention produces, which is what keeps
+    # ``response_usage_tokens`` unchanged.
+    assert usage.total == 1_642_067
+    assert (
+        usage.input_tokens
+        + usage.output_tokens
+        + usage.cache_read_tokens
+        + usage.cache_write_tokens
+        == usage.total
+    )
+
+
+def test_a_cached_count_larger_than_its_prompt_is_recorded_not_clamped():
+    # A body no provider sends: the nested count is bigger than the prompt count
+    # it claims to be part of. The reader must not clamp the remainder to zero —
+    # a silently clamped count is the class of bug this normalisation fixes — and
+    # must not hide the cached count either.
+    usage = response_usage(
+        httpx.Response(
+            200,
+            json={
+                "model": "gpt-4o",
+                "usage": {
+                    "prompt_tokens": 100,
+                    "completion_tokens": 5,
+                    "prompt_tokens_details": {"cached_tokens": 150},
+                },
+            },
+        )
+    )
+    assert usage.input_tokens == -50, "the provider's numbers, not a repaired split"
+    assert usage.cache_read_tokens == 150
+    # The parts still sum to what the provider said, so the reconciled total is
+    # unaffected by an impossible split.
+    assert usage.total == 105
+
+
+def test_the_impossible_split_is_refused_by_the_event_schema_rather_than_billed():
+    # Recorded faithfully above; refused here, loudly. SpendEvent refuses a
+    # negative token count by name, and ``_record_spend`` counts that as a ledger
+    # error, so a provider body that does not add up shows up on a counter
+    # instead of becoming a plausible price.
+    from backstop.ledger import Attribution, SpendEvent
+
+    usage = response_usage(
+        httpx.Response(
+            200,
+            json={"usage": {"prompt_tokens": 100, "prompt_tokens_details": {"cached_tokens": 150}}},
+        )
+    )
+    with pytest.raises(ValueError, match="input_tokens must be >= 0"):
+        SpendEvent(
+            provider="openai",
+            model="gpt-4o",
+            endpoint="/v1/chat/completions",
+            priority="default",
+            outcome="success",
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+            cache_read_tokens=usage.cache_read_tokens,
+            estimated=False,
+            attribution=Attribution(),
+        )
+
+
+def test_a_nested_detail_with_no_usable_count_is_read_as_no_cache_detail():
+    # A body that nests something which is not a count says nothing about
+    # caching, and is treated as the plain shape it looks like rather than as
+    # an error or as a fabricated zero-with-a-reason.
+    for details in ({}, {"cached_tokens": "many"}, {"cached_tokens": True}, {"cached_tokens": -1}, "nope"):
+        usage = response_usage(
+            httpx.Response(
+                200,
+                json={"usage": {"prompt_tokens": 90, "completion_tokens": 5, "prompt_tokens_details": details}},
+            )
+        )
+        assert (usage.input_tokens, usage.cache_read_tokens) == (90, 0), details
+        assert usage.split is True
+
+
+def test_an_explicit_zero_cached_count_leaves_the_prompt_untouched():
+    usage = response_usage(
+        httpx.Response(
+            200,
+            json={
+                "usage": {
+                    "prompt_tokens": 90,
+                    "completion_tokens": 5,
+                    "prompt_tokens_details": {"cached_tokens": 0},
+                }
+            },
+        )
+    )
+    assert (usage.input_tokens, usage.cache_read_tokens) == (90, 0)
+    assert usage.total == 95
+
+
 def test_response_usage_total_agrees_with_the_total_only_reader():
     bodies = [
         {"usage": {"prompt_tokens": 10, "completion_tokens": 5}},

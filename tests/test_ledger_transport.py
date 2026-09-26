@@ -236,6 +236,117 @@ def test_anthropic_cache_tokens_are_kept_out_of_the_fresh_input():
     assert event.cache_write_tokens == 0
 
 
+# --- Cached prompt tokens, priced -------------------------------------------
+#
+# The two providers publish their cached-prompt count in shapes that need
+# opposite arithmetic, and the difference is money: a cached read is a fraction
+# of a fresh input on every rate card here. These two tests are the pair — the
+# OpenAI figure is inside its prompt count and the Anthropic figure is beside
+# its input count — so a reader that applied either convention to both would
+# fail one of them.
+
+#: A real ``/v1/chat/completions`` body with prompt caching, on the model the
+#: other transport tests already use.
+OPENAI_CACHED_RESPONSE = {
+    "id": "chatcmpl-ledger-cache",
+    "object": "chat.completion",
+    "model": "gpt-4o-2024-08-06",
+    "usage": {
+        "prompt_tokens": 1_234_567,
+        "completion_tokens": 500,
+        "total_tokens": 1_235_067,
+        "prompt_tokens_details": {"cached_tokens": 400_000, "audio_tokens": 0},
+    },
+}
+
+#: A real ``/v1/messages`` body carrying the same magnitudes, where the cached
+#: count is published *beside* the input count rather than inside it.
+ANTHROPIC_CACHED_RESPONSE = {
+    "id": "msg_ledger_cache",
+    "type": "message",
+    "model": "claude-sonnet-4-5",
+    "usage": {
+        "input_tokens": 1_234_567,
+        "output_tokens": 500,
+        "cache_creation_input_tokens": 7_000,
+        "cache_read_input_tokens": 400_000,
+    },
+}
+
+
+def test_openai_cached_prompt_tokens_are_charged_at_the_cache_read_rate():
+    """The undercharge this pins: 400,000 cached tokens billed as fresh input.
+
+    gpt-4o charges $2.50/Mtok for a fresh input and $1.25/Mtok for a cached
+    read. OpenAI's ``prompt_tokens`` already includes the cached ones, so
+    charging it whole bills 400,000 tokens at the full rate — 3.091418 instead
+    of 2.591418, a 14.3% overcharge, with ``estimated`` still false and
+    ``unpriced_components`` empty, because nothing about the event looks wrong.
+    """
+    state = _state(_ledger_config())
+    with _sync_client(state, _handler(OPENAI_CACHED_RESPONSE)) as client:
+        response = client.post("/v1/chat/completions", json=OPENAI_BODY)
+    assert response.status_code == 200
+    assert state.ledger_errors == 0
+
+    (event,) = _events(state)
+    assert (event.input_tokens, event.output_tokens) == (834_567, 500)
+    assert event.cache_read_tokens == 400_000
+    # A measurement, not an estimate: the provider published the cached count.
+    assert event.estimated is False
+
+    assert event.cost is not None
+    # 834,567 fresh at $2.50/Mtok, 400,000 cached at $1.25/Mtok, 500 output at
+    # $10.00/Mtok.
+    assert str(event.cost.input_usd) == "2.086418"
+    assert str(event.cost.cache_read_usd) == "0.500000"
+    assert str(event.cost.output_usd) == "0.005000"
+    assert str(event.cost.total_usd) == "2.591418"
+    # The cache-read rate exists for this model, so the export's "what I could
+    # not measure" column has nothing to report — and now that is true.
+    assert event.cost.priced_components == {"input", "output", "cache_read"}
+
+
+def test_anthropic_cached_tokens_are_priced_off_the_additive_counts():
+    """The other convention, unchanged: the same magnitudes, opposite arithmetic.
+
+    Anthropic's ``input_tokens`` already excludes the cached tokens, so the
+    fresh count is 1,234,567 and not 834,567. Getting this wrong in the other
+    direction would bill 400,000 tokens at the cache-read rate *and* drop them
+    out of the fresh input, under-reporting the request twice.
+    """
+    state = _state(_ledger_config())
+    client = httpx.Client(
+        transport=_transport(state, _handler(ANTHROPIC_CACHED_RESPONSE)),
+        base_url="https://api.anthropic.com",
+    )
+    with client:
+        response = client.post(
+            "/v1/messages",
+            json={"model": "claude-sonnet-4-5", "max_tokens": 8, "messages": []},
+        )
+    assert response.status_code == 200
+    (event,) = _events(state)
+    assert (event.input_tokens, event.output_tokens) == (1_234_567, 500)
+    assert (event.cache_read_tokens, event.cache_write_tokens) == (400_000, 7_000)
+    assert event.estimated is False
+
+    assert event.cost is not None
+    # claude-sonnet-4-5: $3.00/Mtok in, $15.00/Mtok out, $0.30 cached read,
+    # $3.75 cached write.
+    assert str(event.cost.input_usd) == "3.703701"
+    assert str(event.cost.cache_read_usd) == "0.120000"
+    assert str(event.cost.cache_write_usd) == "0.026250"
+    assert str(event.cost.output_usd) == "0.007500"
+    assert str(event.cost.total_usd) == "3.857451"
+    assert event.cost.priced_components == {
+        "input",
+        "output",
+        "cache_read",
+        "cache_write",
+    }
+
+
 def test_a_provider_the_host_does_not_identify_is_recorded_as_unknown():
     state = _state(_ledger_config())
     with _sync_client(state, _handler(OPENAI_RESPONSE)) as client:
