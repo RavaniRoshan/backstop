@@ -494,17 +494,16 @@ def detection_view(limit: int = MAX_DETECTION_ROWS) -> dict[str, Any]:
         errors += int(detector.errors)
         for signal in detector.recorded():
             by_severity[signal.severity] = by_severity.get(signal.severity, 0) + 1
-        recent.extend(
-            {
-                "kind": signal.kind,
-                "severity": signal.severity,
-                "key": signal.key,
-                "observed": signal.observed,
-                "threshold": signal.threshold,
-                "occurred_at": signal.occurred_at,
-            }
-            for signal in detector.recorded()
-        )
+            recent.append(
+                {
+                    "kind": signal.kind,
+                    "severity": signal.severity,
+                    "key": signal.key,
+                    "observed": signal.observed,
+                    "threshold": signal.threshold,
+                    "occurred_at": signal.occurred_at,
+                }
+            )
         sessions.append(
             {
                 "session_id": row.session_id,

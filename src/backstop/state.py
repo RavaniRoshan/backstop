@@ -40,8 +40,9 @@ class DetectionSignalSink:
     :mod:`backstop.metrics` — so a process watching ten thousand sessions
     produces the same four-by-three series as one watching ten.
 
-    Stateless and shared by every state: the metric surface is a process-wide
-    singleton, so a per-session sink would be a copy of nothing.
+    Stateless, so every state can hold its own for free: the metric surface it
+    reports to is a process-wide singleton, so there is nothing per-session to
+    copy and nothing to keep in step.
     """
 
     __slots__ = ()
