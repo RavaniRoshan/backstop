@@ -83,6 +83,49 @@ def test_attribution_keys_returns_only_set_fields():
     assert set_fields.keys() == {"team": "payments", "customer": "acme", "currency": "USD"}
 
 
+def test_keys_promises_a_mapping_and_the_record_answers_like_one():
+    record = Attribution(team="payments", feature="checkout-v2", gl_code="  ")
+
+    def total(**dimensions: str) -> str:
+        return "+".join(f"{k}={v}" for k, v in sorted(dimensions.items()))
+
+    assert dict(record) == {"team": "payments", "feature": "checkout-v2"}
+    assert list(record) == ["team", "feature"]
+    assert total(**record) == "feature=checkout-v2+team=payments"
+    assert "team" in record
+    assert "gl_code" not in record
+    assert record["team"] == "payments"
+    assert record["gl_code"] is None
+    with pytest.raises(KeyError):
+        record["nope"]
+
+
+def test_a_blank_string_counts_as_unset():
+    assert Attribution(team="", feature="   ").keys() == {}
+    assert "team" not in Attribution(team=" ")
+
+
+def test_a_blank_override_cannot_erase_an_outer_value():
+    base = Attribution(team="payments", feature="checkout-v2")
+    assert base.merge(Attribution(feature="  ")).keys() == base.keys()
+    assert base.merge(Attribution(feature="")).keys() == base.keys()
+    assert base.merge(Attribution(gl_code="  ", agent="refund-bot")).keys() == {
+        "team": "payments",
+        "feature": "checkout-v2",
+        "agent": "refund-bot",
+    }
+
+
+def test_a_none_override_cannot_erase_an_outer_value():
+    base = Attribution(team="payments", feature="checkout-v2")
+    assert base.merge(Attribution(feature=None)).keys() == base.keys()
+
+
+def test_a_blank_attribution_carries_no_chargeback_dimension():
+    assert Attribution(team="payments").merge(Attribution()).keys() == {"team": "payments"}
+    assert Attribution(team=" ").merge(Attribution(team="refunds")).keys() == {"team": "refunds"}
+
+
 def test_merge_lets_the_override_win_on_set_fields():
     base = Attribution(team="payments", feature="checkout-v2")
     override = Attribution(feature="refunds", agent="refund-bot")

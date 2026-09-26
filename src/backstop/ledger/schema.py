@@ -16,6 +16,7 @@ unpriced (``None``) until that task lands. It is forward-declared under
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass, field, fields
 from datetime import datetime, timezone
 from math import isfinite
@@ -58,6 +59,11 @@ _COUNT_FIELDS = (
     "cache_write_tokens",
     "retries",
 )
+
+
+def _is_set(value: str | None) -> bool:
+    """A field is set when it carries a non-blank string; ``""`` and spaces are not."""
+    return value is not None and value.strip() != ""
 
 
 def utc_now() -> str:
@@ -138,31 +144,58 @@ class Attribution:
     def merge(self, override: "Attribution") -> "Attribution":
         """Return a new ``Attribution`` where ``override``'s set fields win.
 
-        ``self`` is the base and is never mutated. An unset (``None``) field in
-        ``override`` inherits the base value, so nesting scopes accumulate
-        rather than replace.
+        ``self`` is the base and is never mutated. A field is *set* when it is a
+        non-blank string: ``None`` and an empty or all-whitespace string both
+        mean unset, so an environment variable that arrived empty cannot erase
+        the value an outer scope set. An unset field in ``override`` inherits
+        the base value, so nesting scopes accumulate rather than replace.
         """
         merged: dict[str, str] = {}
         for spec in fields(self):
             incoming = getattr(override, spec.name)
             base = getattr(self, spec.name)
-            if incoming is not None:
+            if _is_set(incoming):
                 merged[spec.name] = incoming
-            elif base is not None:
+            elif _is_set(base):
                 merged[spec.name] = base
         return Attribution(**merged)
 
     def keys(self) -> dict[str, str]:
-        """Return only the fields that are set, as ``{name: value}``."""
+        """Return only the set fields, as ``{name: value}``.
+
+        ``Attribution`` also answers ``keys()``, ``__iter__``, ``__contains__``
+        and ``__getitem__``, so a record reads like the mapping this method
+        implies: ``dict(record)``, ``"team" in record`` and ``fn(**record)`` all
+        do the obvious thing over the set fields.
+        """
         return {
             spec.name: value
             for spec in fields(self)
-            if (value := getattr(self, spec.name)) is not None
+            if _is_set(value := getattr(self, spec.name))
         }
 
     def to_dict(self) -> dict[str, str | None]:
         """Return every field, set or not, in declaration order."""
         return {spec.name: getattr(self, spec.name) for spec in fields(self)}
+
+    def __iter__(self) -> Iterator[str]:
+        """Iterate the set field names, as a mapping would."""
+        return iter(self.keys())
+
+    def __contains__(self, name: object) -> bool:
+        """Report whether a field is set, as ``"team" in record`` reads."""
+        return name in self.keys()
+
+    def __getitem__(self, name: str) -> str | None:
+        """Return a set field's value, or ``None`` when it is not set.
+
+        An unknown field name is a ``KeyError``; a known but unset one reads as
+        ``None``, so ``in``, ``keys()`` and ``[]`` agree on what is set.
+        """
+        if name not in self.__dataclass_fields__:
+            raise KeyError(name)
+        value = getattr(self, name)
+        return value if _is_set(value) else None
 
     @classmethod
     def from_fields(cls, **values: str | None) -> "Attribution":
