@@ -19,22 +19,57 @@ from .exceptions import (
     LatencyBudgetExceededError,
     RateLimitError,
 )
-from .extract import _json_body, request_metadata, response_usage_tokens
+from .extract import RequestMetadata, _json_body, request_metadata, response_usage
 from .hooks import AfterResponseHook, BeforeRequestHook
 from .latency import _LatencyTracker, extract_backstop_headers
 from .ledger import (
     ReservationTicket as LedgerReservation,
+    SpendEvent,
+    current_attribution,
     get_current_tenant,
     get_ledger,
 )
 from .metrics import get_metrics
 from .pricing import get_downgrade_target
+from .pricing_catalog import compute_cost
 from .retry import backoff_delay, is_retryable_status
 from .state import BackstopState
 from .streaming import async_setup_streaming, is_streaming, setup_streaming
 
 RetrySleep = Callable[[float], None]
 AsyncRetrySleep = Callable[[float], Awaitable[None]]
+
+#: URL hosts that name a provider the bundled price catalog prices. Matched as a
+#: domain suffix, so ``api.openai.com`` and a regional or proxied OpenAI host
+#: under the same domain both resolve.
+_PROVIDER_HOSTS = (("openai.com", "openai"), ("anthropic.com", "anthropic"))
+
+#: The provider recorded for a request to a host Backstop does not recognise —
+#: Azure OpenAI, Bedrock, a gateway, a self-hosted vLLM. Deliberately not a
+#: guess: an invented provider produces a chargeback row that looks authoritative
+#: and is wrong, and the honest row is an unpriced one an operator can see. A
+#: deployment on such a host can still get a price by filing an entry for
+#: ``"unknown"`` in its own ``price_catalog_path``.
+UNKNOWN_PROVIDER = "unknown"
+
+#: Recorded as the model when neither the request body nor the response named
+#: one. ``SpendEvent`` refuses an empty model, and "unknown" is a fact a
+#: chargeback can be filtered on; a plausible-looking guess is not.
+UNKNOWN_MODEL = "unknown"
+
+
+def _provider_for_host(host: str) -> str:
+    """Return the price catalog's provider name for ``host``, or ``unknown``.
+
+    Domain-suffix match, so a custom ``base_url`` on the provider's own domain
+    resolves the same as the default one. The port is already excluded by httpx's
+    ``URL.host``.
+    """
+    lowered = host.lower()
+    for domain, provider in _PROVIDER_HOSTS:
+        if lowered == domain or lowered.endswith("." + domain):
+            return provider
+    return UNKNOWN_PROVIDER
 
 
 def _deadline_from_config(config: BackstopConfig) -> float | None:
@@ -155,6 +190,222 @@ async def _areconcile(
         tenant_budget.commit(reservation, usage if success else 0)
     elif isinstance(reservation, Reservation):
         await global_budget.areconcile(reservation, usage, success=success)
+
+
+def _record_spend_if_enabled(
+    state: BackstopState,
+    request: httpx.Request,
+    *,
+    body: object,
+    meta: "RequestMetadata",
+    response: httpx.Response,
+    tracker: _LatencyTracker,
+    success: bool,
+    usage: object,
+    outcome: str | None = None,
+) -> None:
+    """The one line the ledger costs on the request path.
+
+    Both transports call exactly this, and with the ledger and the detector both
+    off — the default — this is the entire cost: one attribute load, one truth
+    test, one function call. Nothing is built, nothing is read from the response,
+    no catalog is touched, and no queue is offered an event.
+    """
+    config = state.config
+    if not (config.ledger_enabled or config.detection_enabled):
+        return
+    _record_spend(
+        state,
+        request,
+        body=body,
+        priority=meta.priority,
+        estimated_tokens=meta.estimated_tokens,
+        response=response,
+        created_at=tracker.created_at,
+        retries=tracker.retry_count,
+        outcome=outcome or ("success" if success else "error"),
+        usage=usage,
+    )
+
+
+def _record_spend(
+    state: BackstopState,
+    request: httpx.Request,
+    *,
+    body: object,
+    priority: Priority,
+    estimated_tokens: int,
+    response: httpx.Response,
+    created_at: float,
+    retries: int,
+    outcome: str,
+    usage: object,
+) -> None:
+    """Build, price, observe and submit one spend event. Never raises, never blocks.
+
+    The whole ledger integration is this function plus the call site's
+    ``config.ledger_enabled or config.detection_enabled`` test. With both off —
+    the default — the test is all that runs, and the request path is untouched.
+
+    **Nothing here may fail a request.** The body is wrapped in one ``except``,
+    and the failure is counted on ``state.ledger_errors`` rather than dropped: a
+    ledger that has quietly stopped working looks exactly like a healthy one.
+
+    **Nothing here may block.** The only I/O — the writer's queue — is
+    :meth:`~backstop.ledger.sink.BoundedWriter.submit`, which takes one short
+    lock, appends to a bounded deque and returns, moving the sink's own work onto
+    a background thread. No file is opened, no socket is touched, and no lock a
+    sink could hold is taken on this path.
+
+    Field provenance, because a chargeback is only as good as where its numbers
+    came from:
+
+    ``provider``
+        The request URL's host, matched against the two providers the bundled
+        price catalog prices. A host that names neither is recorded as
+        ``"unknown"`` and therefore unpriced — see :data:`UNKNOWN_PROVIDER`.
+    ``model``
+        The model the *response* reported, which is a measurement of what was
+        actually billed — a dated snapshot rather than the family name asked for.
+        A streaming response has no parsed body yet, so it uses the model the
+        request asked for. Neither recoverable means ``"unknown"``. Never
+        invented. See :data:`UNKNOWN_MODEL`.
+    ``input_tokens`` / ``output_tokens`` / ``cache_read_tokens`` / ``cache_write_tokens``
+        The provider's own split. When the provider published only an aggregate,
+        or nothing at all, the record is flagged ``estimated=True`` and carries
+        the total it does know rather than a fabricated split — see below.
+    ``endpoint``
+        The full request URL, which ``SpendEvent`` normalises: no query string,
+        no fragment, no ``user:pass@``, and a credential-shaped query parameter
+        recorded as ``?<redacted>``. A path alone would not identify which
+        provider a durable ledger row belongs to.
+    ``request_id``
+        ``x-request-id`` (OpenAI) or ``request-id`` (Anthropic) off the response
+        when the provider sent one, so a chargeback row joins to a provider
+        dashboard.
+    ``latency_ms``
+        Wall clock since the request entered the transport, read here. The
+        tracker has not been closed at this point, so this is a slightly later
+        and slightly larger figure than ``_backstop_meta.total_latency_ms``.
+
+    **On a missing split.** Two provider shapes do not report one: a body with
+    only an aggregate ``total_tokens``, and a body with no usage at all. In both
+    cases the event records the magnitude it does know — the reported total, or
+    ``estimated_tokens``, which is the local floor ``chars_per_token`` produced —
+    as ``input_tokens``, with ``output_tokens`` left at zero and
+    ``estimated=True``. That is a deliberate, visible understatement rather than
+    a confident wrong split: an ``estimated`` row is countable and filterable in
+    the export, and it errs toward under-charging, which is the safe direction
+    for a floor. A streaming request always takes this path, because at stream
+    setup the body has not been read and no usage exists yet.
+
+    This is one module-level function rather than two methods because the sync and
+    async transports are near-duplicates by design and both call it. They are not
+    merged.
+    """
+    try:
+        provider = _provider_for_host(request.url.host)
+        input_tokens, output_tokens, cache_read, cache_write, estimated = _tokens_for(
+            usage, estimated_tokens
+        )
+        event = SpendEvent(
+            provider=provider,
+            model=_model_for(usage, body),
+            endpoint=str(request.url),
+            priority=priority.value,
+            outcome=outcome,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cache_read_tokens=cache_read,
+            cache_write_tokens=cache_write,
+            latency_ms=(time.monotonic() - created_at) * 1000,
+            retries=retries,
+            estimated=estimated,
+            attribution=current_attribution(),
+            request_id=_request_id(response),
+        )
+        if state.prices is not None:
+            priced = compute_cost(event, state.prices)
+            if priced is not None:
+                # Filled in place rather than by constructing a second event.
+                # ``dataclasses.replace`` measures 7.0us here against 0.18us for
+                # this, and it re-runs ``__post_init__`` — re-validating
+                # thirteen fields and re-normalising an endpoint that is already
+                # normalised — to set exactly one of them. Nothing has seen the
+                # event yet: it is built, priced and filled inside this function,
+                # and only then handed to the detector and the writer.
+                # ``SpendEvent.__post_init__`` writes its normalised endpoint the
+                # same way, for the same reason.
+                object.__setattr__(event, "cost", priced)
+        state.detector.observe(event)
+        if state.config.ledger_enabled:
+            state.ledger.submit(event)
+    except Exception:
+        state.ledger_errors += 1
+
+
+def _model_for(usage: object, body: object) -> str:
+    """The model that was actually served: the response's, else the request's.
+
+    The response's own ``model`` is preferred because it names the build that was
+    billed — a dated snapshot rather than the family name the caller asked for.
+    A streaming response has no parsed body at stream setup, so the request's
+    ``model`` is what it uses. Neither being recoverable means ``"unknown"``, not
+    a guess.
+    """
+    reported = getattr(usage, "model", None)
+    if isinstance(reported, str) and reported:
+        return reported
+    if isinstance(body, dict):
+        asked = body.get("model")
+        if isinstance(asked, str) and asked:
+            return asked
+    return UNKNOWN_MODEL
+
+
+def _tokens_for(
+    usage: object, estimated_tokens: int
+) -> tuple[int, int, int, int, bool]:
+    """Map a :class:`~backstop.extract.TokenUsage` (or its absence) onto an event.
+
+    Returns ``(input, output, cache_read, cache_write, estimated)``. The second
+    element of the pair is ``True`` whenever the numbers are not a provider
+    measurement of the split, which is the case for a missing usage, an
+    aggregate-only usage, and every streaming request.
+    """
+    split = getattr(usage, "split", False)
+    if usage is not None and split:
+        return (
+            usage.input_tokens,
+            usage.output_tokens,
+            usage.cache_read_tokens,
+            usage.cache_write_tokens,
+            False,
+        )
+    if usage is not None:
+        # An aggregate with no split beside it. The total is a measurement; where
+        # it came from is not, so the whole magnitude lands on input and the
+        # record is flagged.
+        return (usage.total, 0, 0, 0, True)
+    # No usage at all: the local floor, which is what the reservation was made
+    # from. Recorded so the request is visible in the chargeback as an estimate
+    # rather than absent from it as though it were free.
+    return (max(0, estimated_tokens), 0, 0, 0, True)
+
+
+def _request_id(response: httpx.Response) -> str | None:
+    """The provider's own id for this request, when it sent one.
+
+    OpenAI calls it ``x-request-id`` and Anthropic ``request-id``; both are read
+    so a chargeback row joins to a provider dashboard without the caller having
+    to know which provider they are on.
+    """
+    try:
+        headers = response.headers
+        value = headers.get("x-request-id") or headers.get("request-id")
+    except Exception:
+        return None
+    return value if isinstance(value, str) and value else None
 
 
 def _build_alerts(config) -> object | None:
@@ -357,16 +608,49 @@ class BackstopTransport(httpx.BaseTransport):
                 # so every later request was rejected with CircuitBreakerOpenError.
                 self._record_outcome(response.status_code, success=success, circuit=circuit)
                 usage = None
+                # The stream has not been read, so there is no provider usage to
+                # record; the event says so rather than claiming a measurement.
+                # Recorded here, beside the circuit outcome, for the same reason
+                # the outcome is: at dispatch, not at consumption.
+                _record_spend_if_enabled(
+                    self.state,
+                    request,
+                    body=body,
+                    meta=meta,
+                    response=response,
+                    tracker=tracker,
+                    success=success,
+                    usage=None,
+                )
             else:
                 response.read()
                 tracker.first_byte_at = tracker.request_sent_at
-                usage = response_usage_tokens(response)
+                # Read once, used twice. ``usage`` is the total the budget
+                # reconciles against — the number ``response_usage_tokens`` has
+                # always returned for this response — and ``usage_split`` is the
+                # same read's parts, which the ledger bills at different rates.
+                # Reading the body a second time for the ledger would cost
+                # another full JSON decode per request for no new information.
+                usage_split = response_usage(response)
+                usage = None if usage_split is None else usage_split.total
                 success = response.status_code < 400
                 if self.state.quota is not None:
                     self.state.quota.ingest(dict(response.headers))
                     self.state.quota.adjust(self.state.aimd)
                 _reconcile(tenant_budget, self.state.budget, reservation, usage, success=success, downgraded=downgraded)
                 self._record_outcome(response.status_code, success=success, circuit=circuit)
+                # Immediately after the reconcile block, so the ledger and the
+                # budget are reading the same response.
+                _record_spend_if_enabled(
+                    self.state,
+                    request,
+                    body=body,
+                    meta=meta,
+                    response=response,
+                    tracker=tracker,
+                    success=success,
+                    usage=usage_split,
+                )
                 if self._alerts is not None:
                     _b = tenant_budget if tenant_budget is not None else self.state.budget
                     _used = getattr(_b, "spent", None) or getattr(_b, "used", 0)
@@ -477,10 +761,27 @@ class BackstopTransport(httpx.BaseTransport):
             except Exception:
                 self._metrics.call("fallback_attempts")
                 continue
-            usage = response_usage_tokens(response)
+            usage_split = response_usage(response)
+            usage = None if usage_split is None else usage_split.total
             success = response.status_code < 400
             _reconcile(tenant_budget, self.state.budget, reservation, usage, success=success)
             self._record_outcome(response.status_code, success=success, circuit=circuit)
+            # A fallback that succeeded is a request that cost money, so it is
+            # billed as its own event with outcome "fallback" — the reason
+            # ``SpendEvent`` declares that outcome at all. Recorded here rather
+            # than in the caller's return path because this is the only place the
+            # fallback's own model and usage exist.
+            _record_spend_if_enabled(
+                self.state,
+                fb_request,
+                body=_json_body(fb_request),
+                meta=meta,
+                response=response,
+                tracker=tracker,
+                success=success,
+                usage=usage_split,
+                outcome="fallback",
+            )
             if self._alerts is not None:
                 _b = tenant_budget if tenant_budget is not None else self.state.budget
                 _used = getattr(_b, "spent", None) or getattr(_b, "used", 0)
@@ -838,16 +1139,41 @@ class AsyncBackstopTransport(httpx.AsyncBaseTransport):
                 # half-open probe is released by a stream that set up cleanly.
                 self._record_outcome(response.status_code, success=success, circuit=circuit)
                 usage = None
+                # Async twin of the sync branch: recorded at dispatch beside the
+                # circuit outcome, with no provider usage available because the
+                # stream has not been read.
+                _record_spend_if_enabled(
+                    self.state,
+                    request,
+                    body=body,
+                    meta=meta,
+                    response=response,
+                    tracker=tracker,
+                    success=success,
+                    usage=None,
+                )
             else:
                 await response.aread()
                 tracker.first_byte_at = tracker.request_sent_at
-                usage = response_usage_tokens(response)
+                # Async twin of the sync branch: one read, both consumers.
+                usage_split = response_usage(response)
+                usage = None if usage_split is None else usage_split.total
                 success = response.status_code < 400
                 if self.state.quota is not None:
                     self.state.quota.ingest(dict(response.headers))
                     self.state.quota.adjust(self.state.aimd)
                 await _areconcile(tenant_budget, self.state.budget, reservation, usage, success=success, downgraded=downgraded)
                 self._record_outcome(response.status_code, success=success, circuit=circuit)
+                _record_spend_if_enabled(
+                    self.state,
+                    request,
+                    body=body,
+                    meta=meta,
+                    response=response,
+                    tracker=tracker,
+                    success=success,
+                    usage=usage_split,
+                )
                 if self._alerts is not None:
                     _b = tenant_budget if tenant_budget is not None else self.state.budget
                     _used = getattr(_b, "spent", None) or getattr(_b, "used", 0)
@@ -937,10 +1263,23 @@ class AsyncBackstopTransport(httpx.AsyncBaseTransport):
             except Exception:
                 self._metrics.call("fallback_attempts")
                 continue
-            usage = response_usage_tokens(response)
+            usage_split = response_usage(response)
+            usage = None if usage_split is None else usage_split.total
             success = response.status_code < 400
             await _areconcile(tenant_budget, self.state.budget, reservation, usage, success=success)
             self._record_outcome(response.status_code, success=success, circuit=circuit)
+            # Async twin of the sync branch's fallback record.
+            _record_spend_if_enabled(
+                self.state,
+                fb_request,
+                body=_json_body(fb_request),
+                meta=meta,
+                response=response,
+                tracker=tracker,
+                success=success,
+                usage=usage_split,
+                outcome="fallback",
+            )
             if self._alerts is not None:
                 _b = tenant_budget if tenant_budget is not None else self.state.budget
                 _used = getattr(_b, "spent", None) or getattr(_b, "used", 0)
