@@ -16,7 +16,7 @@ unpriced (``None``) until that task lands. It is forward-declared under
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field, fields, is_dataclass
+from dataclasses import dataclass, field, fields
 from datetime import datetime, timezone
 from math import isfinite
 from typing import TYPE_CHECKING, Any
@@ -188,24 +188,59 @@ class Attribution:
         return cls(**values)
 
 
-def _cost_payload(cost: Any) -> Any:
-    """Convert an attached cost to a plain mapping.
+def resolve_cost_type() -> type | None:
+    """Return the concrete ``CostBreakdown``, or ``None`` while it is pending.
 
-    ``CostBreakdown`` belongs to the price catalog task, so it is reached
-    structurally: ``to_dict()`` is the contract, with a dataclass-field
-    fallback for anything that only exposes fields. Money values are expected
-    to have already been rendered for the wire — this module never quantises or
-    converts them.
+    ``CostBreakdown`` does not exist yet — the price catalog task owns it, and
+    this is the one place in the module that reaches for it, so that task
+    replaces this function's body with a plain import and nothing else moves.
     """
+    try:
+        from ..pricing_catalog import CostBreakdown
+    except ImportError:
+        return None
+    return CostBreakdown
+
+
+def cost_to_dict(cost: Any) -> dict[str, Any]:
+    """Serialise a cost, refusing anything that is not cost-shaped.
+
+    Cost-shaped means a mapping, or a value whose ``to_dict()`` returns one.
+    Money is expected to have already been rendered for the wire; this module
+    never quantises or converts it. The previous behaviour accepted any object
+    with a ``to_dict()`` on the way out while the way back in demanded the
+    concrete class, so a record could be written that could not be read.
+    """
+    if isinstance(cost, dict):
+        return dict(cost)
     to_dict = getattr(cost, "to_dict", None)
-    if callable(to_dict):
-        return to_dict()
-    if is_dataclass(cost) and not isinstance(cost, type):
-        return {spec.name: getattr(cost, spec.name) for spec in fields(cost)}
-    raise TypeError(
-        f"cost of type {type(cost).__name__} is not serialisable; "
-        "it must expose to_dict() or be a dataclass"
-    )
+    if not callable(to_dict):
+        raise TypeError(
+            "cost must be a mapping, or expose to_dict() returning a mapping, got "
+            f"{type(cost).__name__}"
+        )
+    payload = to_dict()
+    if not isinstance(payload, dict):
+        raise TypeError(
+            f"cost.to_dict() must return a mapping, got {type(payload).__name__}"
+        )
+    return payload
+
+
+def cost_from_dict(payload: Any) -> Any:
+    """Rebuild a cost from its wire form, the exact inverse of :func:`cost_to_dict`.
+
+    While ``CostBreakdown`` is still pending there is nothing to reconstruct, so
+    the wire form itself is the record: it is carried through unchanged, which
+    keeps the round trip symmetric and honest instead of failing on a class that
+    has not been written yet.
+    """
+    if not isinstance(payload, dict):
+        raise TypeError(f"cost must be a mapping, got {type(payload).__name__}")
+    cost_type = resolve_cost_type()
+    if cost_type is None:
+        return dict(payload)
+    return cost_type.from_dict(payload)
 
 
 @dataclass(frozen=True)
@@ -353,20 +388,36 @@ class SpendEvent:
             "retries": self.retries,
             "estimated": self.estimated,
             "attribution": self.attribution.to_dict(),
-            "cost": None if self.cost is None else _cost_payload(self.cost),
+            "cost": None if self.cost is None else cost_to_dict(self.cost),
             "request_id": self.request_id,
         }
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "SpendEvent":
-        """Rebuild an event from :meth:`to_dict` output, running validation again."""
+        """Rebuild an event from :meth:`to_dict` output, running validation again.
+
+        A key the schema does not declare is an error, not a field to ignore: a
+        typo in a persisted line would otherwise reload as a default and look
+        like real data.
+        """
+        if not isinstance(payload, dict):
+            raise TypeError(f"payload must be a mapping, got {type(payload).__name__}")
+        unknown = sorted(set(payload) - set(cls.__dataclass_fields__))
+        if unknown:
+            raise ValueError(
+                f"unknown SpendEvent field(s) {unknown}; the schema declares "
+                f"{sorted(cls.__dataclass_fields__)}"
+            )
         attribution_payload = payload.get("attribution") or {}
+        if not isinstance(attribution_payload, dict):
+            raise TypeError(
+                "attribution must be a mapping, got "
+                f"{type(attribution_payload).__name__}"
+            )
         cost_payload = payload.get("cost")
         cost: "CostBreakdown | None" = None
         if cost_payload is not None:
-            from ..pricing_catalog import CostBreakdown
-
-            cost = CostBreakdown.from_dict(cost_payload)
+            cost = cost_from_dict(cost_payload)
         return cls(
             event_id=payload["event_id"],
             occurred_at=payload["occurred_at"],

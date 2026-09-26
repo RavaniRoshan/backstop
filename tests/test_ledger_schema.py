@@ -27,6 +27,7 @@ from backstop.ledger.schema import (
     PRIORITIES,
     SCHEMA_VERSION,
     normalize_endpoint,
+    resolve_cost_type,
     utc_now,
 )
 
@@ -466,6 +467,113 @@ def test_from_dict_revalidates():
     payload["priority"] = "urgent"
     with pytest.raises(ValueError, match="priority"):
         SpendEvent.from_dict(payload)
+
+
+def test_from_dict_refuses_an_unknown_key():
+    payload = make_event().to_dict()
+    payload["input_token"] = 5
+    with pytest.raises(ValueError, match="input_token") as excinfo:
+        SpendEvent.from_dict(payload)
+    assert "input_tokens" in str(excinfo.value)
+
+
+def test_from_dict_names_every_unknown_key():
+    payload = make_event().to_dict()
+    payload["teir"] = "payments"
+    payload["input_token"] = 5
+    with pytest.raises(ValueError) as excinfo:
+        SpendEvent.from_dict(payload)
+    assert "input_token" in str(excinfo.value)
+    assert "teir" in str(excinfo.value)
+
+
+def test_from_dict_refuses_a_non_mapping_payload():
+    with pytest.raises(TypeError, match="payload"):
+        SpendEvent.from_dict(["not", "a", "mapping"])
+
+
+def test_from_dict_refuses_a_non_mapping_attribution():
+    payload = make_event().to_dict()
+    payload["attribution"] = "payments"
+    with pytest.raises(TypeError, match="attribution"):
+        SpendEvent.from_dict(payload)
+
+
+# ---------------------------------------------------------------------------
+# Cost wire form
+# ---------------------------------------------------------------------------
+
+
+class CostStub:
+    """Stands in for ``CostBreakdown``, which the price catalog task owns."""
+
+    def __init__(self, payload: dict[str, str]) -> None:
+        self.payload = payload
+
+    def to_dict(self) -> dict[str, str]:
+        return dict(self.payload)
+
+
+COST_WIRE = {
+    "input_usd": "0.001000",
+    "output_usd": "0.011345",
+    "cache_read_usd": "0.000000",
+    "cache_write_usd": "0.000000",
+    "total_usd": "0.012345",
+    "currency": "USD",
+    "price_source": "bundled",
+    "estimated_tokens": False,
+}
+
+
+def test_a_cost_shaped_stub_round_trips_through_the_wire_form():
+    event = make_event(cost=CostStub(COST_WIRE))
+    payload = event.to_dict()
+    assert payload["cost"] == COST_WIRE
+    assert SpendEvent.from_dict(payload).to_dict() == payload
+
+
+def test_a_cost_already_in_wire_form_round_trips():
+    payload = make_event(cost=dict(COST_WIRE)).to_dict()
+    assert payload["cost"] == COST_WIRE
+    assert SpendEvent.from_dict(payload).to_dict() == payload
+
+
+def test_a_cost_round_trip_survives_a_json_line():
+    payload = make_event(cost=CostStub(COST_WIRE)).to_dict()
+    line = json.dumps(payload)
+    assert SpendEvent.from_dict(json.loads(line)).to_dict() == payload
+
+
+@pytest.mark.parametrize("bad", [object(), 7, "0.01", 1.5, True])
+def test_a_cost_that_is_not_cost_shaped_is_refused(bad):
+    with pytest.raises(TypeError, match="cost"):
+        make_event(cost=bad).to_dict()
+
+
+def test_a_cost_whose_to_dict_is_not_a_mapping_is_refused():
+    class NotAMapping:
+        def to_dict(self):
+            return "0.01"
+
+    with pytest.raises(TypeError, match="cost.to_dict"):
+        make_event(cost=NotAMapping()).to_dict()
+
+
+def test_a_non_mapping_cost_on_the_wire_is_refused():
+    payload = make_event().to_dict()
+    payload["cost"] = "0.01"
+    with pytest.raises(TypeError, match="cost"):
+        SpendEvent.from_dict(payload)
+
+
+def test_the_cost_type_hook_is_the_one_thing_the_price_catalog_task_replaces():
+    assert resolve_cost_type() is None  # backstop.pricing_catalog does not exist yet
+    assert resolve_cost_type.__doc__ and "price catalog" in resolve_cost_type.__doc__
+
+
+def test_an_unpriced_event_carries_no_cost():
+    assert make_event().to_dict()["cost"] is None
 
 
 # ---------------------------------------------------------------------------
