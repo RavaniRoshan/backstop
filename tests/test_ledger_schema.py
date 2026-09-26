@@ -31,6 +31,7 @@ from backstop.ledger.schema import (
     OUTCOMES,
     PRIORITIES,
     SCHEMA_VERSION,
+    UNKNOWN_ENDPOINT,
     normalize_endpoint,
     resolve_cost_type,
     utc_now,
@@ -447,8 +448,92 @@ def test_userinfo_and_fragment_are_stripped_from_the_recorded_endpoint():
 
 
 def test_an_unparsable_url_is_still_stripped_textually():
-    assert normalize_endpoint("http://[::1?api_key=sk-1") == "http://[::1"
+    assert normalize_endpoint("http://[::1?api_key=sk-1") == "http://[::1?<redacted>"
+    assert normalize_endpoint("http://[::1?x=1") == "http://[::1"
     assert normalize_endpoint("http://user@[::1/p?x=1") == "http://[::1/p"
+
+
+ADVERSARIAL_ENDPOINTS = [
+    "/v1/chat/completions",
+    "https://api.openai.com:443/v1/chat/completions",
+    "/v1/chat?api_key=sk-live-SECRET",
+    "/v1/chat?api_key=sk-1&beta=true",
+    "/v1/chat?beta=true",
+    "https://user:pa55word@api.openai.com:443/v1/chat#top",
+    "https://user@host/v1/models?a=1",
+    "/v1/chat#fragment",
+    "/v1/chat?x-api-key=sk-1",
+    "/v1/chat?X-Amz-Signature=sk-1",
+    "/v1/chat?apiKey=sk-1",
+    "/v1/chat?api%5Fkey=sk-1",
+    "/v1/chat?api_key=",
+    "/v1/chat?api_key",
+    "/v1/chat?access_token=sk-1",
+    "/v1/chat?monkey=1",
+    "/v1/chat?<redacted>",
+    "http://[::1?api_key=sk-1",
+    "http://user@[::1/p?x=1",
+    "http://[::1",
+    "?",
+    "#",
+    "?a=1",
+    "   ?  ",
+    UNKNOWN_ENDPOINT,
+    "v1/chat?key=sk-1",
+    "//host/p?api_key=1",
+]
+
+
+@pytest.mark.parametrize("raw", ADVERSARIAL_ENDPOINTS)
+def test_endpoint_normalisation_is_idempotent(raw):
+    once = normalize_endpoint(raw)
+    assert normalize_endpoint(once) == once
+
+
+@pytest.mark.parametrize("raw", ADVERSARIAL_ENDPOINTS)
+def test_a_stored_endpoint_survives_the_wire_round_trip(raw):
+    event = make_event(endpoint=raw)
+    assert event.endpoint
+    reloaded = SpendEvent.from_dict(event.to_dict())
+    assert reloaded == event
+    assert reloaded.endpoint == event.endpoint
+    assert SpendEvent.from_dict(reloaded.to_dict()) == event
+
+
+def test_a_credential_stays_redacted_across_reads_and_writes():
+    event = make_event(endpoint="/v1/chat?api_key=sk-live-SECRET")
+    first = event.to_dict()
+    second = SpendEvent.from_dict(first).to_dict()
+    third = SpendEvent.from_dict(second).to_dict()
+    assert first["endpoint"] == second["endpoint"] == third["endpoint"]
+    assert first["endpoint"] == "/v1/chat?<redacted>"
+    assert "sk-live-SECRET" not in str(first) + str(second) + str(third)
+
+
+def test_a_wire_line_is_byte_stable_across_cycles():
+    event = make_event(endpoint="/v1/chat?api_key=sk-1", attribution=Attribution(team="t"))
+    line = json.dumps(event.to_dict())
+    reloaded = SpendEvent.from_dict(json.loads(line))
+    assert json.dumps(reloaded.to_dict()) == line
+
+
+@pytest.mark.parametrize("raw", ["?", "#", "#frag", "?a=1", "   ?  "])
+def test_an_endpoint_that_normalises_away_becomes_the_sentinel(raw):
+    event = make_event(endpoint=raw)
+    assert event.endpoint == UNKNOWN_ENDPOINT == "unknown"
+    assert event.to_dict()["endpoint"] == UNKNOWN_ENDPOINT
+    assert SpendEvent.from_dict(event.to_dict()) == event
+
+
+def test_the_sentinel_itself_is_a_fixed_point():
+    assert normalize_endpoint(UNKNOWN_ENDPOINT) == UNKNOWN_ENDPOINT
+    assert make_event(endpoint=UNKNOWN_ENDPOINT).endpoint == UNKNOWN_ENDPOINT
+
+
+def test_a_blank_input_is_still_rejected_before_normalisation():
+    for blank in ("", "   ", "\t"):
+        with pytest.raises(ValueError, match="endpoint"):
+            make_event(endpoint=blank)
 
 
 def test_a_non_string_endpoint_is_rejected():

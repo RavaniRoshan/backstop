@@ -94,38 +94,73 @@ SECRET_QUERY_RE = re.compile(
 #: Stands in for a dropped query string that carried a credential.
 REDACTED_QUERY = "<redacted>"
 
+#: Stands in for an endpoint that normalises away to nothing, e.g. ``"?"``.
+UNKNOWN_ENDPOINT = "unknown"
+
+
+def _query_marker(query: str) -> str:
+    """Return the query to keep: the redaction marker if one is warranted, else ``""``.
+
+    A query that is already the marker keeps it. That is what makes
+    :func:`normalize_endpoint` idempotent, which the wire round trip depends on:
+    re-normalising a stored endpoint must not quietly drop the record that a
+    credential was present, because a ledger line is read and written again.
+    """
+    if query == REDACTED_QUERY:
+        return REDACTED_QUERY
+    pairs = parse_qsl(query, keep_blank_values=True)
+    if any(SECRET_QUERY_RE.search(name) for name, _ in pairs):
+        return REDACTED_QUERY
+    return ""
+
 
 def normalize_endpoint(raw: str) -> str:
     """Return the record-safe form of a request endpoint.
 
     The ledger is a durable, long-lived file, so a caller that hands over a URL
-    with a query string, a fragment, or ``user:pass@`` in it must not have
-    those written down: an API key in a query string would otherwise land in
-    the JSONL line and in every ``repr`` of the event. The query string and the
-    fragment are dropped entirely, the userinfo is dropped from the authority,
-    and the fact that a credential was present is recorded as
-    ``?<redacted>`` rather than the credential itself.
+    with a query string, a fragment, or ``user:pass@`` in it must not have those
+    written down: an API key in a query string would otherwise land in the
+    JSONL line and in every ``repr`` of the event. The query string and the
+    fragment are dropped, the userinfo is dropped from the authority, and a
+    credential-shaped query parameter is recorded as ``?<redacted>`` rather than
+    the credential itself.
+
+    The result is idempotent — normalising a stored endpoint returns it
+    unchanged, redaction marker included — and never blank: an input that
+    normalises away to nothing, such as ``"?"`` or ``"#frag"``, becomes
+    :data:`UNKNOWN_ENDPOINT` rather than an empty field the validator would have
+    rejected.
     """
     if "?" not in raw and "#" not in raw and "@" not in raw:
-        return raw
-    try:
-        parts = urlsplit(raw)
-    except ValueError:
-        return _normalize_endpoint_textually(raw)
-    pairs = parse_qsl(parts.query, keep_blank_values=True)
-    query = REDACTED_QUERY if any(SECRET_QUERY_RE.search(name) for name, _ in pairs) else ""
-    return urlunsplit((parts.scheme, parts.netloc.rsplit("@", 1)[-1], parts.path, query, ""))
+        normalised = raw
+    else:
+        try:
+            parts = urlsplit(raw)
+        except ValueError:
+            normalised = _normalize_endpoint_textually(raw)
+        else:
+            normalised = urlunsplit((
+                parts.scheme,
+                parts.netloc.rsplit("@", 1)[-1],
+                parts.path,
+                _query_marker(parts.query),
+                "",
+            ))
+    return normalised if normalised.strip() else UNKNOWN_ENDPOINT
 
 
 def _normalize_endpoint_textually(raw: str) -> str:
     """Fallback for a URL ``urlsplit`` refuses, e.g. an unbracketed IPv6 host."""
-    without_fragment = raw.split("#", 1)[0]
-    authority_and_path = without_fragment.split("?", 1)[0]
-    scheme, separator, rest = authority_and_path.partition("://")
+    without_fragment, _, _fragment = raw.partition("#")
+    without_query, _, query = without_fragment.partition("?")
+    scheme, separator, authority_and_path = without_query.partition("://")
     if not separator:
-        return authority_and_path
-    authority, slash, path = rest.partition("/")
-    return f"{scheme}://{authority.rsplit('@', 1)[-1]}{slash}{path}"
+        authority_and_path = without_query
+    authority, slash, path = authority_and_path.partition("/")
+    head = f"{scheme}://" if separator else ""
+    marker = _query_marker(query)
+    kept = f"?{marker}" if marker else ""
+    return f"{head}{authority.rsplit('@', 1)[-1]}{slash}{path}{kept}"
 
 
 @dataclass(frozen=True)
