@@ -5,6 +5,7 @@ from typing import Any, TypeVar
 from ._httpcompat import HTTPX, compat_for
 from .config import BackstopConfig
 from .exceptions import UnsupportedClientError
+from .ledger import CloseReport
 from .metrics import metrics_app, start_metrics_server
 from .state import BackstopState
 from .transports import AsyncBackstopTransport, BackstopTransport
@@ -29,6 +30,25 @@ SUPPORTED_ANTHROPIC_RANGE = ">=0.98,<2"
 
 
 class Backstop:
+    """The public surface: wrap a client, read the metrics, close the ledger.
+
+    :meth:`wrap` is the only call most users make, and :meth:`close` is the one
+    a user of the spend ledger has to know about. They are a pair: ``wrap``
+    starts a background drain thread behind a file handle when
+    ``BackstopConfig(ledger_enabled=True)``, and ``close`` is what releases both
+    and tells you what the ledger could not deliver. A process that exits without
+    closing loses nothing — every event is flushed as it is written — but it does
+    leave the handle and the thread to the operating system, and a process that
+    *keeps running* after a finished job wants the file closed and the loss
+    figure in hand. The ledger also registers its own ``atexit`` hook, so the
+    accidental case is covered; the deliberate one is a ``close`` you can read the
+    return value of.
+
+    Everything here is a ``staticmethod``, matching the rest of the surface: a
+    user holds a wrapped client, not a Backstop instance, and a close takes that
+    client back.
+    """
+
     @staticmethod
     def wrap(client: T, budget: int | None = 50_000, config: BackstopConfig | None = None) -> T:
         existing = getattr(client, "_backstop_state", None)
@@ -67,6 +87,31 @@ class Backstop:
 
     start_metrics_server = staticmethod(start_metrics_server)
     metrics_app = staticmethod(metrics_app)
+
+    @staticmethod
+    def close(client: T) -> CloseReport:
+        """Close the ledger a wrapped client owns and report the outcome.
+
+        The shutdown counterpart to :meth:`wrap`, and the same shape of call: hand
+        back the client you wrapped, get back a
+        :class:`~backstop.ledger.sink.CloseReport` whose ``lost`` is the number of
+        submitted events that will never reach storage and whose ``drained`` says
+        whether a stalled sink was abandoned. Idempotent, and safe in a
+        ``finally``: a second call returns the first call's report.
+
+        A client Backstop never wrapped has no ledger, so the report is
+        :meth:`~backstop.ledger.sink.CloseReport.nothing_submitted` — every
+        figure zero, which is the truth rather than a placeholder. Refusing the
+        call instead would make this unusable in the teardown path it exists for.
+
+        Closing a client does not close its inner HTTP transport, and closing the
+        inner HTTP transport does not close the ledger: a wrapped client outlives
+        any one request, and only its owner knows the run is over.
+        """
+        state = getattr(client, "_backstop_state", None)
+        if state is None:
+            return CloseReport.nothing_submitted()
+        return state.close()
 
     @staticmethod
     def dashboard_app(**kwargs: Any) -> Any:

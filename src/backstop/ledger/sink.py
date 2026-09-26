@@ -462,6 +462,27 @@ class CloseReport:
         """Events that reached storage: the writes the sink did not lose."""
         return landed_events(self.written, self.sink_reported_errors)
 
+    @classmethod
+    def nothing_submitted(cls) -> "CloseReport":
+        """The report for a ledger that was never asked to record anything.
+
+        What a caller closing *nothing* gets: a client Backstop never wrapped, or
+        a state built with the ledger off. Every figure is zero and
+        :attr:`drained` is ``True`` because nothing was ever in flight, so the
+        accounting invariant holds at ``0 == 0`` rather than being an exception to
+        it. A factory rather than a hand-built instance so a field added here
+        cannot be silently forgotten at the one call site that has no writer.
+        """
+        return cls(
+            submitted=0,
+            written=0,
+            dropped_events=0,
+            sink_errors=0,
+            undrained=0,
+            drained=True,
+            close_timeout_s=0.0,
+        )
+
 
 class BoundedWriter:
     """Hands events to a sink from one background thread, without ever blocking.

@@ -69,9 +69,18 @@ from .schema import (
     resolve_cost_type,
     utc_now,
 )
-from .sink import BoundedWriter, JsonlSink, LedgerSink, MemorySink, NullSink
+from .sink import (
+    DRAIN_THREAD_NAME,
+    BoundedWriter,
+    CloseReport,
+    JsonlSink,
+    LedgerSink,
+    MemorySink,
+    NullSink,
+)
 
 __all__ = [
+    "DRAIN_THREAD_NAME",
     "EVENT_ID_RE",
     "OCCURRED_AT_RE",
     "OUTCOMES",
@@ -85,6 +94,7 @@ __all__ = [
     "BudgetLedger",
     "ChargebackRow",
     "ChargebackTotals",
+    "CloseReport",
     "CostBreakdown",
     "JsonlSink",
     "LedgerCorruptionError",

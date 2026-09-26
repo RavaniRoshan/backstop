@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import atexit
+import weakref
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from .admission import PriorityGate
@@ -9,7 +12,7 @@ from .budget import Budget
 from .circuit import CircuitBreaker
 from .config import BackstopConfig
 from .detection import DetectionSignal, RunawayDetector
-from .ledger import Attribution, BoundedWriter, JsonlSink, MemorySink, NullSink
+from .ledger import Attribution, BoundedWriter, CloseReport, JsonlSink, MemorySink, NullSink
 from .metrics import disable_otel, enable_otel, get_metrics
 from .pricing_catalog import PriceCatalog
 from .quotas import QuotaMonitor
@@ -94,6 +97,11 @@ class BackstopState:
     #: describe.
     ledger_errors: int = 0
     _circuits: dict = field(default_factory=dict)
+    #: The ``atexit`` callback :meth:`close` unregisters, or ``None``. Private
+    #: because it is machinery for :meth:`close` rather than state anyone reads;
+    #: held so a close can drop the registration instead of leaving a hook that
+    #: outlives the state it was made for.
+    _atexit_hook: Callable[[], None] | None = None
 
     def circuit_for(self, tenant_id: str | None) -> CircuitBreaker:
         if not self.config.per_tenant_circuit or tenant_id is None:
@@ -104,6 +112,35 @@ class BackstopState:
         breaker = CircuitBreaker(self.config)
         self._circuits[tenant_id] = breaker
         return breaker
+
+    def close(self) -> CloseReport:
+        """Close the ledger writer and report what will never be written.
+
+        **The shutdown story for ``ledger_path``.** A durable ledger owns a file
+        handle and a daemon drain thread, and a close is the only thing that
+        releases either. Every event is flushed as it is written, so nothing is
+        lost by *not* closing — but the handle and the thread are, and a user who
+        turns the ledger on and then exits should not have to know that.
+
+        The report is the point of the call:
+        :attr:`~backstop.ledger.sink.CloseReport.lost` is the number of submitted
+        events that will never reach storage, from all three loss buckets, and
+        ``undrained`` says whether a stalled sink was abandoned. ``close`` joins
+        the drain thread with a bounded timeout, so this cannot hang.
+
+        Idempotent, because shutdown paths run more than once: an explicit close
+        and then an ``atexit`` hook, or two ``finally`` blocks. The second call
+        returns the first call's report rather than a second, smaller one. The
+        ``atexit`` registration is dropped on the way out either way.
+
+        Safe on a state with the ledger off: it closes a writer over a
+        :class:`NullSink` and reports zeros, which is the truth rather than a
+        placeholder.
+        """
+        hook, self._atexit_hook = self._atexit_hook, None
+        if hook is not None:
+            atexit.unregister(hook)
+        return self.ledger.close()
 
     @classmethod
     def create(
@@ -145,7 +182,35 @@ class BackstopState:
         # aware of gateway, harness and demo sessions too. The reference it holds
         # is weak, so a garbage-collected client leaves the registry on its own.
         get_registry().register(state)
+        if resolved.ledger_enabled:
+            _register_exit_close(state)
         return state
+
+
+def _register_exit_close(state: BackstopState) -> None:
+    """Close a live state at interpreter exit, without pinning it.
+
+    Registered only when the ledger is on, because that is the only case where
+    there is a file handle and a drain thread to release. The callback holds a
+    *weak* reference: registering ``state.close`` directly would keep every
+    wrapped session alive for the life of the process, and the dashboard reports
+    live sessions from exactly those references — a finished run would go on
+    showing up as a running one.
+
+    The closure is per-state rather than a shared function so that
+    :meth:`BackstopState.close`'s ``atexit.unregister`` removes this state's hook
+    and no other: ``unregister`` drops *every* registration of the callable it is
+    given, so a shared hook would take the other sessions' with it.
+    """
+    reference = weakref.ref(state)
+
+    def close_if_live() -> None:
+        live = reference()
+        if live is not None:
+            live.close()
+
+    state._atexit_hook = close_if_live
+    atexit.register(close_if_live)
 
 
 def _build_ledger(resolved: BackstopConfig) -> tuple[BoundedWriter, PriceCatalog | None]:
