@@ -43,10 +43,45 @@ jobs:
           if [ "${{ matrix.anthropic-version }}" != "latest" ]; then
             pip install "anthropic==${{ matrix.anthropic-version }}"
           fi
+      - name: Lint
+        run: ruff check src/ tests/
       - name: Run tests
         run: pytest
       - name: Run benchmark smoke
         run: python -m backstop benchmark
+
+  ts-backstop:
+    name: ts typecheck + test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ts/backstop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ts/backstop/package-lock.json
+      - name: Verify the lockfile matches the package identity
+        # this shipped as @ravanish/backstop@0.5.0 while package.json said
+        # backstop-ai@0.6.0, so the published lockfile named a different package
+        run: |
+          node -e '
+            const p = require("./package.json"), l = require("./package-lock.json");
+            if (l.name !== p.name || l.version !== p.version) {
+              console.error(`lockfile ${l.name}@${l.version} != package ${p.name}@${p.version}`);
+              process.exit(1);
+            }
+          '
+      - name: Install
+        run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Build
+        run: npm run build
+      - name: Test
+        run: npm test
 
   build:
     needs: test

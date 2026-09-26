@@ -1,5 +1,6 @@
 import { createHash, createHmac } from "node:crypto";
 import type { AuditSink } from "./types.js";
+import { createWriteStream } from "node:fs";
 
 export interface AuditRecord {
   ts: number;
@@ -27,8 +28,11 @@ export class AuditLog {
   constructor(sink: AuditSink | null, hmacKey?: string) {
     this.key = Buffer.from(hmacKey ?? "", "utf-8");
     if (typeof sink === "string") {
-      const fs = require("node:fs") as typeof import("node:fs");
-      this.file = fs.createWriteStream(sink, { flags: "a" });
+      // A static import, not require(): this package is `"type": "module"`, so
+      // `require` is not defined at runtime and any file-path sink threw
+      // ReferenceError. The import is lazy in effect because it is only reached
+      // when a path sink is configured.
+      this.file = createWriteStream(sink, { flags: "a" });
     } else if (typeof sink === "function") {
       this.callable = sink;
     }

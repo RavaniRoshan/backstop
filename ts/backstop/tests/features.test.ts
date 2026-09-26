@@ -108,3 +108,29 @@ test("wrap respects priority (critical bypasses budget)", async () => {
   const res = await wrapped.chat.completions.create(criticalReq as never);
   assert.ok(res.usage);
 });
+
+// A file-path audit sink is the one path that touched the filesystem, and it is
+// where the package's `"type": "module"` bit us: the body used `require(...)`,
+// which is not defined in an ES module, so every file sink threw
+// ReferenceError at construction. The fake client below is not enough to catch
+// that, so this exercises the real filesystem path end to end.
+test("a file-path audit sink appends to the file", async () => {
+  const { mkdtempSync, readFileSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { AuditLog } = await import("../src/audit.js");
+
+  const dir = mkdtempSync(join(tmpdir(), "backstop-audit-"));
+  const file = join(dir, "audit.jsonl");
+  try {
+    const log = new AuditLog(file, "k");
+    log.record("allow", "test");
+    log.close();
+    await new Promise((r) => setTimeout(r, 50));
+    const lines = readFileSync(file, "utf-8").trim().split("\n");
+    assert.ok(lines.length >= 1, "expected at least one audit line");
+    assert.equal(JSON.parse(lines[0]!).reason, "test");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
