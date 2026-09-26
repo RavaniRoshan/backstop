@@ -53,10 +53,11 @@ import os
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from decimal import ROUND_HALF_UP, Decimal
-from typing import Any
+from decimal import ROUND_HALF_UP, Decimal, localcontext
+from functools import wraps
+from typing import Any, Callable, TypeVar
 
-from ..pricing_catalog import COST_COMPONENTS, CURRENCY
+from ..pricing_catalog import COST_COMPONENTS, CURRENCY, LEDGER_CONTEXT
 from .schema import Attribution, SpendEvent
 
 __all__ = [
@@ -325,7 +326,36 @@ def _next_month(month: str) -> str:
 # Money
 # --------------------------------------------------------------------------
 
+_F = TypeVar("_F", bound=Callable[..., Any])
 
+
+def _exact_money(fn: _F) -> _F:
+    """Run one money function under :data:`~backstop.pricing_catalog.LEDGER_CONTEXT`.
+
+    Every ``Decimal`` operator and every ``quantize`` reads the **thread's**
+    context, and a decimal context is process-global: a host application that
+    tightened ``prec`` would otherwise round this module's totals to a handful
+    of significant digits — silently, because a rounded total is still a total.
+    The catalog already prices under this context for the same reason, and a
+    report that adds up to a different figure from the one the catalog billed
+    is the one thing a charge-back cannot be.
+
+    Applied to the public entry points rather than to each operation, so the
+    whole of a function is covered whatever arithmetic a later change adds
+    inside it. :class:`_Bucket` is deliberately *not* decorated: it is called
+    once per event, and :func:`build_chargeback` holds the context around its
+    whole loop instead of paying a context switch per row.
+    """
+
+    @wraps(fn)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        with localcontext(LEDGER_CONTEXT):
+            return fn(*args, **kwargs)
+
+    return wrapper  # type: ignore[return-value]
+
+
+@_exact_money
 def money(amount: Decimal) -> str:
     """Render an exact amount as a string with exactly two decimal places.
 
@@ -348,6 +378,7 @@ def money(amount: Decimal) -> str:
     return format(amount.quantize(_REPORT_QUANTUM, rounding=ROUND_HALF_UP), "f")
 
 
+@_exact_money
 def _share(numerator: Decimal, denominator: Decimal) -> Decimal:
     """``numerator / denominator`` to four places, or zero when nothing divides it."""
     if denominator == 0:
@@ -536,6 +567,7 @@ class ChargebackTotals:
         return _share(Decimal(self.unpriced_requests), Decimal(self.request_count))
 
     @property
+    @_exact_money
     def unpriced_share_pct(self) -> Decimal:
         """``unpriced_share`` as a percentage, to two places."""
         return (self.unpriced_share * 100).quantize(
@@ -543,6 +575,7 @@ class ChargebackTotals:
         )
 
     @property
+    @_exact_money
     def unattributed_share_pct(self) -> Decimal:
         """``unattributed_share`` as a percentage, to two places."""
         return (self.unattributed_share * 100).quantize(
@@ -550,6 +583,7 @@ class ChargebackTotals:
         )
 
     @property
+    @_exact_money
     def rounding_gap_usd(self) -> Decimal:
         """Displayed total minus exact total: at most half a cent per line."""
         return self.total_usd - self.unrounded_total_usd.quantize(
@@ -728,6 +762,7 @@ class _Bucket:
                 self.unpriced_components.add(component)
 
 
+@_exact_money
 def build_chargeback(
     events: Iterable[SpendEvent],
     group_by: Sequence[str] = DEFAULT_GROUP_BY,
@@ -753,6 +788,12 @@ def build_chargeback(
     same order — the property the demo's byte-for-byte determinism rests on.
 
     Purity: no clock, no I/O, no global state. Same events, same call, same rows.
+
+    The exact per-request totals are accumulated in the loop below, which
+    :func:`_exact_money` holds :data:`~backstop.pricing_catalog.LEDGER_CONTEXT`
+    around — once, rather than per event, which is why :class:`_Bucket` is not
+    decorated itself. Without it a host's ``prec`` would round each addition and
+    the report would quietly disagree with the figures the catalog billed.
     """
     names = _check_group_by(group_by)
     if not isinstance(currency, str) or not currency.strip():
@@ -813,6 +854,7 @@ def _row(
     )
 
 
+@_exact_money
 def chargeback_totals(
     rows: Sequence[ChargebackRow], group_by: Sequence[str] | None = None
 ) -> ChargebackTotals:
@@ -1074,6 +1116,7 @@ def _revenue_amount(value: Any, key: tuple[str, ...]) -> Decimal:
     )
 
 
+@_exact_money
 def revenue_join(
     rows: Sequence[ChargebackRow],
     revenue: Mapping[tuple[str, ...], Any],

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as _dt
+import decimal
 import json
 import platform
 import statistics
@@ -643,15 +644,18 @@ def _run_ledger(args: argparse.Namespace) -> int:
     Exit codes carry meaning. ``0`` means the report is complete: every line in
     the file was read, and any loss is a torn final line that is *named* in the
     output. ``1`` means the report would be wrong or absent — a file that will not
-    open, or a corrupt line, which raises :class:`LedgerCorruptionError` naming the
-    line and is never skipped. Silently dropping a line to produce a plausible
-    total is the one outcome this refuses.
+    open, a corrupt line, which raises :class:`LedgerCorruptionError` naming the
+    line and is never skipped, or an amount too large to total. Silently dropping
+    a line to produce a plausible total is the one outcome this refuses.
     """
     from .ledger import export as ledger_export
     from .ledger.demo import run_demo as run_ledger_demo
 
     if args.ledger_command == "demo":
-        result = run_ledger_demo(group_by=tuple(args.group_by))
+        try:
+            result = run_ledger_demo(group_by=tuple(args.group_by))
+        except decimal.DecimalException as exc:
+            return _decimal_failure(args, exc)
         print(result.to_json() if args.json else result.to_markdown())
         return 0
 
@@ -667,50 +671,95 @@ def _run_ledger(args: argparse.Namespace) -> int:
         print(f"error: cannot read ledger {args.path!r}: {exc}", file=sys.stderr)
         return 1
 
-    rows = ledger_export.build_chargeback(
-        read.events, tuple(args.group_by), ledger_export.Period.all()
-    )
-    totals = ledger_export.chargeback_totals(rows, tuple(args.group_by))
+    try:
+        rows = ledger_export.build_chargeback(
+            read.events, tuple(args.group_by), ledger_export.Period.all()
+        )
+        totals = ledger_export.chargeback_totals(rows, tuple(args.group_by))
+    except decimal.DecimalException as exc:
+        return _decimal_failure(args, exc)
 
     if args.ledger_command == "show":
-        shown = list(rows) if args.limit == 0 else list(rows)[: max(args.limit, 0)]
-        if args.json:
-            payload = json.loads(
-                ledger_export.render_chargeback_json(shown, totals)
-            )
-            payload["file"] = read.to_dict()
-            payload["rows_total"] = len(rows)
-            payload["limit"] = args.limit
-            # Both loss counters, as null rather than as 0: a JSONL line records an
-            # event, never a counter, so the file cannot answer this and a reader
-            # of the JSON deserves the same sentence a reader of the table gets.
-            payload["delivery"] = {
-                "dropped_events": None,
-                "sink_errors": None,
-                "note": ledger_export.FILE_DELIVERY_NOTE,
-            }
-            print(json.dumps(payload, indent=2, sort_keys=True))
-            return 0
-        print(_ledger_show_markdown(read, shown, totals, len(rows)))
+        try:
+            shown = list(rows) if args.limit == 0 else list(rows)[: max(args.limit, 0)]
+            if args.json:
+                payload = json.loads(
+                    ledger_export.render_chargeback_json(shown, totals)
+                )
+                payload["file"] = read.to_dict()
+                payload["rows_total"] = len(rows)
+                payload["limit"] = args.limit
+                # Both loss counters, as null rather than as 0: a JSONL line
+                # records an event, never a counter, so the file cannot answer
+                # this and a reader of the JSON deserves the same sentence a
+                # reader of the table gets.
+                payload["delivery"] = {
+                    "dropped_events": None,
+                    "sink_errors": None,
+                    "note": ledger_export.FILE_DELIVERY_NOTE,
+                }
+                print(json.dumps(payload, indent=2, sort_keys=True))
+                return 0
+            print(_ledger_show_markdown(read, shown, totals, len(rows)))
+        except decimal.DecimalException as exc:
+            return _decimal_failure(args, exc)
         return 0
 
-    written = ledger_export.write_chargeback_csv(
-        rows, args.out, group_by=tuple(args.group_by)
-    )
+    try:
+        # Every money rendering happens before the file is opened, so a decimal
+        # failure cannot leave a written report behind a command that failed:
+        # a half-finished export is a charge-back somebody will pivot.
+        summary = (
+            f"wrote {len(rows)} row(s) to {args.out} from {len(read.events)} event(s) "
+            f"in {args.path} — {ledger_export.money(totals.total_usd)} "
+            f"{totals.currency} total, {totals.unpriced_requests} unpriced, "
+            f"{ledger_export.money(totals.unattributed_usd)} unattributed"
+        )
+        rendered = None if not args.json else ledger_export.render_chargeback_json(rows, totals)
+        written = ledger_export.write_chargeback_csv(
+            rows, args.out, group_by=tuple(args.group_by)
+        )
+    except decimal.DecimalException as exc:
+        return _decimal_failure(args, exc)
     if args.json:
-        payload = json.loads(ledger_export.render_chargeback_json(rows, totals))
+        payload = json.loads(rendered)
         payload["file"] = read.to_dict()
         payload["out"] = str(args.out)
         payload["rows_written"] = written
         print(json.dumps(payload, indent=2, sort_keys=True))
         return 0
-    print(
-        f"wrote {written} row(s) to {args.out} from {len(read.events)} event(s) "
-        f"in {args.path} — {ledger_export.money(totals.total_usd)} "
-        f"{totals.currency} total, {totals.unpriced_requests} unpriced, "
-        f"{ledger_export.money(totals.unattributed_usd)} unattributed"
-    )
+    print(summary)
     return 0
+
+
+def _decimal_failure(args: argparse.Namespace, exc: BaseException) -> int:
+    """Report a decimal arithmetic failure as a diagnosis, not a traceback.
+
+    A ``decimal`` context is process-global, and money that cannot be
+    represented at the ledger's own 28 digits raises
+    :class:`decimal.InvalidOperation` out of ``quantize``. Left alone that
+    reaches the operator as ``decimal.InvalidOperation`` with no indication of
+    which command failed, on which file, or what to do about it.
+
+    The message names the command, the file, the ambient context and the usual
+    cause, and goes to stderr with exit ``1`` — the same "the report would be
+    wrong or absent" code a corrupt line gets, because it is the same class of
+    outcome. The ambient context is printed because it is the first thing worth
+    ruling out and it is the one thing the operator cannot see from the output.
+    """
+    context = decimal.getcontext()
+    where = getattr(args, "path", None)
+    print(
+        f"error: backstop ledger {args.ledger_command} could not total "
+        f"{where!r}: {type(exc).__name__}: {exc} "
+        f"(ambient decimal context: prec={context.prec}, Emax={context.Emax}). "
+        "The ledger's own money arithmetic runs at prec=28 regardless of that "
+        "context, so the usual cause is an amount with too many digits to "
+        "quantise — check the cost and revenue figures in the file for an "
+        "extreme magnitude.",
+        file=sys.stderr,
+    )
+    return 1
 
 
 def _ledger_show_markdown(read, shown, totals, rows_total: int) -> str:

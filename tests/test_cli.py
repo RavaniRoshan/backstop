@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import decimal
 import gc
 import json
 import socket
@@ -371,6 +372,104 @@ def test_cli_ledger_bad_group_by_is_a_usage_error(value, capsys, ledger_file, tm
             main(argv + ["--group-by", value])
         assert caught.value.code == 2
     assert capsys.readouterr().out == ""
+
+
+@pytest.fixture
+def absurd_ledger(tmp_path: Path) -> Path:
+    """A ledger whose one event carries a cost with more digits than money has.
+
+    Written by hand rather than produced, because no provider and no rate card
+    produces it: the point is that the reader accepts a syntactically valid
+    ``total_usd`` it cannot total, and that the operator gets a diagnosis rather
+    than a ``decimal.InvalidOperation`` traceback.
+    """
+    path = tmp_path / "absurd.jsonl"
+    huge = "1" * 27 + ".890123"
+    line = {
+        "event_id": "0" * 32,
+        "occurred_at": "2026-09-26T01:00:00.000000Z",
+        "schema_version": "1.0",
+        "provider": "openai",
+        "model": "gpt-4o",
+        "endpoint": "/v1/chat/completions",
+        "priority": "default",
+        "outcome": "success",
+        "input_tokens": 10_000,
+        "output_tokens": 100,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "latency_ms": 12.0,
+        "retries": 0,
+        "estimated": False,
+        "attribution": {"team": "payments", "feature": None, "environment": None},
+        "request_id": None,
+        "cost": {
+            "input_usd": huge,
+            "output_usd": "0.001000",
+            "cache_read_usd": "0.000000",
+            "cache_write_usd": "0.000000",
+            "total_usd": huge,
+            "currency": "USD",
+            "price_source": "bundled",
+            "estimated_tokens": False,
+            "priced_components": ["input", "output", "cache_read", "cache_write"],
+        },
+    }
+    path.write_text(json.dumps(line) + "\n", encoding="utf-8")
+    return path
+
+
+def test_cli_ledger_show_diagnoses_a_decimal_failure_instead_of_tracing_back(
+    capsys, absurd_ledger
+):
+    """The last resort: the money is too big to total, and it says so.
+
+    A ``quantize`` at 28 significant digits cannot represent a 33-digit amount,
+    so the arithmetic raises. Left alone that reached the operator as a bare
+    ``decimal.InvalidOperation`` with no command, no file and no cause.
+    """
+    code = main(["ledger", "show", "--path", str(absurd_ledger)])
+    assert code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "backstop ledger show could not total" in captured.err
+    assert str(absurd_ledger) in captured.err
+    assert "InvalidOperation" in captured.err
+    # The ambient context is named because it is the first thing to rule out and
+    # the one thing the operator cannot see from the output.
+    assert f"prec={decimal.getcontext().prec}" in captured.err
+    assert "too many digits to quantise" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_cli_ledger_export_diagnoses_a_decimal_failure_and_writes_nothing(
+    capsys, absurd_ledger, tmp_path
+):
+    target = tmp_path / "should-not-exist.csv"
+    code = main(["ledger", "export", "--path", str(absurd_ledger), "--out", str(target)])
+    assert code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "backstop ledger export could not total" in captured.err
+    assert "InvalidOperation" in captured.err
+    # A report that cannot be totalled is not written: a half-written CSV is a
+    # charge-back somebody will pivot.
+    assert not target.exists()
+
+
+def test_cli_ledger_demo_diagnoses_a_decimal_failure(monkeypatch, capsys):
+    """The demo path too, for the same reason: one guard, three subcommands."""
+
+    def explode(*args, **kwargs):
+        raise decimal.InvalidOperation("quantize")
+
+    monkeypatch.setattr("backstop.ledger.demo.build_chargeback", explode)
+    code = main(["ledger", "demo"])
+    assert code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "backstop ledger demo could not total" in captured.err
+    assert "InvalidOperation" in captured.err
 
 
 def test_cli_ledger_requires_a_subcommand(capsys):

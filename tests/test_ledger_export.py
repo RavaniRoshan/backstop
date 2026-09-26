@@ -13,6 +13,7 @@ runs, which is what makes ``backstop ledger demo`` safe to put in a slide.
 from __future__ import annotations
 
 import csv
+import decimal
 import io
 import json
 import re
@@ -419,6 +420,114 @@ def test_an_empty_window_is_empty_and_sums_to_zero():
     assert totals.total_usd == Decimal("0.00")
     assert totals.unattributed_share == Decimal("0.0000")
     assert totals.first_seen == "" and totals.last_seen == ""
+
+
+# --------------------------------------------------------------------------
+# Independence from the ambient decimal context
+# --------------------------------------------------------------------------
+#
+# A decimal context is process-global. The catalog already prices under its own
+# (see backstop.pricing_catalog.LEDGER_CONTEXT); these tests pin that the report
+# totals under the *same* context, because a charge-back that adds up to a
+# different figure from the one the catalog billed is the failure this product
+# exists to prevent — and unlike the crash it used to raise, a rounded total
+# looks entirely plausible.
+#
+# The figures are at the *dollar* scale on purpose. ``quantize`` to six decimal
+# places needs one significant digit per whole dollar, so a report totalling
+# less than a dollar fits inside ``prec=6`` by luck and proves nothing; these
+# events cost tens of dollars and need eight digits.
+
+#: gpt-4o at 2.50 in, 10.00 out, 1.25 cached read, per million tokens.
+#:   10,000,000 in  -> 25.000000
+#:    1,234,567 out -> 12.345670
+#:    8,000,000 read -> 10.000000   Total 47.345670, displayed 47.35
+HOSTILE_EVENTS = (
+    event(
+        "2026-09-26T01:00:00.000000Z",
+        team="payments",
+        feature="checkout-v2",
+        input_tokens=10_000_000,
+        output_tokens=1_234_567,
+        cache_read_tokens=8_000_000,
+    ),
+    event(
+        "2026-09-26T02:00:00.000000Z",
+        input_tokens=3_000_000,
+        output_tokens=123_456,
+    ),
+)
+# Exact window total 47.345670 + 8.734560 = 56.080230, displayed 47.35 + 8.73.
+HOSTILE_TOTALS = {
+    "total_usd": Decimal("56.08"),
+    "unrounded_total_usd": Decimal("56.080230"),
+    "unattributed_usd": Decimal("8.73"),
+    "unattributed_share_pct": Decimal("15.58"),
+    "unpriced_share_pct": Decimal("0.00"),
+    "rounding_gap_usd": Decimal("0.00"),
+}
+
+
+def test_a_chargeback_totals_identically_under_a_tight_decimal_context(monkeypatch):
+    """``prec=6``: the reproduction, one layer up from the catalog.
+
+    Under the old arithmetic every ``quantize`` in this module ran at the
+    thread's six significant digits, so a total of 47.345670 needed eight and
+    raised ``InvalidOperation``: ``backstop ledger show``, ``export`` and
+    ``demo`` all died with a bare ``decimal.InvalidOperation`` and no
+    indication of why.
+    """
+    baseline = chargeback_totals(build_chargeback(HOSTILE_EVENTS))
+    for name, expected in HOSTILE_TOTALS.items():
+        assert getattr(baseline, name) == expected, name
+    # Sanity: this window really does need more than six significant digits, or
+    # the test below would pass against the old arithmetic for the wrong reason.
+    assert len(baseline.unrounded_total_usd.as_tuple().digits) > 6
+
+    monkeypatch.setattr(decimal.getcontext(), "prec", 6)
+    totals = chargeback_totals(build_chargeback(HOSTILE_EVENTS))
+    for name, expected in HOSTILE_TOTALS.items():
+        assert getattr(totals, name) == expected, name
+    # The rendering too, and the CSV: the figures a reader sees are the figures
+    # the aggregation produced.
+    assert money(totals.total_usd) == "56.08"
+    assert money(totals.unattributed_usd) == "8.73"
+    header, *records = csv_records(build_chargeback(HOSTILE_EVENTS))
+    money_column = header.index("total_usd")
+    assert [record[money_column] for record in records] == ["47.35", "8.73"]
+
+
+def test_the_revenue_margin_is_not_rounded_by_a_host_decimal_context(monkeypatch):
+    """A margin is money as much as a cost is, and it is a subtraction.
+
+    Under ``prec=6`` the difference between a six-decimal cost and a two-decimal
+    revenue figure is computed to six significant digits, so a margin of tens of
+    dollars loses its cents.
+    """
+    rows = build_chargeback(HOSTILE_EVENTS)
+    revenue = {("payments", "checkout-v2"): "1000.00", (UNATTRIBUTED, UNATTRIBUTED): "1.00"}
+    margins = {row.keys: row.margin_usd for row in revenue_join(rows, revenue)}
+    # 1000.00 - 47.345670, and 1.00 - 8.734560.
+    assert margins[("payments", "checkout-v2")] == Decimal("952.654330")
+    assert margins[(UNATTRIBUTED, UNATTRIBUTED)] == Decimal("-7.734560")
+
+    monkeypatch.setattr(decimal.getcontext(), "prec", 6)
+    hostile = {row.keys: row.margin_usd for row in revenue_join(rows, revenue)}
+    assert hostile == margins
+    # The CSV renders the margin at two places, like every other money cell.
+    assert render_revenue_csv(revenue_join(rows, revenue)).count(",952.65,") == 1
+
+
+def test_the_ledger_demo_totals_the_same_way_under_a_hostile_context(monkeypatch):
+    """The pitch artifact has to be as reproducible as the export is."""
+    from backstop.ledger.demo import run_demo
+
+    baseline = run_demo()
+    monkeypatch.setattr(decimal.getcontext(), "prec", 2)
+    monkeypatch.setattr(decimal.getcontext(), "rounding", decimal.ROUND_UP)
+    hostile = run_demo()
+    assert hostile.to_json() == baseline.to_json()
+    assert hostile.to_markdown() == baseline.to_markdown()
 
 
 # --------------------------------------------------------------------------
