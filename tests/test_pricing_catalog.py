@@ -1621,3 +1621,54 @@ def test_the_ledger_package_still_exports_its_own_names():
     for name in ("Attribution", "SpendEvent", "TenantBudget", "with_attribution"):
         assert name in package.__all__, name
     assert os.path.basename(package.__file__ or "") == "__init__.py"
+
+
+def test_the_missing_price_rule_names_the_mechanism_that_actually_exists():
+    """A docstring that names a counter nobody increments reads as an answer.
+
+    Both places that own the "a missing price must be visible" rule said the
+    caller increments a ``price_unknown`` counter. No such counter was ever
+    built, in ``src/`` or in the tests. The mechanism that does exist is the
+    event itself: ``cost=None``, counted by the charge-back export's
+    ``unpriced_requests`` column. Corrected rather than built, because a
+    process-global counter with no poller is the second telemetry system this
+    codebase refuses to grow, and the export column is the better design — it is
+    per group, per period, and in the CSV finance actually opens.
+    """
+    for text in (pricing_catalog.__doc__, compute_cost.__doc__):
+        assert text is not None
+        assert "price_unknown" not in text
+        assert "unpriced_requests" in text
+
+    # And the mechanism the docstrings now name is the one that runs.
+    from backstop.ledger import build_chargeback
+    from backstop.ledger.export import NO_VALUE
+
+    unpriced = make_event(model="mystery-v1")
+    assert unpriced.cost is None
+    (row,) = build_chargeback([unpriced])
+    assert row.unpriced_requests == 1
+    assert row.total_usd == 0
+    assert row.price_source == NO_VALUE
+
+
+def test_no_module_in_the_package_claims_a_counter_it_does_not_have():
+    """The general form of the rule, so the next one is caught here.
+
+    A docstring is a promise a reader will act on, and "the caller increments
+    X" is the most actionable kind: a user wiring an alert looks for the name and
+    finds nothing. Cheap to check, and it fails loudly the next time a docstring
+    names a counter that was never built.
+    """
+    import pathlib
+
+    import backstop
+
+    root = pathlib.Path(backstop.__file__).resolve().parent
+    offenders = [
+        f"{path.name}: {line.strip()}"
+        for path in sorted(root.rglob("*.py"))
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if "increments" in line and "counter" in line
+    ]
+    assert not offenders, f"docstrings promise a counter that does not exist: {offenders}"

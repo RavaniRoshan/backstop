@@ -63,13 +63,18 @@ layer is the higher one.
 Missing prices
 --------------
 
-A missing price is visible, never filled. :func:`compute_cost` returns ``None`
-and its caller increments a ``price_unknown`` counter; it never falls back to a
-neighbouring model, a family average, or a default. A model that publishes an
-input and output price but no cache price is a second, quieter case: the cache
-components are charged at zero and
-:attr:`CostBreakdown.priced_components` records that they were not priced, so
-an export can report the gap instead of presenting a zero as a measurement.
+A missing price is visible, never filled. :func:`compute_cost` returns ``None``,
+its caller records the event with ``cost=None``, and the charge-back export
+counts that event in ``unpriced_requests`` while leaving the row's
+``price_source`` as the no-value marker. So an unpriced model reaches the report
+as a hole of unknown size rather than as a row that quietly costs nothing, and
+there is no separate counter that could drift from the export — the row *is* the
+record. :func:`compute_cost` itself never falls back to a neighbouring model, a
+family average, or a default. A model that publishes an input and output price
+but no cache price is a second, quieter case: the cache components are charged
+at zero and :attr:`CostBreakdown.priced_components` records that they were not
+priced, so an export can report the gap instead of presenting a zero as a
+measurement.
 """
 from __future__ import annotations
 
@@ -1015,10 +1020,13 @@ def compute_cost(
     is the answer this function is built around: it never falls back to a
     neighbouring model, a family average, or a default rate, because a
     charge-back that is quietly wrong is worse than one that is absent. **The
-    caller owns the counter path**: when this returns ``None`` the event is
-    recorded with ``cost=None`` and the ledger increments its
-    ``price_unknown`` counter, so an unpriced model is visible in the export
-    rather than absent from it.
+    caller owns the reporting path**: when this returns ``None`` the event is
+    recorded with ``cost=None`` — there is no counter to increment, because the
+    event itself is the record — and :func:`backstop.ledger.build_chargeback`
+    counts it in the row's ``unpriced_requests`` column, leaving ``price_source``
+    as the no-value marker. An unpriced model is therefore visible in every
+    report rather than absent from it, and that visibility cannot drift from the
+    export because it *is* the export.
 
     ``price_overrides`` wins over the catalog for this call only. Precedence, from
     :func:`PriceCatalog` and here together: per-call override, then the user's
