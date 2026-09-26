@@ -23,13 +23,15 @@ def is_streaming(body: Any) -> bool:
 def _extract_sse_usage(response_text: str) -> int | None:
     """Extract token usage from an SSE streaming response text.
 
-    Delegates to :func:`backstop.extract._usage_from_sse_text` so the SSE
-    usage-parsing logic lives in one place. Returns None if no usage is found;
-    callers then fall back to the reservation estimate.
+    Delegates to :func:`backstop.extract.sse_usage` so the SSE usage-parsing
+    logic lives in one place, and takes its ``total`` because a reservation is
+    reconciled against a sum, not against a split. Returns None if no usage is
+    found; callers then fall back to the reservation estimate.
     """
-    from .extract import _usage_from_sse_text
+    from .extract import sse_usage
 
-    return _usage_from_sse_text(response_text)
+    usage = sse_usage(response_text)
+    return None if usage is None else usage.total
 
 
 def _int_or_zero(*values: Any) -> int | None:
