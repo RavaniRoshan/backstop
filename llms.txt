@@ -12,6 +12,7 @@
 - Examples: /examples/
 - Committed benchmark snapshot: /docs/benchmark-results-2026-07-20.md
 - Concurrency and scale limits: /docs/concurrency.md
+- Spend ledger, chargeback export and runaway-spend detection: /docs/ledger.md
 - Threat model: /docs/threat-model.md
 
 ## Install (0.6.0 published)

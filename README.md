@@ -10,6 +10,9 @@
   <a href="https://github.com/RavaniRoshan/backstop/actions/workflows/ci.yml">
     <img src="https://github.com/RavaniRoshan/backstop/actions/workflows/ci.yml/badge.svg" alt="CI" />
   </a>
+  <a href="https://github.com/RavaniRoshan/backstop/releases/latest">
+    <img src="https://img.shields.io/github/v/release/RavaniRoshan/backstop" alt="Release: v0.6.0" />
+  </a>
   <a href="https://github.com/RavaniRoshan/backstop/blob/main/LICENSE.txt">
     <img src="https://img.shields.io/github/license/RavaniRoshan/backstop" alt="License: MIT" />
   </a>
@@ -195,6 +198,9 @@ except BudgetExceededError as exc:
 | Priority admission | Queues and prioritises across `critical` / `default` / `background`; see below |
 | Retry + backoff | Configurable exponential backoff with jitter |
 | Shadow mode | Observe-without-enforce for safe rollout |
+| Spend ledger | Opt-in. One priced, attributed record per completed request, to a JSONL file or an in-memory ring; see below and [docs/ledger.md](docs/ledger.md) |
+| Chargeback export | `backstop ledger export` writes a finance-grade CSV that joins to your own revenue data |
+| Runaway-spend detection | Velocity, drift, retry amplification and context growth, per attribution key. Shadow by default: reports, never blocks |
 
 ### Priority admission
 
@@ -222,6 +228,60 @@ client = Backstop.wrap(
 )
 ```
 
+### Spend ledger
+
+Opt-in, off by default, and the same one-wrap-call adoption: you add a config
+field, not a call site. Every completed provider request then produces one
+priced, attributed record.
+
+```python
+from backstop import Backstop, BackstopConfig, attribution
+
+client = Backstop.wrap(
+    OpenAI(),
+    budget=500_000,
+    config=BackstopConfig(ledger_enabled=True, ledger_path="ledger.jsonl"),
+)
+
+with attribution(team="payments", feature="checkout-v2"):
+    client.chat.completions.create(...)
+```
+
+See the charge-back it produces, with no key and no network:
+
+```bash
+backstop ledger demo
+```
+
+```
+| team | feature | request_count | input_tokens | output_tokens | total_usd | unpriced_requests | unpriced_components |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
+| payments | checkout-v2 | 388 | 8532297 | 278259 | 26.21 | 0 | cache_write |
+| payments | refunds | 96 | 520529 | 101931 | 3.40 | 0 | (none) |
+| support | triage | 240 | 516754 | 87934 | 1.76 | 0 | (none) |
+| search | query-rewrite | 1140 | 741077 | 165354 | 1.65 | 0 | (none) |
+| (unattributed) | (unattributed) | 69 | 396310 | 39882 | 1.54 | 0 | (none) |
+| search | vendor-preview | 34 | 82143 | 11300 | 0.00 | 34 | (none) |
+| **Total** | all | 1967 | 10789110 | 684660 | **34.56** | 34 | cache_write |
+```
+
+That traffic is synthetic and the run is deterministic to the dollar; the prices
+are real, computed with `Decimal` from a bundled rate card. Read your own file
+with `backstop ledger show --path ledger.jsonl`, or write the CSV with
+`backstop ledger export --path ledger.jsonl --out chargeback.csv --group-by
+team,feature`. The honesty columns — `unpriced_requests`, `estimated_requests`,
+`unpriced_components` — sit next to the money on purpose: an unattributed dollar
+is the thing finance most needs to see, so it renders as `(unattributed)` and
+never as a blank cell.
+
+**It is not free, and the number is measured.** With the ledger off (the
+default) the whole per-request cost is one truth test and no event is built. With
+it on, a request roughly doubles in cost: +147 µs p50 (+98%) on a 150 µs request,
+measured on Python 3.12.3/Linux over 7 alternating runs. The request path still
+never opens a file or a socket. Full numbers, the reproduction script, and the
+known limitations — including a dated rate card and a silent cache-write
+under-count on Anthropic's 1-hour TTL — are in [docs/ledger.md](docs/ledger.md).
+
 ---
 
 ## What It Does Not Do
@@ -241,7 +301,35 @@ client = Backstop.wrap(
   keys to provider secrets at call time. That is indirection over keys you
   already hold, not custody of them.
 - **Not a multi-provider router.** Use LiteLLM or similar if you need fallback across providers. Backstop's fallback chain stays within one provider.
-- **Not observability storage.** Backstop emits metrics; you send them to your own backend.
+- **Not observability storage — but not nothing either.** Metrics are still
+  yours to ship: Backstop emits them and you send them to your own backend, with
+  no retention, no query layer and no collector of its own. What changed is that
+  Backstop now has one kind of **durable local storage** of its own: the opt-in
+  spend ledger writes an append-only NDJSON file, or keeps a bounded in-memory
+  ring, on the machine that made the requests. That is a file, not a system. It
+  is what makes the charge-back above possible, and it is bounded by the disk you
+  gave it and by a buffer that **refuses** rather than grows. Still absent:
+  - **No cloud.** Nothing is uploaded. There is no Backstop service, no
+    collector, no dashboard that reads your ledger.
+  - **No multi-tenancy of the ledger.** One file per process, whatever path that
+    process chose. Rotation, archival, retention policy and querying are yours.
+    (`virtual_keys` and per-tenant budgets are about *enforcement*, not about
+    partitioning storage.)
+  - **No forecasting.** `backstop.forecast` projects budget exhaustion from a
+    measured burn rate; it does not project spend, and the ledger is a record of
+    what happened, not a model of what will.
+  - **No cross-customer benchmarks.** Nothing aggregates across deployments and
+    there is no published "normal cost per request" for you to compare against.
+    The demo's numbers are a synthetic scenario, not a reference.
+  - **No framework-native attribution.** `team` / `feature` / `customer` come
+    from a `ContextVar` you scope yourself, or from `virtual_keys`; nothing
+    reads a LangChain/LlamaIndex/CrewAI run for you. Attribution is exactly what
+    your call sites declare, and an undeclared call site is a `(unattributed)`
+    row rather than a guess.
+  - **No enforcement on spend.** The detector reports; it cannot block, cancel or
+    kill, and spend *avoided* is not in the ledger at all — it stays on the
+    enforcement surface (`budget_exceeded` counters, the audit log's `deny`
+    records), where it already was.
 - **Not LangGraph/CrewAI-native.** Works with those frameworks only at the SDK level, not via framework-specific hooks.
 
 ---
@@ -266,12 +354,12 @@ clients, wraps them, and confirms the HTTP-family detection resolves. It does
 **not** send a request through the wrapped transport, so it cannot prove
 enforcement works — `backstop verify` is the command that does that.
 
-Known caveat: `doctor` imports `httpx2` unconditionally, but `httpx2` is not a
-declared dependency (it arrives only as a dependency of newer `openai` /
-`anthropic` majors). On an install that resolves to the older SDK family, so
-that `httpx2` is absent, `doctor` fails its wrap smoke test and **exits 1**. That
-is a `doctor` bug, not a broken install — check whether `httpx2` is importable
-before trusting a non-zero exit. `backstop verify` is unaffected.
+`httpx2` is not a declared dependency; it arrives only as a dependency of newer
+`openai` / `anthropic` majors. `doctor` handles its absence: on an install
+resolving to the older SDK family it reports `httpx2 not installed; the SDKs in
+use are on the httpx family` and carries on, and still exits 0. On an install
+where it is present, the `httpx2` mock-transport and `compat_for` checks run as
+before.
 
 See [docs/compatibility.md](docs/compatibility.md) for the full version matrix and unsupported version notes.
 
