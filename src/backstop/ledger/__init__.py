@@ -19,6 +19,12 @@ The sinks — ``LedgerSink`` and its four implementations, plus the
 ``BoundedWriter`` that keeps them off the request path — are re-exported for the
 same reason: a caller wiring a ledger needs the event, the price and the place it
 goes, and three imports of the same object is three chances to get one wrong.
+
+The charge-back export is re-exported with them. A deployment that turns the
+ledger on gets events and prices; what it wants next is the number finance asks
+for, and that is :func:`build_chargeback` over the same objects rather than a
+reimplementation of them. :func:`read_ledger` is here for the same reason: the
+JSONL file a :class:`JsonlSink` writes is read by the module that wrote it.
 """
 from __future__ import annotations
 
@@ -33,6 +39,20 @@ from .budget import (
     with_budget,
 )
 from .context import attribution, current_attribution, with_attribution
+from .export import (
+    UNATTRIBUTED,
+    ChargebackRow,
+    ChargebackTotals,
+    LedgerCorruptionError,
+    LedgerRead,
+    Period,
+    build_chargeback,
+    chargeback_totals,
+    money,
+    read_ledger,
+    revenue_join,
+    write_chargeback_csv,
+)
 from .schema import (
     EVENT_ID_RE,
     OCCURRED_AT_RE,
@@ -59,30 +79,42 @@ __all__ = [
     "SCHEMA_VERSION",
     "SECRET_QUERY_RE",
     "UNKNOWN_ENDPOINT",
+    "UNATTRIBUTED",
     "Attribution",
     "BoundedWriter",
     "BudgetLedger",
+    "ChargebackRow",
+    "ChargebackTotals",
     "CostBreakdown",
     "JsonlSink",
+    "LedgerCorruptionError",
+    "LedgerRead",
     "LedgerSink",
     "MemorySink",
     "NullSink",
+    "Period",
     "PriceCatalog",
     "PriceEntry",
     "ReservationTicket",
     "SpendEvent",
     "TenantBudget",
     "attribution",
+    "build_chargeback",
+    "chargeback_totals",
     "compute_cost",
     "cost_from_dict",
     "cost_to_dict",
     "current_attribution",
     "get_current_tenant",
     "get_ledger",
+    "money",
     "normalize_endpoint",
+    "read_ledger",
     "reset_ledger",
     "resolve_cost_type",
+    "revenue_join",
     "utc_now",
     "with_attribution",
     "with_budget",
+    "write_chargeback_csv",
 ]
