@@ -8,7 +8,6 @@ from typing import Dict, Any, Optional
 
 from openai import AsyncOpenAI
 from backstop.wrapper import Backstop
-from backstop.config import BackstopConfig
 
 
 def _extract_patch_from_output(output: str) -> str:

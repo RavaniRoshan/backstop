@@ -49,7 +49,7 @@ def test_file_audit_sink_writes_ndjson_with_envelope():
         sink.emit({"decision": "deny", "api_key": "sk-ABCDEFGHIJKLMNOPQRSTUVWX"})
         sink.close()
         with open(path, "r", encoding="utf-8") as fh:
-            lines = [l.strip() for l in fh if l.strip()]
+            lines = [line.strip() for line in fh if line.strip()]
         assert len(lines) == 1
         env = json.loads(lines[0])
         assert env["type"] == "com.backstop.audit"

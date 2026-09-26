@@ -6,8 +6,6 @@ test_passed reflects the real exit code. Also covers default models,
 base_url override, and provider dispatch.
 """
 import asyncio
-import os
-import subprocess
 
 import pytest
 import yaml
@@ -122,7 +120,7 @@ def test_runner_writes_patch_and_executes_test_command(monkeypatch):
     """End-to-end: patch is written to worktree, test_command runs, exit
     code is honored."""
     # Force a clean, non-repo worktree path (deterministic)
-    tmp = monkeypatch.setattr("wedge.runner.os.path.exists", lambda p: False)
+    monkeypatch.setattr("wedge.runner.os.path.exists", lambda p: False)
     # Use temp repo path so runner falls back to mkdtemp
     runner = WedgeRunner(
         "t1",

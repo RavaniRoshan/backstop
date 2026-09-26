@@ -55,6 +55,15 @@ __all__ = [
     "cost",
 ]
 
-budgets = get_ledger()
+# `backstop.budgets` is kept as a public alias for the process-global ledger, but
+# it must never be a snapshot: `reset_ledger()` rebinds the module global, and a
+# value bound at import time would keep pointing at the discarded instance. So it
+# is resolved on every attribute access instead (PEP 562).
+
+
+def __getattr__(name: str):
+    if name == "budgets":
+        return get_ledger()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 cost = type("_CostModule", (), {"estimate": staticmethod(cost_estimate)})()
 

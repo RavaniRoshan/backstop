@@ -19,8 +19,7 @@ import re
 import threading
 import time
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 # CloudEvents envelope spec (v1.0.2): id, source, type, specversion, data, time.
 

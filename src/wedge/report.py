@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import yaml
 from typing import Dict, Any, List
 
 # Per-runner Backstop budget cap (mirrors WedgeRunner's wrap budget).

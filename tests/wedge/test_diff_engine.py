@@ -1,4 +1,3 @@
-import pytest
 from wedge.diff_engine import compute_similarity, compare_patches
 
 def test_compute_similarity():

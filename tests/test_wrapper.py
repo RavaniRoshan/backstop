@@ -237,7 +237,6 @@ def test_a_wrapped_client_reuses_the_sdks_own_transport():
     been rebound, and the fallback then replaces the SDK's transport - taking
     its proxy, TLS and connection-pool configuration with it.
     """
-    import httpx
     import openai
 
     from backstop.wrapper import _sync_transport_from

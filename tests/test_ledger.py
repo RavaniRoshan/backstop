@@ -4,7 +4,6 @@ import httpx
 import pytest
 
 from backstop import BackstopConfig
-from backstop.budget import Budget
 from backstop.exceptions import BudgetExceededError
 from backstop.ledger import (
     BudgetLedger,

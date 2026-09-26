@@ -295,10 +295,13 @@ def test_the_detection_view_covers_every_live_session_separately():
     view reads the states rather than the sink.
     """
     first = _state()
-    second = _state()
+    # a second live state, so the view has two sessions to tell apart
+    _state()
     _burst(first, count=2)
     view = detection_view()
     assert view["session_count"] == 2
+    # the untouched state is reported, with a signal count of its own
+    assert any(int(row["signals"]) == 0 for row in view["sessions"])
     assert {row["session_id"] for row in view["sessions"]} == {
         row.session_id for row, _ in get_registry().states()
     }

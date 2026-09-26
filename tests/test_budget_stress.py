@@ -9,8 +9,8 @@ from __future__ import annotations
 import concurrent.futures
 import random
 import threading
+import time
 
-import pytest
 
 from backstop.budget import Budget
 from backstop.exceptions import BudgetExceededError
@@ -30,32 +30,51 @@ def test_budget_never_goes_negative_single_thread():
 
 
 def test_budget_spent_plus_reserved_never_exceeds_total():
-    """At no point should spent + reserved > total."""
+    """At no point may spent + reserved exceed total.
+
+    This test used to build a `violations` list, append to it under a lock and
+    then assert nothing about it - the property was named but never checked, and
+    ruff flagged the unused list. It now samples the invariant from the reader
+    side while the workers run, which is the only place a race would show up.
+    """
     budget = Budget(1000)
+    total = 1000
     lock = threading.Lock()
-    violations = []
+    violations: list[int] = []
+    stop = threading.Event()
 
     def worker():
         for _ in range(500):
             try:
                 r = budget.reserve(random.randint(1, 20))
-                # Check invariant while reserved
-                with lock:
-                    if budget.spent + (budget.backend.reserved if hasattr(budget.backend, 'reserved') else 0) > 1000 + 20:
-                        # Allow small tolerance for the current reservation
-                        pass
                 budget.reconcile(r, random.randint(1, 15), success=random.random() > 0.2)
             except BudgetExceededError:
                 pass
 
-    threads = [threading.Thread(target=worker) for _ in range(10)]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
+    def sampler():
+        # a single reservation may transiently add its own estimate, so the
+        # bound is total plus one maximum reservation
+        while not stop.is_set():
+            reserved = getattr(budget.backend, "reserved", 0)
+            with lock:
+                live = budget.spent + reserved
+            if live > total + 20:
+                violations.append(live)
+            time.sleep(0)
 
+    threads = [threading.Thread(target=worker) for _ in range(10)]
+    watcher = threading.Thread(target=sampler, daemon=True)
+    watcher.start()
+    for t_ in threads:
+        t_.start()
+    for t_ in threads:
+        t_.join()
+    stop.set()
+    watcher.join(timeout=5)
+
+    assert not violations, f"spent+reserved exceeded the ceiling: {violations[:5]}"
     assert budget.remaining >= 0
-    assert budget.spent <= 1000
+    assert budget.spent <= total
 
 
 def test_concurrent_budget_never_overspends():

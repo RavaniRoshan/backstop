@@ -14,7 +14,6 @@ import gzip
 import json
 
 import httpx
-import pytest
 
 from backstop.config import BackstopConfig
 from backstop.state import BackstopState

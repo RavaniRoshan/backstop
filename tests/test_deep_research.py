@@ -12,7 +12,7 @@ import pytest
 
 from backstop.agent_guard import AgentGuard
 from backstop.audit import AuditLog
-from backstop.config import BackstopConfig, Priority
+from backstop.config import BackstopConfig
 from backstop.forecast import BurnSample, CostForecaster, detect_spend_anomaly, will_exhaust
 from backstop.limiter import TokenBucketLimiter
 from backstop.quotas import QuotaMonitor, parse_ratelimit_headers
@@ -432,7 +432,7 @@ def test_audit_records_deny_on_budget_exceeded(tmp_path):
     with pytest.raises(Exception):
         client.post("/v1/chat/completions", json={"model": "m", "messages": [{"role": "user", "content": "x"}]})
     lines = path.read_text().splitlines()
-    assert any(json.loads(l)["decision"] == "deny" for l in lines)
+    assert any(json.loads(line)["decision"] == "deny" for line in lines)
     assert AuditLog(str(path), hmac_key="k").verify()
 
 
@@ -486,7 +486,7 @@ def test_langchain_adapter_factory_requires_framework():
 
 # --- P2#10 gateway scaffold (requires fastapi) ----------------------------
 def test_gateway_proxies_through_backstop():
-    fastapi = pytest.importorskip("fastapi")
+    pytest.importorskip("fastapi")
     from fastapi.testclient import TestClient
 
     from backstop.gateway import make_gateway_app

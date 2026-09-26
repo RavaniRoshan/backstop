@@ -6,6 +6,7 @@ import time
 from collections.abc import Awaitable, Callable
 
 import httpx
+from typing import Any
 
 from ._httpcompat import HTTPX, _HttpCompat
 from .budget import Reservation

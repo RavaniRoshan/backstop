@@ -1,4 +1,3 @@
-import pytest
 from wedge.report import generate_report
 
 def test_generate_report():

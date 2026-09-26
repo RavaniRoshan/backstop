@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import json
 import time
 from typing import TYPE_CHECKING, Any
 
+from .ledger import ReservationTicket as LedgerReservation
 from ._httpcompat import _HttpCompat, compat_for
 
 if TYPE_CHECKING:
@@ -62,7 +62,6 @@ def _reconcile_usage(
     Falls back to the reservation estimate only when the provider emitted no
     usage block in the stream (actual_tokens is None) and the request succeeded.
     """
-    from .ledger import ReservationTicket as LedgerReservation
 
     if tenant_budget is not None and isinstance(reservation, LedgerReservation):
         if success:
@@ -90,7 +89,6 @@ def setup_streaming(
     the response is closed. This avoids eagerly reading the stream at setup time
     (which would starve the consumer) while still reconciling to actual tokens.
     """
-    from .ledger import ReservationTicket as LedgerReservation
     compat = compat_for(response)
     _ensure_response_family(response, compat)
 

@@ -5,7 +5,6 @@ import datetime as _dt
 import decimal
 import json
 import platform
-import statistics
 import sys
 import time
 
@@ -215,7 +214,7 @@ def _run_doctor() -> int:
 
         # Test with httpx mock transport (this is what the actual tests use)
         import httpx
-        state = BackstopState.create(100_000, BackstopConfig(default_max_output_tokens=1))
+        BackstopState.create(100_000, BackstopConfig(default_max_output_tokens=1))
         mock_transport = httpx.MockTransport(lambda r: httpx.Response(200, json={"id": "mock", "object": "chat.completion", "choices": [{"message": {"role": "assistant", "content": "test"}}]}))
         client = httpx.Client(transport=mock_transport, base_url="https://mock.local")
         print("- [ok] httpx MockTransport works (as used in tests)")
@@ -253,7 +252,7 @@ def _run_doctor() -> int:
     try:
         import openai
         openai_client = openai.OpenAI(api_key="dummy-key")
-        wrapped_openai = Backstop.wrap(openai_client, budget=10_000, config=BackstopConfig())
+        Backstop.wrap(openai_client, budget=10_000, config=BackstopConfig())
         print("- [ok] OpenAI client wrapped successfully")
         
         # Report SDK version
@@ -276,7 +275,7 @@ def _run_doctor() -> int:
     try:
         import anthropic
         anthropic_client = anthropic.Anthropic(api_key="dummy-key")
-        wrapped_anthropic = Backstop.wrap(anthropic_client, budget=10_000, config=BackstopConfig())
+        Backstop.wrap(anthropic_client, budget=10_000, config=BackstopConfig())
         print("- [ok] Anthropic client wrapped successfully")
         
         # Report SDK version
@@ -335,7 +334,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     benchmark.add_argument("--json", action="store_true", help="emit JSON instead of Markdown")
 
-    doctor = subparsers.add_parser("doctor", help="validate the Backstop install")
+    subparsers.add_parser("doctor", help="validate the Backstop install")
 
     serve = subparsers.add_parser(
         "serve", help="run Backstop as an OpenAI-compatible gateway/sidecar (needs fastapi)"

@@ -1448,3 +1448,28 @@ def test_utc_now_keeps_its_shape_across_the_calendar():
         rendered = moment.replace(tzinfo=None).isoformat(timespec="microseconds") + "Z"
         assert OCCURRED_AT_RE.fullmatch(rendered), rendered
         assert rendered.startswith(str(year).zfill(4))
+
+
+def test_the_budgets_alias_is_never_a_stale_snapshot():
+    """`backstop.budgets` must track the live ledger, not the one at import.
+
+    It used to be `budgets = get_ledger()` evaluated once at module load, so
+    after `reset_ledger()` the package attribute still pointed at the discarded
+    instance: a tenant registered on `backstop.budgets` would be invisible to
+    the transport, which reads the live global.
+    """
+    import backstop
+    from backstop.ledger.budget import get_ledger, reset_ledger
+
+    first = backstop.budgets
+    assert first is get_ledger()
+
+    reset_ledger()
+    try:
+        assert backstop.budgets is get_ledger()
+        assert backstop.budgets is not first, "budgets went stale after reset_ledger()"
+    finally:
+        reset_ledger()
+
+    with pytest.raises(AttributeError):
+        backstop.definitely_not_an_attribute

@@ -2,7 +2,6 @@ import argparse
 import asyncio
 import os
 import yaml
-import sys
 
 from wedge.runner import WedgeRunner
 from wedge.diff_engine import compare_patches
