@@ -59,6 +59,7 @@ from typing import Any, Callable, TypeVar
 
 from ..pricing_catalog import COST_COMPONENTS, CURRENCY, LEDGER_CONTEXT
 from .schema import Attribution, SpendEvent
+from .sink import landed_events, lost_events
 
 __all__ = [
     "CSV_TERMINATOR",
@@ -1558,21 +1559,26 @@ def _excerpt(raw: bytes) -> str:
 class DeliveryReport:
     """How much spend the ledger lost on its way to the sink.
 
-    Two counters, not one, because they are different losses and adding them is
-    the caller's job:
+    Three counters, not one, because they are three different losses:
 
     ``dropped_events``
         Events the :class:`~backstop.ledger.sink.BoundedWriter` refused because
         its bounded buffer was full. Nothing was wrong with the sink.
-    ``writer_sink_errors`` and ``sink_sink_errors``
-        The first is what escaped a sink as an exception. The second is a sink
-        that swallows its own failures — :class:`~backstop.ledger.sink.JsonlSink`
-        must, since it is called from the drain thread and must never raise into
-        a caller — counting them itself. A deployment that reports only
-        ``writer.sink_errors`` reports zero for every write failure there was.
+    ``writer_sink_errors``
+        What escaped a sink as an exception.
+    ``sink_sink_errors``
+        A sink that swallows its own failures —
+        :class:`~backstop.ledger.sink.JsonlSink` must, since it is called from
+        the drain thread and must never raise into a caller — counting them
+        itself. A deployment that reports only ``writer.sink_errors`` reports
+        zero for every write failure there was.
 
-    ``lost`` is the sum of the three, which is the only figure that answers
-    "is this file complete".
+    ``lost`` is the sum of the three through
+    :func:`~backstop.ledger.sink.lost_events`, the same function
+    :attr:`~backstop.ledger.sink.CloseReport.lost` uses, so the live path and the
+    shutdown path cannot report different numbers for the same writer. ``written``
+    is the count of writes that *returned*; ``landed`` is how many of them
+    produced a record.
     """
 
     submitted: int
@@ -1584,16 +1590,29 @@ class DeliveryReport:
 
     @property
     def lost(self) -> int:
-        return self.dropped_events + self.writer_sink_errors + self.sink_sink_errors
+        """Events that will never be written."""
+        return lost_events(self.dropped_events, self.writer_sink_errors, self.sink_sink_errors)
+
+    @property
+    def landed(self) -> int:
+        """Events that reached storage: the writes the sink did not lose."""
+        return landed_events(self.written, self.sink_sink_errors)
 
 
 def delivery_report(writer: Any) -> DeliveryReport:
     """Read both loss counters from a live writer, and the sink's own with them.
 
-    Takes a :class:`~backstop.ledger.sink.BoundedWriter` — or anything exposing
-    the same counters, so a caller can pass a state, a test double, or the writer
-    itself. A sink with no counter of its own reports zero rather than
-    ``None``: a sink that cannot fail does not have to say so twice.
+    Takes a :class:`~backstop.ledger.sink.BoundedWriter` — a
+    :class:`~backstop.ledger.sink.CloseReport`, or anything exposing the same
+    counters, so a caller can pass a state, a test double, or the writer itself.
+    A sink with no counter of its own reports zero rather than ``None``: a sink
+    that cannot fail does not have to say so twice.
+
+    A ``CloseReport`` already carries the sink's own count and its degraded flag,
+    read once at close, and both are preferred over a live re-read when it is
+    present: a report taken after ``close()`` is a settled number rather than a
+    snapshot of a thread that may still be working, and re-reading the sink
+    afterwards could catch counters that have moved.
     """
     for name in ("submitted", "written", "dropped_events", "sink_errors"):
         if not hasattr(writer, name):
@@ -1602,13 +1621,19 @@ def delivery_report(writer: Any) -> DeliveryReport:
                 f"got {type(writer).__name__}"
             )
     sink = getattr(writer, "sink", None)
+    reported = getattr(writer, "sink_reported_errors", None)
+    degraded = getattr(writer, "sink_degraded", None)
+    if reported is None:
+        reported = getattr(sink, "sink_errors", 0) or 0
+    if degraded is None:
+        degraded = bool(getattr(sink, "degraded", False))
     return DeliveryReport(
         submitted=int(writer.submitted),
         written=int(writer.written),
         dropped_events=int(writer.dropped_events),
         writer_sink_errors=int(writer.sink_errors),
-        sink_sink_errors=int(getattr(sink, "sink_errors", 0) or 0),
-        sink_degraded=bool(getattr(sink, "degraded", False)),
+        sink_sink_errors=int(reported or 0),
+        sink_degraded=bool(degraded),
     )
 
 
@@ -1628,6 +1653,7 @@ def format_delivery(report: DeliveryReport) -> list[str]:
         "",
         f"- submitted: {report.submitted}",
         f"- written: {report.written}",
+        f"- landed (written less the sink's own losses): {report.landed}",
         f"- dropped_events (writer buffer full): {report.dropped_events}",
         f"- writer sink_errors (escaped the sink): {report.writer_sink_errors}",
         f"- sink sink_errors (counted by the sink): {report.sink_sink_errors}",

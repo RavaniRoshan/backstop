@@ -559,6 +559,7 @@ def run_demo(
         delivery={
             "submitted": report.submitted,
             "written": report.written,
+            "landed": report.landed,
             "dropped_events": report.dropped_events,
             "writer_sink_errors": report.writer_sink_errors,
             "sink_sink_errors": report.sink_sink_errors,

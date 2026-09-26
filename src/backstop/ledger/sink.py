@@ -30,6 +30,8 @@ quietly:
 
 * a refused submit returns ``False`` and moves ``dropped_events``;
 * a sink that raises is counted in ``sink_errors`` and never reaches a caller;
+* a sink that swallows its own failure counts it on an optional ``sink_errors``
+  counter of its own, which :meth:`BoundedWriter.close` folds into the report;
 * a :class:`JsonlSink` that cannot write says so through ``degraded`` and stops
   appending, rather than interleaving partial lines into a file a reader trusts;
 * :meth:`BoundedWriter.close` reports what was never written, with a bounded join
@@ -57,6 +59,8 @@ __all__ = [
     "LedgerSink",
     "MemorySink",
     "NullSink",
+    "landed_events",
+    "lost_events",
 ]
 
 #: Default ring length for :class:`MemorySink`, and the default of
@@ -79,6 +83,40 @@ DEFAULT_CLOSE_TIMEOUT = 5.0
 DRAIN_THREAD_NAME = "backstop-ledger-drain"
 
 
+def lost_events(
+    dropped_events: int, writer_sink_errors: int, sink_reported_errors: int
+) -> int:
+    """The submitted events that will never be written. The one definition of it.
+
+    Three buckets, and they are disjoint by construction: a submit the writer
+    refused, a write that raised out of the sink, and a write the sink took
+    responsibility for and then failed to record. Adding them is the whole
+    arithmetic, and both report classes — :class:`CloseReport` on the shutdown
+    path and :class:`~backstop.ledger.export.DeliveryReport` on the live path —
+    call this, so the number a user reads at shutdown is the number the demo
+    prints and cannot drift from it.
+    """
+    return dropped_events + writer_sink_errors + sink_reported_errors
+
+
+def landed_events(written: int, sink_reported_errors: int) -> int:
+    """The writes that produced a record: ``written`` less the ones the sink lost.
+
+    ``written`` counts the calls a sink *returned from*, which is the only thing
+    the writer can see: a sink that swallows its own failure looks exactly like
+    one that succeeded. So ``written`` is an upper bound on what reached
+    storage, and this is the number of records a reader of the file will
+    actually find.
+
+    Floored at zero because a sink that counted more failures than the writer
+    counted successes has contradicted itself, and a negative count of records
+    would be a worse lie than a zero. The contract in :class:`LedgerSink` is
+    that a sink counts the failures of the writes it *accepted*, so the two
+    numbers are comparable by design.
+    """
+    return written - sink_reported_errors if sink_reported_errors < written else 0
+
+
 @runtime_checkable
 class LedgerSink(Protocol):
     """Where the ledger puts one event.
@@ -91,6 +129,21 @@ class LedgerSink(Protocol):
     None of the three may raise into a caller on the request path. The ledger
     calls them from :class:`BoundedWriter`'s drain thread, but a user may also
     call ``write`` directly, so the contract holds either way.
+
+    **The optional fourth member, ``sink_errors``.** A sink must not raise, so it
+    has to be able to say that a write failed some other way — a closed handle, a
+    full disk — and ``None`` is not available to it because raising is what it
+    may not do. A sink that can lose an event therefore exposes an integer
+    attribute ``sink_errors`` counting **the writes it returned from without
+    raising and did not record**. :class:`JsonlSink` does; :class:`NullSink` and
+    :class:`MemorySink` cannot lose anything and so do not.
+
+    It is a convention rather than a protocol member on purpose: the protocol is
+    ``runtime_checkable`` and a data member would make ``isinstance`` answer
+    false for a user's perfectly good three-method sink.
+    :func:`~backstop.ledger.export.delivery_report` and
+    :meth:`BoundedWriter.close` read it with ``getattr`` and default it to zero,
+    so a sink with no counter is asked nothing.
     """
 
     def write(self, event: SpendEvent) -> None:
@@ -363,6 +416,18 @@ class CloseReport:
     ``False`` the join timed out, :attr:`undrained` events were discarded, and
     the abandoned drain thread may still land one more write, so ``written`` is
     read as "at least this many".
+
+    :attr:`written` counts the writes the sink *returned from*, and
+    :attr:`sink_reported_errors` is the subset of those the sink took
+    responsibility for and then failed to record — the failures it swallowed
+    rather than raised, which :class:`LedgerSink` documents as the optional
+    ``sink_errors`` counter. :attr:`landed` is therefore the number of records
+    that actually reached storage, and it is the figure to quote next to
+    ``submitted``: a sink that cannot write returns from every write, so without
+    the subtraction a file that received nothing reports ``written=50`` and
+    ``lost=0``. :attr:`lost` folds all three loss buckets through the same
+    :func:`lost_events` that :class:`~backstop.ledger.export.DeliveryReport`
+    uses, so the shutdown path and the live path cannot disagree.
     """
 
     submitted: int
@@ -375,11 +440,27 @@ class CloseReport:
     #: Whether the drain thread finished before the join expired.
     drained: bool
     close_timeout_s: float
+    #: Writes this sink swallowed: returned from, and did not record. Read once
+    #: at close from the sink's own ``sink_errors`` counter, defaulting to zero
+    #: for a sink that has none.
+    sink_reported_errors: int = 0
+    #: Whether the sink says it has stopped appending, read at close. ``False``
+    #: for a sink that cannot degrade, which is most of them.
+    sink_degraded: bool = False
 
     @property
     def lost(self) -> int:
-        """Events that will never be written: refused, discarded, or failed."""
-        return self.dropped_events + self.sink_errors
+        """Events that will never be written: refused, discarded, or failed.
+
+        The same number :attr:`backstop.ledger.export.DeliveryReport.lost` gives
+        for the same writer, including the failures a sink counted itself.
+        """
+        return lost_events(self.dropped_events, self.sink_errors, self.sink_reported_errors)
+
+    @property
+    def landed(self) -> int:
+        """Events that reached storage: the writes the sink did not lose."""
+        return landed_events(self.written, self.sink_reported_errors)
 
 
 class BoundedWriter:
@@ -510,6 +591,14 @@ class BoundedWriter:
         abandoned — the thread is a daemon, so shutdown continues — and its
         backlog is discarded and reported as :attr:`CloseReport.undrained` rather
         than written after ``close`` returned.
+
+        **The sink's own failure count is read here, once, after the drain has
+        finished.** A sink that must not raise swallows its failures and counts
+        them itself (``sink_errors`` in :class:`LedgerSink`); without this read
+        the report says every event was written, because the writer only ever
+        saw a ``write`` that returned. It is read *after* the join so the count
+        is settled, and *before* the sink's own ``flush``/``close`` so those
+        steps — which are not event writes — are not double counted.
         """
         with self._condition:
             if self._report is not None:
@@ -521,6 +610,7 @@ class BoundedWriter:
         if thread is not None:
             thread.join(self._close_timeout)
             drained = not thread.is_alive()
+        sink_reported, sink_degraded = self._sink_own_counters()
         with self._condition:
             undrained = len(self._buffer)
             if undrained:
@@ -531,6 +621,8 @@ class BoundedWriter:
                 written=self._written,
                 dropped_events=self._dropped_events,
                 sink_errors=self._sink_errors,
+                sink_reported_errors=sink_reported,
+                sink_degraded=sink_degraded,
                 undrained=undrained,
                 drained=drained,
                 close_timeout_s=self._close_timeout,
@@ -544,6 +636,30 @@ class BoundedWriter:
             except Exception:
                 pass
         return report
+
+    def _sink_own_counters(self) -> tuple[int, bool]:
+        """The sink's own loss count and degraded flag, read defensively.
+
+        Both are the optional ``sink_errors``/``degraded`` of :class:`LedgerSink`,
+        defaulted: a sink with neither cannot have lost an event or stopped
+        appending. A counter that is not an integer is read as no counter —
+        there is nothing to add — and a sink whose health cannot be *confirmed*
+        is reported degraded, so the operator looks rather than assumes. Neither
+        read may raise: this runs inside ``close``, which is the one call a
+        shutdown is allowed to make, and the reads are made after the join
+        precisely so nothing here can be the reason a report never arrives.
+        """
+        try:
+            counter = getattr(self._sink, "sink_errors", 0)
+        except Exception:
+            counter = 0
+        try:
+            degraded = bool(getattr(self._sink, "degraded", False))
+        except Exception:
+            degraded = True
+        if isinstance(counter, bool) or not isinstance(counter, int):
+            counter = 0
+        return max(0, counter), degraded
 
     def _start_drain_locked(self) -> None:
         """Start the one drain thread. Caller holds the lock."""

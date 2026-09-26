@@ -772,6 +772,117 @@ def test_close_reports_every_event_it_never_wrote() -> None:
     assert sink.closed is True
 
 
+# --- A sink that swallows its own failure ----------------------------------
+#
+# ``JsonlSink`` may not raise into the drain thread, so it degrades and counts.
+# From the writer's side that write is indistinguishable from a successful one,
+# which is why the sink is given a counter of its own and why ``close`` has to
+# read it. The reproduction below is the reviewer's: 50 events into a file that
+# can never be opened, which used to report ``written=50 dropped=0
+# sink_errors=0`` — every event accounted for, and not one of them in the file.
+
+
+def test_close_reports_a_sinks_own_failures_as_lost(tmp_path: Any) -> None:
+    blocker = tmp_path / "blocker"
+    blocker.write_text("not a directory", encoding="utf-8")
+    writer = BoundedWriter(JsonlSink(blocker / "ledger.jsonl"))
+    for index in range(50):
+        writer.submit(make_event(model=f"m{index}"))
+
+    report = writer.close()
+    assert report.submitted == 50
+    assert report.landed == 0, "the file received zero records"
+    assert report.lost == 50, "the docstring promises the events that never land"
+    assert report.sink_reported_errors == 50
+    assert report.sink_degraded is True
+    # The writer's own buckets are unchanged: nothing was refused and nothing
+    # raised, which is exactly why the writer alone could not have known.
+    assert report.dropped_events == 0
+    assert report.sink_errors == 0
+    assert report.submitted == report.written + report.dropped_events + report.sink_errors
+
+
+def test_the_shutdown_and_live_delivery_apis_agree_on_the_loss(tmp_path: Any) -> None:
+    """One number, two APIs — the demo's and the shutdown path's.
+
+    ``export.delivery_report`` already folded in the sink's own counter; the
+    report ``close()`` returns did not, so the same writer could be described as
+    complete by one and as empty by the other. They now share
+    :func:`lost_events`, and this asserts the two agree on both readings.
+    """
+    from backstop.ledger.export import delivery_report
+
+    blocker = tmp_path / "blocker"
+    blocker.write_text("not a directory", encoding="utf-8")
+    writer = BoundedWriter(JsonlSink(blocker / "ledger.jsonl"))
+    for _ in range(50):
+        writer.submit(make_event())
+
+    report = writer.close()
+    live = delivery_report(writer)
+    from_report = delivery_report(report)
+
+    assert report.lost == 50
+    assert live.lost == report.lost
+    assert from_report.lost == report.lost
+    assert live.landed == report.landed == 0
+    assert from_report.landed == report.landed
+    # Every field of the same writer, from both APIs.
+    assert (live.submitted, live.written, live.dropped_events) == (
+        report.submitted,
+        report.written,
+        report.dropped_events,
+    )
+    assert live.sink_degraded is True
+    assert from_report.sink_degraded is True
+
+
+def test_a_healthy_close_reports_nothing_lost_and_everything_landed() -> None:
+    sink = _CountingSink()
+    writer = BoundedWriter(sink)
+    for _ in range(5):
+        writer.submit(make_event())
+
+    report = writer.close()
+    # A sink with no counter of its own is asked nothing: a sink that cannot lose
+    # anything does not have to report that twice.
+    assert report.sink_reported_errors == 0
+    assert report.sink_degraded is False
+    assert report.lost == 0
+    assert report.landed == 5 == len(sink.written)
+
+
+def test_a_sink_that_counts_failures_it_raised_does_not_produce_a_negative_landed() -> None:
+    """A sink that contradicts itself must not make the report say -1 landed."""
+
+    class _DoubleCountedSink(_CountingSink):
+        @property
+        def sink_errors(self) -> int:
+            return 99
+
+    writer = BoundedWriter(_DoubleCountedSink())
+    writer.submit(make_event())
+    report = writer.close()
+    assert report.written == 1
+    assert report.landed == 0, "floored, not negative"
+    # The loss is still reported rather than hidden, because the sink said so.
+    assert report.lost == 99
+
+
+def test_a_sink_whose_own_counter_is_not_a_count_is_read_as_no_counter() -> None:
+    class _NonsenseCounterSink(_CountingSink):
+        @property
+        def sink_errors(self) -> Any:
+            return "lots"
+
+    writer = BoundedWriter(_NonsenseCounterSink())
+    writer.submit(make_event())
+    report = writer.close()
+    assert report.sink_reported_errors == 0
+    assert report.landed == 1
+    assert report.lost == 0
+
+
 def test_close_is_idempotent_and_returns_the_same_report() -> None:
     writer = BoundedWriter(_CountingSink())
     writer.submit(make_event())
