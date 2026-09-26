@@ -19,6 +19,7 @@ import re
 from dataclasses import dataclass, field, fields, is_dataclass
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
+from urllib.parse import parse_qsl, urlsplit, urlunsplit
 from uuid import uuid4
 
 if TYPE_CHECKING:
@@ -52,6 +53,52 @@ _TOKEN_FIELDS = ("input_tokens", "output_tokens", "cache_read_tokens", "cache_wr
 def utc_now() -> str:
     """Return the current UTC instant as ``2026-09-25T14:03:11.123456Z``."""
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+#: Query parameter names that carry a credential. Their values are never stored.
+#: Matched as a word inside the name, so a vendor prefix such as ``x-api-key``
+#: counts, and ``monkey=1`` does not.
+SECRET_QUERY_RE = re.compile(
+    r"(?:^|[^a-z0-9])(?:api[-_]?key|access[-_]?key|access[-_]?token|authorization"
+    r"|password|passwd|secret|signature|token|auth|key|sig)(?:[^a-z0-9]|$)",
+    re.IGNORECASE,
+)
+
+#: Stands in for a dropped query string that carried a credential.
+REDACTED_QUERY = "<redacted>"
+
+
+def normalize_endpoint(raw: str) -> str:
+    """Return the record-safe form of a request endpoint.
+
+    The ledger is a durable, long-lived file, so a caller that hands over a URL
+    with a query string, a fragment, or ``user:pass@`` in it must not have
+    those written down: an API key in a query string would otherwise land in
+    the JSONL line and in every ``repr`` of the event. The query string and the
+    fragment are dropped entirely, the userinfo is dropped from the authority,
+    and the fact that a credential was present is recorded as
+    ``?<redacted>`` rather than the credential itself.
+    """
+    if "?" not in raw and "#" not in raw and "@" not in raw:
+        return raw
+    try:
+        parts = urlsplit(raw)
+    except ValueError:
+        return _normalize_endpoint_textually(raw)
+    pairs = parse_qsl(parts.query, keep_blank_values=True)
+    query = REDACTED_QUERY if any(SECRET_QUERY_RE.search(name) for name, _ in pairs) else ""
+    return urlunsplit((parts.scheme, parts.netloc.rsplit("@", 1)[-1], parts.path, query, ""))
+
+
+def _normalize_endpoint_textually(raw: str) -> str:
+    """Fallback for a URL ``urlsplit`` refuses, e.g. an unbracketed IPv6 host."""
+    without_fragment = raw.split("#", 1)[0]
+    authority_and_path = without_fragment.split("?", 1)[0]
+    scheme, separator, rest = authority_and_path.partition("://")
+    if not separator:
+        return authority_and_path
+    authority, slash, path = rest.partition("/")
+    return f"{scheme}://{authority.rsplit('@', 1)[-1]}{slash}{path}"
 
 
 @dataclass(frozen=True)
@@ -182,6 +229,14 @@ class SpendEvent:
     request_id: str | None = None
 
     def __post_init__(self) -> None:
+        if not isinstance(self.endpoint, str):
+            raise TypeError(
+                f"endpoint must be a str, got {type(self.endpoint).__name__} {self.endpoint!r}"
+            )
+        # A frozen dataclass refuses assignment, so the normalised endpoint is
+        # written exactly once, here; the record is immutable from this point on
+        # and equals what the caller handed in only when it was already clean.
+        object.__setattr__(self, "endpoint", normalize_endpoint(self.endpoint))
         for name in _TOKEN_FIELDS:
             value = getattr(self, name)
             if value < 0:

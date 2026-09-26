@@ -26,6 +26,7 @@ from backstop.ledger.schema import (
     OUTCOMES,
     PRIORITIES,
     SCHEMA_VERSION,
+    normalize_endpoint,
     utc_now,
 )
 
@@ -191,6 +192,74 @@ def test_every_documented_priority_is_accepted(priority):
 @pytest.mark.parametrize("outcome", OUTCOMES)
 def test_every_documented_outcome_is_accepted(outcome):
     assert make_event(outcome=outcome).outcome == outcome
+
+
+# ---------------------------------------------------------------------------
+# Endpoint normalisation
+# ---------------------------------------------------------------------------
+
+
+def test_a_normal_path_is_recorded_unchanged():
+    assert make_event(endpoint="/v1/chat/completions").endpoint == "/v1/chat/completions"
+    assert (
+        make_event(endpoint="https://api.openai.com:443/v1/messages").endpoint
+        == "https://api.openai.com:443/v1/messages"
+    )
+
+
+def test_a_query_string_is_stripped_from_the_recorded_endpoint():
+    event = make_event(endpoint="/v1/chat/completions?beta=true&stream=false")
+    assert event.endpoint == "/v1/chat/completions"
+    assert event.to_dict()["endpoint"] == "/v1/chat/completions"
+
+
+def test_a_credential_in_the_query_string_is_redacted_not_stored():
+    event = make_event(endpoint="/v1/chat/completions?api_key=sk-live-SECRET")
+    assert "sk-live-SECRET" not in event.endpoint
+    assert "sk-live-SECRET" not in repr(event)
+    assert "sk-live-SECRET" not in str(event.to_dict())
+    assert event.endpoint == "/v1/chat/completions?<redacted>"
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "/v1/chat/completions?api_key=sk-1",
+        "/v1/chat/completions?key=sk-1",
+        "/v1/chat/completions?access_token=sk-1",
+        "/v1/chat/completions?X-Api-Key=sk-1",
+        "/v1/chat/completions?authorization=Bearer+sk-1",
+        "/v1/chat/completions?X-Amz-Signature=sk-1",
+        "/v1/chat/completions?apiKey=sk-1",
+        "/v1/chat/completions?beta=true&api_key=sk-1",
+    ],
+)
+def test_every_credential_shaped_query_parameter_is_redacted(raw):
+    normalised = normalize_endpoint(raw)
+    assert "sk-1" not in normalised
+    assert normalised == "/v1/chat/completions?<redacted>"
+
+
+def test_a_credential_free_query_is_dropped_without_a_redaction_marker():
+    assert normalize_endpoint("/v1/chat/completions?monkey=1&stream=false") == (
+        "/v1/chat/completions"
+    )
+
+
+def test_userinfo_and_fragment_are_stripped_from_the_recorded_endpoint():
+    event = make_event(endpoint="https://user:pa55word@api.openai.com:443/v1/chat#top")
+    assert event.endpoint == "https://api.openai.com:443/v1/chat"
+    assert "pa55word" not in repr(event)
+
+
+def test_an_unparsable_url_is_still_stripped_textually():
+    assert normalize_endpoint("http://[::1?api_key=sk-1") == "http://[::1"
+    assert normalize_endpoint("http://user@[::1/p?x=1") == "http://[::1/p"
+
+
+def test_a_non_string_endpoint_is_rejected():
+    with pytest.raises(TypeError, match="endpoint"):
+        make_event(endpoint=None)
 
 
 # ---------------------------------------------------------------------------
