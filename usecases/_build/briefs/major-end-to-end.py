@@ -31,7 +31,7 @@ BRIEF = {
     # ---- window chrome + header -------------------------------------------
     "window_title": "Chargeback",
     "product": "backstop",
-    "version": "v0.6.1",
+    "version": "v0.6.0",
     "model": "gpt-4o + claude-sonnet-4",
     "path": "~/acme/payments-agent",
     "branch": "feat/ledger",
