@@ -225,8 +225,33 @@ def test_null_sink_write_is_measurably_cheaper_than_a_sink_that_works() -> None:
     any work at all (a lock and an append), so the comparison is machine-speed
     independent: the ratio is what carries the claim, and the absolute ceiling is
     a backstop against a regression that made the empty body do something.
+
+    Each side is timed ``SAMPLES`` times and the **fastest** run is used. A
+    single sample is not a measurement of the code, it is a measurement of the
+    machine at that instant, and this test proved that the hard way: one CI leg
+    reported NullSink at 125ns and MemorySink at 369ns, missing a 3x bound by
+    6ns, having passed locally and on the other thirteen legs.
+
+    The 3x bound is gone rather than loosened. It looked safe and was not: at
+    125ns against a 1000ns ceiling it passed locally, but the measured margin
+    on CI was 1.02 where 1.00 was required, and the ratio moves with the host.
+    Timing NullSink at 25 samples under load here gives a spread of 79.8-92.7ns
+    against MemorySink's 294.5-543.4ns, and the two do not scale together --
+    MemorySink's cost is a lock and an append, NullSink's is a call that returns.
+    So the ratio is a property of the machine, not of the code, and asserting
+    3x asserts that the runner is fast.
+
+    A ratio against the other sink does not work, and neither does dropping the
+    ratio: asserting only ``null < memory`` let a NullSink that had grown a lock
+    and a dict pass, verified by injecting exactly that. So the baseline here is
+    a **bare empty function called the same number of times on the same machine
+    in the same loop**. Both sides are then the same kind of operation -- a
+    Python call that does nothing -- so their ratio is a property of the code
+    rather than of the host, and the fixed slack absorbs call overhead that is
+    genuinely not the sink's fault.
     """
     rounds = 50_000
+    samples = 7
     event = make_event()
     null = NullSink()
     memory = MemorySink(maxlen=8)
@@ -243,16 +268,36 @@ def test_null_sink_write_is_measurably_cheaper_than_a_sink_that_works() -> None:
     hit_null()
     hit_memory()
 
-    null_start = time.perf_counter()
-    hit_null()
-    null_ns = (time.perf_counter() - null_start) / rounds * 1e9
-    memory_start = time.perf_counter()
-    hit_memory()
-    memory_ns = (time.perf_counter() - memory_start) / rounds * 1e9
+    def noop(_event) -> None:
+        """The floor: a Python call that returns."""
 
+    def hit_noop() -> None:
+        for _ in range(rounds):
+            noop(event)
+
+    def fastest(hit) -> float:
+        best = float("inf")
+        for _ in range(samples):
+            start = time.perf_counter()
+            hit()
+            best = min(best, (time.perf_counter() - start) / rounds * 1e9)
+        return best
+
+    hit_noop()
+    noop_ns = fastest(hit_noop)
+    null_ns = fastest(hit_null)
+    memory_ns = fastest(hit_memory)
+
+    # Absolute backstop, independent of any comparison.
     assert null_ns < 1000.0, f"NullSink.write took {null_ns:.0f}ns per call"
-    assert null_ns * 3 < memory_ns, (
-        f"NullSink.write ({null_ns:.0f}ns) should be far cheaper than "
+    # Self-calibrating: the sink costs about what an empty call costs. A lock, a
+    # dict update or a serialisation inside the disabled path breaks this.
+    assert null_ns < noop_ns * 3 + 60, (
+        f"NullSink.write ({null_ns:.0f}ns) is doing more than an empty call "
+        f"({noop_ns:.0f}ns); the disabled ledger should pay a call and nothing else"
+    )
+    assert null_ns < memory_ns, (
+        f"NullSink.write ({null_ns:.0f}ns) should be cheaper than "
         f"MemorySink.write ({memory_ns:.0f}ns)"
     )
 
