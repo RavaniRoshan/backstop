@@ -21,7 +21,11 @@ open or a network call on the request path.
   (unattributed, unpriced, estimated) sitting next to the money.
 - A runaway-spend detector that reports four kinds of unusual spending and, by
   default, blocks nothing.
-- Three CLI subcommands: `backstop ledger demo`, `show` and `export`.
+- Four CLI subcommands: `backstop ledger demo`, `show`, `export` and
+  `backstop reconcile`.
+- A reconciliation against a provider **statement file**, per model and in total,
+  with the reason for every difference and a measured error budget. It calls no
+  provider API and has never been run against a real invoice in this repository.
 
 ## What it is not
 
@@ -39,6 +43,10 @@ open or a network call on the request path.
 - **Not exact.** It prices the token counts the provider reported, from a rate
   card that is a dated snapshot, and where either is missing it says so in a
   column rather than filling the hole.
+- **Not a payment system and not a billing connection.** It reconciles against a
+  statement *file* you supply. It cannot fetch an invoice, cannot credit a
+  difference, and cannot tell a committed-spend discount from a rate change
+  without a rate card that already knows about it.
 
 ---
 
@@ -709,6 +717,203 @@ raises, and a state whose ledger is not a writer at all.
 
 ---
 
+## Reconciling against a provider statement
+
+`build_chargeback` produces a number. This section is about the check that makes
+it a number somebody can act on: comparing it against what the provider actually
+charged.
+
+**What it reconciles against is a statement FILE** — a CSV or a JSON document that
+OpenAI's or Anthropic's console or admin surface produced, which you supply.
+`backstop reconcile` **calls no provider API, holds no credentials, and has never
+been run against a real invoice in this repository.** Every provider field name it
+reads is centralised in `OPENAI_STATEMENT_FIELDS` and `ANTHROPIC_STATEMENT_FIELDS`,
+marked as transcribed from those providers' published reporting surfaces, and
+marked as needing verification against a real statement before you rely on them.
+One constant per provider is the whole cost of correcting a spelling.
+
+```bash
+backstop reconcile --demo                                                    # fixed, offline, synthetic
+backstop reconcile --ledger ledger.jsonl --invoice statement.csv [--json]    # the real thing
+```
+
+```python
+from backstop.ledger import (
+    Invoice, measure_error_budget, parse_invoice_csv, reconcile_invoice, reconciliation_csv,
+)
+
+variance = reconcile_invoice(events, parse_invoice_csv("statement.csv"))
+budget = measure_error_budget(events, [parse_invoice_csv("statement.csv")])
+print(variance.to_markdown())
+print(reconciliation_csv(variance))
+```
+
+### The five statuses, and why a variance is reported rather than fixed
+
+| status | what it means |
+|---|---|
+| `matched` | the two sides are the identical figure. The only state that asserts equality |
+| `within_tolerance` | a real difference, inside the tolerance. **Not** "the same" — the exact signed figure is on the row |
+| `variance` | a difference above the tolerance, named, quantified, and attributed to a cause |
+| `missing_from_ledger` | the provider billed for something Backstop did not record — either no event for that model, or every event it has is unpriced |
+| `missing_from_invoice` | Backstop recorded spend the statement does not bill for |
+
+The sign convention is `ledger - invoice`, so **positive means Backstop claims more
+than it was charged**. A negative variance is not the safe direction: it is what a
+streaming floor, an unpriced component and a stale rate card all produce, so both
+signs are reported and never an absolute.
+
+Three rules make the number worth auditing:
+
+- **Nothing is netted away.** A model on one side only gets its own row and is
+  never offset against the other side, and the total says how many rows it had to
+  exclude. A missing dollar cannot hide inside a matched one.
+- **Absent is not zero.** If either side published no figure, the row's `variance_usd`
+  is *absent*, not zero, because a difference cannot be taken against a number that
+  does not exist. This is the ledger's own rule — an unpriced request is recorded
+  with `cost=None`, not with `0.00`.
+- **One unpriced request takes its model's total with it.** A sum of the events that
+  *did* price is a figure nobody can defend, so the model's `ledger_usd` is absent
+  and `unpriced_events` says how many requests are responsible.
+
+### An unknown model is never guessed
+
+A model the catalog does not carry is a row whose *ledger* side is absent, with a
+reason saying so — the visible form of the rule
+[above](#the-price-catalog). There is no default rate, no neighbouring-model
+fallback, and no dropping the row. Supply a catalog entry through
+`price_catalog_path` and the same three inputs reconcile; that is a test, not a
+claim.
+
+Rows are keyed on the **exact model string**, not on a resolved price-card name. A
+statement that spells a model the way the ledger does not therefore produces a
+visible *pair* of rows rather than one merged row, because two names that happen to
+share a rate card are two names and merging them is a guess.
+
+### A variance can be attributed, not just reported
+
+Every row carries the token counts on **both** sides and the delta beside them, so
+the difference can be attributed to a rate card or to a measurement:
+
+| what the tokens say | what it is | what to do |
+|---|---|---|
+| every count agrees exactly | a **price** difference | the rate card is stale; refresh it or supply your own |
+| a count differs too | at least partly a **count** difference | the ledger and the statement disagree about the tokens — compare `request_id` by `request_id` |
+| the statement publishes a category no component is built from | **not comparable** | the token delta is reported as absent rather than silently omitting it |
+| the statement bills a non-token cost (`web_search`, `code_execution`) | **not comparable** | the money is real and is compared; the token sides are declared incomparable |
+
+The reason string on every non-`matched` row says which of the four it is, in
+words. `within_tolerance` is a fourth state on purpose: a difference inside a
+tolerance is still a difference, and the exact signed figure is on the row
+regardless.
+
+### The token-count asymmetry, and where it bites here
+
+The two providers count cached tokens on **opposite sides** of the number they
+call the input, and the rule keys on the **provider recorded on the line**, never on
+the column name:
+
+| provider | what `input_tokens` means | what the reconciler does |
+|---|---|---|
+| OpenAI | the whole prompt, **cached included** | subtracts the cached count to reach the fresh input |
+| Anthropic | the **fresh** count, with the cached figures beside it | uses it as the fresh input |
+
+Read one as the other and the error is the size of the cache, not a rounding
+difference. A row that publishes an explicitly exclusive count
+(`input_uncached_tokens`, `uncached_input_tokens`) is read as the fresh input by
+either provider. This is the same asymmetry
+[above](#the-price-catalog) records for the transports, and a test pins both
+directions.
+
+### The tolerance, and why those numbers
+
+`DEFAULT_TOLERANCE_USD` is **$0.01** and `DEFAULT_TOLERANCE_PCT` is **0.5%**; the
+**looser** of the two wins on each row, and both are parameters
+(`--tolerance-usd`, `--tolerance-pct`).
+
+1. A cent is the provider's own stated precision — both published statements are
+   denominated in cents, so a cent is the smallest difference one can express.
+2. It absorbs the ledger's own six-decimal quantisation: $0.0000005 per request, so
+   a cent covers the worst case for 20,000 requests.
+3. It cannot hide a rate error: 1% of a $100 row is $1.00, a hundred times the
+   tolerance. This is the direction that matters, because a stale rate card is the
+   first gap in the planning document's own list.
+4. It **is** loose in *token* terms on a large row — a cent is 4,000 input tokens at
+   gpt-4o's $2.50/Mtok — because a tolerance is a claim about *dollars* and a rate
+   card is a dollar claim. A deployment that wants a tighter answer on one model
+   passes a smaller tolerance, and every row prints its exact signed variance
+   either way.
+
+One number from someone else's tolerance is not a number to adopt. Measure yours.
+
+### The error budget, measured rather than asserted
+
+`measure_error_budget(ledger_events, invoices, catalog)` reports what was observed:
+the **absolute** variance summed over every model row, that sum as a percentage of
+what the statement billed on the rows that could be compared, the count of lines,
+and the **worst single row** by name.
+
+The absolute figure is the headline on purpose. A netted figure lets a model that
+is over-counted hide one that is under-counted — which is the netting this module
+refuses everywhere else — so the netted number is reported beside it and never as
+the answer.
+
+`ErrorBudget.note` states the limits in the function's own output, so the caveat
+travels with the figure instead of living in a docstring somebody has to have read:
+
+> This is an empirical figure over the inputs it was given, not a guarantee. An
+> error budget is only an error budget over a population that resembles the inputs
+> it was measured on: a figure measured over a handful of statements says nothing
+> about a deployment that streams, that sends traffic through an unwrapped client,
+> that runs a model the catalog does not price, or that is on a rate card the
+> providers have since changed.
+
+An unmeasured budget — no statement, or a window where every row is missing a
+side — reports `measured: false` and `within_tolerance: false`. A budget over
+nothing has not been shown to hold.
+
+### The export
+
+`reconciliation_csv(variance)` returns RFC 4180 CSV text, CRLF, stable column
+order (`INVOICE_COLUMNS`), largest variance first, and **no totals row**. Money is
+the two-decimal strings the charge-back export uses, so no cell in the file is a
+number a spreadsheet can re-round; an absent figure is `(none)`, never a blank and
+never a zero. The exact six-decimal variance for every row that is not `matched`
+is inside that row's `reason` cell, so the two-decimal money columns lose nothing a
+reader needs.
+
+### What the demo shows, and what it is worth
+
+`backstop reconcile --demo` runs offline with no key and no file, and its report is
+byte-identical across runs. Its statement is **synthetic** and every disagreement
+is declared in advance, because a demo where everything reconciles teaches a
+reader nothing about what the tool is for:
+
+| model | what the synthetic statement does | what the row proves |
+|---|---|---|
+| `gpt-4o` | prices a cache write the bundled card does not publish | a component the ledger charged zero — [a silent under-count](#known-limitations) — surfaces as a **price** variance |
+| `gpt-4.1` | applies an input rate 10% above the bundled one | a stale rate card is a pure **price** variance with identical token counts |
+| `claude-sonnet-4-20250514` | reports 10,000 more output tokens and bills for them | a **count** variance, which the row above is not |
+| `gpt-5.6-sol` | bills the ledger's figure exactly | there *is* a `matched` row, so a reader can tell the tool reports one |
+| `claude-haiku-4-5` | absent | spend recorded that the statement does not bill |
+| `vendor-preview-2027` | bills an amount the catalog cannot price | the unpriced row, ledger side absent rather than zero |
+| `claude-opus-5` | bills a model the ledger never saw | traffic that did not go through a wrapped client |
+
+One statement is built **per provider** and each is reconciled against that
+provider's events only, because M1 is defined per provider per month and
+reconciling one vendor's statement against the other's traffic would report models
+as unbilled that are billed on the other statement.
+
+**What the demo's error budget is worth: nothing beyond the inputs it ran on.** It
+is one synthetic statement over one synthetic day, on a rate card dated
+`2026-09-26`, with no streaming, no unwrapped client and one deliberately unpriced
+model. It is not a promise about any other account, and not a promise about this
+one. `backstop reconcile --demo` prints that caveat because the alternative — a
+number on a slide with no population attached to it — is the thing this whole
+section exists to prevent.
+
+---
+
 ## Reference
 
 | command | what it does | exit |
@@ -716,8 +921,15 @@ raises, and a state whose ledger is not a writer at all.
 | `backstop ledger demo` | priced charge-back from fixed, offline, synthetic events. No key, no network, no file, byte-identical across runs | 0 |
 | `backstop ledger show --path FILE` | the file's integrity report, then its charge-back. `--limit N` (0 for all), `--json` | 0; 1 on a corrupt non-final line or an unreadable path |
 | `backstop ledger export --path FILE --out FILE.csv` | the RFC 4180 CSV, CRLF, UTF-8, money as 2dp strings. `--group-by team,feature`, `--json` | 0; 1 as above, and nothing is written |
+| `backstop reconcile --demo` | reconciles fixed, offline, synthetic events against a synthetic statement whose disagreements are declared in advance. No key, no network, no file, byte-identical across runs | 0 |
+| `backstop reconcile --ledger FILE --invoice FILE` | the ledger's integrity report, then the per-model variance against a `.csv` or `.json` statement. `--json`, `--tolerance-usd 0.01`, `--tolerance-pct 0.5` | 0 on a complete report, **whatever the report says**; 1 on a corrupt ledger, an unparseable statement, an unreadable path, or an amount too large to total |
 | `backstop doctor` | a wrap-and-import smoke test. Does **not** send a request | 0 |
 | `backstop verify` | eight reproducible proof checks, all offline by default | 0 |
+
+A `reconcile` variance is a **finding, not a failure**: the command exits 0 on a
+complete report whatever that report says, because a command that exited non-zero
+on a variance would train an operator to ignore it. Exit 1 means there is no report
+to read, and nothing is reconciled silently past one of those cases.
 
 Both `--group-by` flags take a comma-separated list of `Attribution` fields and
 reject an unknown one as an argparse usage error (exit 2) listing the legal

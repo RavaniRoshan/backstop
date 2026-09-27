@@ -30,7 +30,7 @@ dependencies = [
 metrics = ["prometheus-client>=0.20"]
 anthropic = ["anthropic>=0.98,<2"]
 tokenizers = ["tiktoken>=0.7"]
-fastapi = ["fastapi>=0.110"]
+fastapi = ["fastapi>=0.110", "uvicorn>=0.27"]
 redis = ["redis>=5"]
 otel = ["opentelemetry-api>=1.20", "opentelemetry-sdk>=1.20"]
 test = [
@@ -40,6 +40,8 @@ test = [
   "anthropic>=0.98,<2",
   "prometheus-client>=0.20,<0.27",
   "ruff>=0.6",
+  "fastapi>=0.110",
+  "uvicorn>=0.27",
 ]
 
 [project.urls]
