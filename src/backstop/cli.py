@@ -243,6 +243,13 @@ def _run_doctor() -> int:
         traceback.print_exc()
         return 1
 
+    # What the money cannot tell you. Printed before anything that produces a
+    # number, because this is the only command a user is guaranteed to run.
+    print("\n## What these numbers cannot tell you")
+    from .ledger.export import chargeback_caveats
+    for caveat in chargeback_caveats():
+        print(f"- {caveat}")
+
     # Test actual SDK client wrapping (missing from original smoke test)
     print("\n## Actual SDK client wrapping test")
     provider_status = {}
@@ -767,9 +774,14 @@ def _run_ledger(args: argparse.Namespace) -> int:
         payload["file"] = read.to_dict()
         payload["out"] = str(args.out)
         payload["rows_written"] = written
+        # Machine consumers get the caveat as a field rather than a comment
+        # row, so the CSV stays valid data and nothing is lost to a reader.
+        payload["caveats"] = list(ledger_export.chargeback_caveats())
         print(json.dumps(payload, indent=2, sort_keys=True))
         return 0
     print(summary)
+    for caveat in ledger_export.chargeback_caveats():
+        print(f"\n> **Caveat.** {caveat}")
     return 0
 
 
@@ -920,6 +932,18 @@ def _run_reconcile(args: argparse.Namespace) -> int:
         f"- **ledger file:** `{args.ledger}`",
         f"- **statement file:** `{invoice.source}`",
     ]
+    # Say which column satisfied which field. The accepted names are transcribed
+    # from published docs and have never met a real statement, so the reader is
+    # told what the parser assumed and can check it against their own dashboard
+    # in one glance rather than taking the variance on trust.
+    assumed = invoice.assumptions()
+    if assumed and not assumed.startswith("no column provenance"):
+        lines.append(f"- **columns read:** {assumed}")
+    else:
+        lines.append(
+            "- **columns read:** none recorded; this statement was synthesised rather "
+            "than parsed from a file, so there is nothing to check."
+        )
     if skipped:
         lines.append(
             f"- **{skipped} event(s) in the ledger name another provider** and were not "

@@ -238,6 +238,29 @@ BUNDLED_EFFECTIVE_FROM = "2026-09-26"
 # Cache write is Anthropic's 5-minute write (1.25x base input), the default
 # prompt-cache TTL. OpenAI lists a cache-write rate only for the gpt-6 and
 # gpt-5.6 families, so every other OpenAI row leaves it unpriced.
+#
+# Anthropic publishes a SECOND cache-write tier at 2x base input for a one-hour
+# TTL, and the schema carries one `cache_write` rate, so a deployment using the
+# 1-hour TTL is under-counted on that component by 37.5% while the row still
+# reports `cache_write` among its priced components. That is the worst failure
+# class in this module: a wrong number that looks complete. The event record
+# cannot carry the TTL -- the ledger does not observe the request's cache_control
+# - so the gap is closed by making the caveat travel with every number instead:
+# CACHE_WRITE_TIER_CAVEAT below is printed by `backstop doctor`, prepended to
+# every charge-back export, and asserted by a test. It is stated in
+# docs/ledger.md as the top open measurement risk.
+#: The one measurement limitation a reader must be told about before quoting a
+#: figure produced by the bundled card. Kept as a named constant rather than a
+#: comment so that the code which emits a number can also emit this, and so a
+#: test can fail if it is ever quietly dropped.
+CACHE_WRITE_TIER_CAVEAT: str = (
+    "cache_write is priced at Anthropic's 5-minute tier (1.25x base input). "
+    "A 1-hour cache TTL is billed at 2x, so cache writes are under-counted by "
+    "37.5% of that component on such a deployment. The ledger does not observe "
+    "the request's cache_control, so no per-row figure can reveal it. Reconcile "
+    "against the provider statement before invoicing."
+)
+
 _BUNDLED_ROWS: tuple[tuple[str, str, str, str, str | None, str | None], ...] = (
     # --- OpenAI, current ---
     ("gpt-6-astra", "openai", "10.00", "50.00", "1.00", "12.50"),

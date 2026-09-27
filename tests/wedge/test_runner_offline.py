@@ -22,6 +22,19 @@ FAKE_PATCH = (
 )
 
 
+
+def _isolate_wedge_report(monkeypatch, tmp_path) -> None:
+    """Keep ``wedge_report.md`` out of the repository root.
+
+    ``wedge.cli.run_task`` writes its report to a CWD-relative path, and these
+    tests stub ``generate_report`` to return the empty string -- so running the
+    suite left a zero-byte ``wedge_report.md`` in the repository root. It was
+    untracked, so it never reached a commit; it just dirtied the working tree of
+    anyone who ran the tests, and it is what ``audit/consumer_ready.py`` flagged
+    as a zero-byte file. Every test that drives ``run_task`` calls this.
+    """
+    monkeypatch.chdir(tmp_path)
+
 def test_extract_clean_diff():
     out = _extract_patch_from_output(
         "loose text\n--- a/x.py\n+++ b/x.py\n@@\n-old\n+new\n"
@@ -224,6 +237,7 @@ def test_cli_passes_base_url_from_task_yaml(monkeypatch, tmp_path):
     monkeypatch.setattr(wedge_cli, "WedgeRunner", FakeRunner)
     monkeypatch.setattr(wedge_cli, "compare_patches", lambda patches: {})
     monkeypatch.setattr(wedge_cli, "generate_report", lambda *a, **k: "")
+    _isolate_wedge_report(monkeypatch, tmp_path)
 
     task_file = tmp_path / "task.yaml"
     task_file.write_text(
@@ -267,6 +281,7 @@ def test_cli_falls_back_to_wedge_base_url_env(monkeypatch, tmp_path):
     monkeypatch.setattr(wedge_cli, "compare_patches", lambda patches: {})
     monkeypatch.setattr(wedge_cli, "generate_report", lambda *a, **k: "")
     monkeypatch.setenv("WEDGE_BASE_URL", "https://env.example.com/v1")
+    _isolate_wedge_report(monkeypatch, tmp_path)
 
     task_file = tmp_path / "task.yaml"
     task_file.write_text(

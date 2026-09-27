@@ -1,5 +1,18 @@
 # backstop-ai
 
+> **This is a partial port, not a mirror of the Python package.** The PyPI
+> distribution of the same name is the full thing. This one is OpenAI-only and
+> covers roughly half the surface: budget, circuit breaker, retry, fallback,
+> cache, audit, admission, AIMD, agent guard. No Anthropic, no spend ledger, no
+> statement reconciliation, no dashboard, no gateway, no shadow mode. If you
+> need any of those, use the Python package.
+>
+> It also intercepts differently. Python injects a transport so the SDK's own
+> code path is preserved; this patches `client.chat.completions.create`. The
+> "one drop-in call, nothing else changes" property holds, but the mechanism
+> underneath is not the one the Python docs describe, and a future SDK release
+> that renames that method will break it.
+
 In-process LLM guardrails for the **OpenAI SDK** — a TypeScript port of the
 Python [`backstop`](https://github.com/RavaniRoshan/backstop) `wrap()` API.
 

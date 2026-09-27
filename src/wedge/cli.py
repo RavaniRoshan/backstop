@@ -51,8 +51,16 @@ async def run_task(task_file: str, overrides: dict | None = None):
     report_md = generate_report(task_name, diff_results, results)
 
     report_file = "wedge_report.md"
-    with open(report_file, "w") as f:
+    # Write atomically. `open(path, "w")` truncates before a single byte is
+    # written, so an interrupted run used to leave a 0-byte wedge_report.md
+    # that reads as a valid report about nothing. A report people cite should
+    # either be complete or not exist.
+    tmp_file = f"{report_file}.tmp"
+    with open(tmp_file, "w") as f:
         f.write(report_md)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp_file, report_file)
 
     print(f"Done! Report saved to {report_file}")
 

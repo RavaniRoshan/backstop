@@ -1,76 +1,64 @@
-# demo.gif build pipeline
+# How the demo videos are built
 
-Renders the terminal demo GIFs in this directory tree, reproducing the frame /
-timing / geometry contract of the reference `demo.gif` in the `demo-gif` skill.
+Every video in `usecases/` and the flagship `walkthrough.mp4` is assembled by the
+code in [`media/`](./media/). The source of each frame is stated rather than
+assumed, because a demo that paraphrases its own product is a demo that drifts
+into advertising.
 
-## Contract (all hard-gated by `make.py`)
+## What is real
 
-| Property | Value |
-|---|---|
-| Canvas | 1552x992 (designed at 776x496, exported with a nearest upscale) |
-| Frames | 414 full-canvas composites |
-| Disposal | 1 on every frame |
-| Delays | 100ms x408, 400ms x2, 200ms x4 |
-| Runtime | 42.4s |
-| Loop | none — plays once (no NETSCAPE extension) |
-| Format | GIF89a, 256-colour global palette |
+**The dashboard frames are screenshots of the product running.** A live
+`backstop dashboard --demo` is started, the workload is allowed to drain a real
+budget, and Chromium captures the page at scripted seconds:
 
-Hard constraints that are also honoured: no fades, no easing, no cursor blink,
-no per-character typing animation, discrete whole-row scroll jumps, transient
-pill overlays of 1-2 frames, and a dim completed ledger with green `o` /
-coral `*`,`+`,`-` status dots.
+- full-page frames for the timelapses
+- CSS-selector element captures (`article.panel:has(#chart-traffic)` and so on)
+  for the panels, so a focus ring lands on the pixels it names instead of on
+  coordinates somebody guessed
 
-## Usage
+The per-tenant frame comes from [`media/tenants.py`](./media/tenants.py), which
+registers genuine `TenantBudget`s against a real `BackstopState` and drives real
+requests through wrapped `openai` clients under `with_budget(...)`. `initech`
+really does exhaust its own ceiling at 0 remaining while the other three keep
+spending. The `--demo` workload does not register tenants, so its Tenants panel
+is permanently empty and a multi-tenant demo built on it would be fiction.
 
-```bash
-python3 _build/make.py _build/briefs/<name>.py ../<slug>/demo.gif
-```
+**The terminal frames are verbatim stdout.** Captured by running `backstop demo`,
+`backstop ledger demo` and `backstop reconcile --demo`. `terminal.py` refuses to
+render any text that a capture did not write — it raises rather than typesetting
+a hand-written terminal — so a scene cannot drift into paraphrasing the CLI.
 
-`make.py` exits non-zero if any gate fails.
+**The motion is ours.** Cuts, focus rings, arrows, column bands, lower-thirds and
+caption timing are all composed here. Nothing in a frame is a mock-up of a screen
+the product does not have.
 
-## Why the encoder is hand-written
+## Captions cannot outrun the footage
 
-PIL's GIF writer silently merges byte-identical consecutive frames and sums their
-durations, which collapsed 414 frames into 36. `gifenc.py` emits one graphic
-control extension and one full-canvas image descriptor per frame and never
-merges. `gifsicle -O2` is also unusable: it merges frames to save 90% of the
-file, which violates the frame contract (414 -> 55 images).
+On-screen figures are interpolated from the same read that took each screenshot
+(`figures.json`), so a number can never be quoted for a second the viewer is not
+looking at. This caught a real lie during the build: a caption reading "requests/s
+falls as prevented/s rises" sat over a frame showing the *end* state, with t=78
+figures beside a t=95 chart.
 
-## Why the composition is designed at 1x
+## Rebuilding
 
-The reference is designed at 776x496 and exported at 1552x992 ("text stays
-chunky"). Rendering antialiased text directly at 2x roughly doubled the LZW cost
-of every frame. Quantising at 1x and then upscaling with NEAREST is both more
-faithful and smaller.
+The capture step writes to `/tmp/opencode/media/capture` and the compositors read
+from there, so the inputs are declared at the top of each file (`CAP`, `DASH`,
+`CLI`, `ARC`, `TEN`). In order:
 
-## Size optimisation (shipped)
+1. Start the dashboard and the tenant harness on their ports.
+2. Capture pages and cards with Playwright, writing `figures.json` alongside.
+3. `python3 _build/media/flagship.py` — the 132-second walkthrough.
+4. `python3 _build/media/usecases.py` — the five per-usecase videos.
 
-`gifsicle -O1` re-encodes each frame keeping only the pixels that changed and
-leaving the rest to the previous frame. Measured on the flagship:
+Output lands in `/tmp/opencode/media/out`; the committed MP4s and their poster
+stills are copied into `usecases/<name>/demo.mp4` and `demo.png`.
 
-| | before | after |
-|---|---:|---:|
-| major-end-to-end | 23.47 MB | **2.42 MB** |
-| multi-tenant-saas | 24.69 MB | **2.72 MB** |
-| agent-fleet-slo | 24.23 MB | **2.46 MB** |
-| runaway-eval-loop | 23.78 MB | **2.46 MB** |
-| audit-and-compliance | 25.63 MB | **2.84 MB** |
-| **total** | **117 MB** | **12.9 MB** |
+## Why MP4 and not GIF
 
-This is only trusted because it is **proved, not assumed**: `optimise()` keeps a
-copy of the full-canvas render and `verify_identical.py` decodes both files and
-compares all 414 frames pixel for pixel. If a single pixel differs, or if any
-frame/timing gate regresses, the optimised file is discarded and the
-full-canvas one is kept. The check is part of the build, not a one-off.
-
-`-O2` is not usable: it merges frames whose content is identical, collapsing the
-414-frame timeline to 58. The settle phase is deliberately static, so this always
-happens.
-
-## Why the container is not byte-identical
-
-The optimised files store cropped frame rectangles. The contract that matters is
-the DECODED composite, and the reference `demo.gif` contains the same kind of
-patch rectangles from its screen recorder. The decoded image is identical, which
-is what `verify_identical.py` asserts. If you need literal full-canvas
-rectangles, skip the optimise step - the renderer still emits them.
+The previous set was five variations on one synthetic terminal canvas, rendered
+as 256-colour GIF89a. That format was why they looked broken: a 256-entry palette
+dithers badly over a dark UI, and a 12.9MB animated GIF gets resampled into mush
+by anything that downsamples it. The resolution was never the problem. H.264 is
+full colour, a fraction of the weight, and GitHub renders a poster still plus a
+link rather than a downsampled animation.

@@ -21,7 +21,9 @@ import csv
 import decimal
 import io
 import json
+import os
 import socket
+import tempfile
 from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
@@ -1618,3 +1620,95 @@ def test_the_scope_sentence_is_on_every_render() -> None:
     assert RECONCILIATION_SCOPE in result.to_markdown()
     assert result.to_dict()["scope"] == RECONCILIATION_SCOPE
     assert isinstance(result, InvoiceVariance)
+
+
+def test_a_parsed_statement_records_which_column_satisfied_each_field(tmp_path):
+    """The parser's assumptions must be visible, not buried in a source constant.
+
+    The accepted column names are transcribed from published reporting surfaces
+    and have never been checked against a real statement file. A parser that
+    picked the wrong column would produce a confident, wrong variance, so the
+    choice is recorded on the invoice and printed by the CLI, where whoever runs
+    it can check it against their provider's own dashboard.
+    """
+    from backstop.ledger.reconcile import parse_invoice_csv
+
+    header = (
+        "date,model,input_uncached_tokens,input_cached_tokens,"
+        "input_cache_write_tokens,output_tokens,cost_usd\n"
+    )
+    row = "2026-09-01,gpt-4o,1000,200,0,500,0.0125\n"
+    path = tmp_path / "statement.csv"
+    path.write_text(header + row, encoding="utf-8")
+
+    invoice = parse_invoice_csv(path)
+
+    used = invoice.columns_used
+    # Every logical field this parser resolved is named, and each is a real
+    # column of the file rather than a default it invented.
+    assert used["input"] == "input_uncached_tokens"
+    assert used["cache_read"] == "input_cached_tokens"
+    assert used["charged_usd"] == "cost_usd"
+    assert used["period"] == "date"
+    # The *values* are the file's columns; the keys are Backstop's own logical
+    # vocabulary and are not expected to appear in a provider's statement.
+    assert set(used.values()) <= set(header.strip().split(","))
+    assert "input <- input_uncached_tokens" in invoice.assumptions()
+
+
+def test_a_built_statement_says_so_rather_than_claiming_columns(tmp_path):
+    """A synthetic invoice must not imply a file was parsed."""
+    from backstop.ledger.reconcile import demo_invoice
+
+    for invoice in demo_invoice():
+        assert invoice.matched_fields == ()
+        assert invoice.assumptions().startswith("no column provenance")
+
+
+def test_a_cost_only_export_is_named_rather_than_mistaken_for_the_wrong_provider():
+    """Neither provider ships tokens and money in one file, and that is a fact
+    a reader holding one of the real exports needs stated.
+
+    OpenAI publishes tokens from `GET /v1/organization/usage/completions` and
+    money from `GET /v1/organization/costs`; Anthropic publishes them from
+    `usage_report/messages` and `cost_report`. Both providers' dashboard exports
+    are two separate downloads. A cost export carries `amount_value` and no token
+    categories, so detection -- which works off the token category names -- used
+    to report "cannot tell which provider's statement this is", which is true and
+    useless to someone holding a legitimate file.
+    """
+    import csv
+
+    from backstop.ledger.reconcile import parse_invoice_csv
+
+    row = {
+        "start_time": "1736553600", "end_time": "1736640000",
+        "amount_value": "0.130804", "currency": "usd", "line_item": "gpt-4o",
+    }
+    with tempfile.NamedTemporaryFile("w", suffix=".csv", delete=False, newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=list(row))
+        writer.writeheader()
+        writer.writerow(row)
+        path = fh.name
+    try:
+        with pytest.raises(ValueError) as caught:
+            parse_invoice_csv(path)
+        message = str(caught.value)
+        assert "COST export" in message
+        assert "amount_value" in message
+        # It must name the export to fetch next, or the reader is stuck again.
+        assert "/v1/organization/costs" in message
+        assert "does not yet join" in message
+    finally:
+        os.unlink(path)
+
+
+def test_the_openai_costs_api_column_is_accepted():
+    """`amount_value` is the column OpenAI actually publishes, and it was
+    missing -- so the parser refused the only real spelling and demanded a field
+    that does not exist. Found by reading the provider's documentation."""
+    from backstop.ledger.reconcile import OPENAI_STATEMENT_FIELDS
+
+    assert "amount_value" in OPENAI_STATEMENT_FIELDS["charged_usd"]
+    # Most-canonical first, so it is preferred over the invented spellings.
+    assert OPENAI_STATEMENT_FIELDS["charged_usd"][0] == "amount_value"

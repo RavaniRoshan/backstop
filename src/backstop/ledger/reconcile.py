@@ -219,9 +219,15 @@ DEFAULT_TOLERANCE_PCT = Decimal("0.5")
 # (`model`, `amount`, `token_type`) and the Messages Usage Report
 # (`uncached_input_tokens`, `cache_read_input_tokens`, `cache_creation.*`).
 #
-# One deliberate omission: **Anthropic's cost report `amount` is denominated in
-# lowest currency units — cents — and a bare `amount` column is therefore not
-# accepted in a CSV.** Reading a cents figure as dollars is a 100x error that a
+# One deliberate omission: **a bare `amount` column is not accepted in a CSV.**
+# The ground is that Anthropic's cost report is denominated in minor units, so
+# reading it as dollars is a 100x error. That ground is CONTESTED -- Elastic and
+# Honeycomb both document the field as minor units, one monitoring vendor
+# documents it as a USD decimal string -- and it has not been resolved, because
+# resolving it needs one real statement. The refusal stands because refusing a
+# column whose units are uncertain is the safe side of a 100x error, but it is
+# built on an unresolved premise and is not described here as settled. See
+# docs/ledger-statement-calibration.md. Reading a cents figure as dollars is a 100x error that a
 # reconciliation would report as a real variance and a reader would believe. Only
 # columns whose name says USD are read, and a statement that offers nothing else is
 # refused with a message naming the trap rather than parsed at a hundred times its
@@ -310,7 +316,21 @@ def _fields(
 OPENAI_STATEMENT_FIELDS: Mapping[str, tuple[str, ...]] = _fields(
     model=("model",),
     period=("date", "start_time", "bucket_start", "day"),
-    charged_usd=("cost_usd", "total_cost_usd", "charged_usd", "amount_usd", "cost"),
+    # `amount_value` is the real column name on OpenAI's Costs API
+    # (`GET /v1/organization/costs`, and the "Cost data" export of the Usage
+    # dashboard grouped by line item). It was missing from this list, so the one
+    # column the provider actually publishes for a charged amount was refused and
+    # the parser demanded a field that does not exist. Found by reading the
+    # provider's documentation rather than by guessing, which is the whole point
+    # of the provenance block above.
+    charged_usd=(
+        "amount_value",
+        "cost_usd",
+        "total_cost_usd",
+        "charged_usd",
+        "amount_usd",
+        "cost",
+    ),
 )
 
 #: Anthropic statement fields. See the block comment above for the provenance and
@@ -654,6 +674,28 @@ class Invoice:
     source: str
     lines: tuple[InvoiceLine, ...]
     currency: str = CURRENCY
+    #: Which column of the file satisfied each logical field, e.g.
+    #: ``{"input": "input_uncached_tokens", "charged_usd": "cost_usd"}``.
+    #:
+    #: This exists because the accepted column names are transcribed from
+    #: published reporting surfaces and have never been checked against a real
+    #: statement file. A reconciliation that silently picked the wrong column
+    #: would produce a confident, wrong variance. Recording the choice turns the
+    #: assumption into something the reader can check against their own
+    #: dashboard in one glance, which is the only honest way to ship an
+    #: unverified parser.
+    matched_fields: tuple[tuple[str, str], ...] = ()
+
+    @property
+    def columns_used(self) -> dict[str, str]:
+        """The same mapping as a dict, for display."""
+        return dict(self.matched_fields)
+
+    def assumptions(self) -> str:
+        """A one-line, human-checkable statement of what this parse assumed."""
+        if not self.matched_fields:
+            return "no column provenance recorded (this invoice was built, not parsed)"
+        return ", ".join(f"{logical} <- {column}" for logical, column in self.matched_fields)
 
     def __post_init__(self) -> None:
         for name in ("provider", "period", "source", "currency"):
@@ -1808,6 +1850,34 @@ def _detect_provider(names: Iterable[str], path: str) -> str:
     matched = sorted(provider for provider, keys in markers.items() if present & keys)
     if len(matched) == 1:
         return matched[0]
+
+    # A cost-only export. Both providers publish tokens and money from two
+    # different endpoints -- OpenAI's Usage API against its Costs API, Anthropic's
+    # usage_report/messages against its cost_report -- and neither file carries
+    # both. A cost export has the amount and no token categories, so detection by
+    # token category cannot see it and previously reported "cannot tell which
+    # provider", which is true and useless. Say what the file actually is and what
+    # to do about it, because a reader holding one of these deserves to be told
+    # that reconciling it needs the matching usage export alongside.
+    cost_only = present & {"amount_value", "line_item", "amount", "currency"}
+    if cost_only and not matched:
+        owner = "openai" if "amount_value" in present else "anthropic"
+        endpoint = (
+            "GET /v1/organization/costs (or the Usage dashboard's 'Cost data' export)"
+            if owner == "openai"
+            else "GET /v1/organizations/cost_report"
+        )
+        raise ValueError(
+            f"statement {path!r} is a {owner} COST export, not a usage statement: it "
+            f"carries {sorted(cost_only)} and no token categories. Both providers publish "
+            f"money and tokens from separate endpoints, so no single file holds both "
+            f"and this cannot be reconciled on its own -- a row priced from the ledger "
+            f"has to be compared against token counts, and these have none. Fetch the "
+            f"matching usage export as well ({endpoint}) and reconcile the two "
+            f"together; this module does not yet join them, and would rather say so "
+            f"than report a variance built from half a statement."
+        )
+
     raise ValueError(
         f"cannot tell which provider's statement {path!r} is: it carries "
         f"{'none of' if not matched else 'both ' + ' and '.join(matched)} the token "
@@ -1955,6 +2025,7 @@ def parse_invoice_csv(path: str | os.PathLike[str], provider: str | None = None)
         period=period,
         source=location,
         lines=_lines_from_rows(rows, name, period, location),
+        matched_fields=tuple(sorted(resolved.items())),
     )
 
 

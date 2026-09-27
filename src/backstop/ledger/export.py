@@ -115,6 +115,33 @@ UNATTRIBUTED = "(unattributed)"
 #: spent this" and "there is no number here" are different facts.
 NO_VALUE = "(none)"
 
+#: Stated beside every charge-back figure a human reads. The same reasoning as
+#: MIXED_PRICE_SOURCE below: a number nobody can qualify is not auditable. The
+#: bundled rate card prices Anthropic's 5-minute cache-write tier, so a
+#: deployment on a 1-hour TTL under-counts that component by 37.5% while every
+#: row still reads as fully priced -- and the event record cannot reveal it,
+#: because the ledger does not observe the request's cache_control. Stating it
+#: beside the figure is the only place a reader will see it before invoicing.
+CACHE_WRITE_TIER_CAVEAT: str = (
+    "Cache writes are priced at Anthropic's 5-minute tier. On a 1-hour cache "
+    "TTL they are under-counted by 37.5% of that component. Reconcile against "
+    "the provider statement before invoicing."
+)
+
+
+def chargeback_caveats() -> tuple[str, ...]:
+    """What a charge-back figure cannot tell its reader.
+
+    Carried by every *human-facing* rendering -- the markdown report, the
+    `doctor` run, and the console output of the command that writes the CSV.
+    Deliberately not written into the CSV itself: that file is data, its
+    documented contract is minimal quoting, and a leading comment row breaks
+    every naive `read_csv`. Putting prose in a spreadsheet is a different kind
+    of wrong from the one being warned about.
+    """
+    return (CACHE_WRITE_TIER_CAVEAT,)
+
+
 #: A row's ``price_source`` when its requests were billed by more than one layer.
 #: A charge-back that does not say which rate card produced the number is not
 #: auditable, so the mixture is named rather than resolved to one of its members.
@@ -1346,6 +1373,11 @@ def render_chargeback_markdown(
     wanted = tuple(columns) if columns is not None else display_columns(names)
     _check_display(names, wanted)
     lines = [
+        f"> **Caveat.** {caveat}"
+        for caveat in chargeback_caveats()
+    ]
+    lines += [
+        "",
         _markdown_row(wanted),
         _markdown_row(tuple("---:" if name in _RIGHT_ALIGNED else "---" for name in wanted)),
     ]

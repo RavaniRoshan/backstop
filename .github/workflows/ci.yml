@@ -125,3 +125,55 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           password: ${{ secrets.PYPI_API_TOKEN }}
+
+  npm-publish:
+    # Runs only for a real version tag, and only after both test gates. Uses npm
+    # trusted publishing (OIDC): the token is minted per-run from the workflow
+    # identity, so there is no npm secret in this repository to leak or rotate.
+    #
+    # THIS REQUIRES ONE MANUAL STEP, because npm will not accept the workflow
+    # until the package says so: on npmjs.com -> backstop-ai -> Settings ->
+    # Trusted Publisher -> GitHub Actions, add
+    #     repository  RavaniRoshan/backstop
+    #     workflow    .github/workflows/ci.yml
+    #     path        ts/backstop/package.json
+    # Without that, this job fails with E403 and the package stays unpublished --
+    # which is the state it is in now, and the reason npm sits at 0.6.0 while
+    # PyPI is at 0.7.0.
+    needs: [test, ts-backstop]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Required for the OIDC exchange. Nothing else is granted.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+      - name: Install, typecheck, test
+        working-directory: ts/backstop
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+      - name: Build
+        working-directory: ts/backstop
+        run: npm run build
+      - name: Refuse to publish a version that is not what the tag says
+        working-directory: ts/backstop
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG="$(node -p "require('./package.json').version")"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "tag $TAG does not match package.json $PKG" >&2
+            exit 1
+          fi
+      - name: Publish to npm
+        working-directory: ts/backstop
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
