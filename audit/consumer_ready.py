@@ -181,6 +181,37 @@ def check_hygiene(r: Report) -> None:
           ", ".join(junk) or "none")
 
 
+def check_launch_kit(r: Report) -> None:
+    """The launch copy must not outlive the facts it asserts.
+
+    A launch post is the one surface where a number is read without the caveat
+    that qualifies it, so its claims have to be exactly current. The kit states
+    a test count and a version; this compares both against reality so a
+    post-release change cannot leave the copy claiming a number the repo no
+    longer meets.
+    """
+    kit = read("docs/launch/0.7.0.md")
+    if not kit:
+        r.add("launch", "the launch kit exists", False, "docs/launch/0.7.0.md is missing")
+        return
+    m = re.search(r"^__version__\s*=\s*\"([^\"]+)\"", read("src/backstop/__init__.py"), re.M)
+    version = m.group(1) if m else "?"
+    r.add("launch", "the kit quotes the current version", version in kit,
+          f"kit does not mention {version}")
+    code, out = sh([find_test_python(), "-m", "pytest", "-p", "no:cacheprovider"], timeout=1800)
+    t = re.search(r"(\d+) passed", out)
+    r.add("launch", "the kit quotes the current test count",
+          bool(t) and f"{t.group(1)} tests" in kit,
+          f"repo has {t.group(1) if t else '?'} passing; the kit says something else")
+    r.add("launch", "the kit says what must not be claimed",
+          "What not to say" in kit,
+          "a launch kit without an explicit not-to-claim list will drift into overclaiming")
+    cited = re.findall(r"`(content/docs/[\w./-]+)`", kit)
+    missing = [c for c in cited if not (SITE / c).exists()]
+    r.add("launch", "the kit cites only paths that exist", not missing,
+          ", ".join(missing) or f"{len(cited)} citations all resolve")
+
+
 def check_liberty(r: Report) -> None:
     """Two packages named backstop-ai must not diverge silently."""
     code, out = sh([sys.executable, "-c", "import tomllib,pathlib;"
@@ -232,6 +263,7 @@ GROUPS = [
     ("consistency", check_consistency),
     ("hygiene", check_hygiene),
     ("liberty", check_liberty),
+    ("launch", check_launch_kit),
     ("site", check_site),
     ("product", check_product),
 ]
