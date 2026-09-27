@@ -8,7 +8,7 @@ fleet was the provider's queue. Backstop puts the ceiling back: three-level
 priority admission, AIMD concurrency, a circuit breaker that fails fast, and a
 `queue_timeout` so a waiter gets an error rather than silence.
 
-![A terminal session where an SRE lead reads the fleet config, sets an AIMD ceiling, watches a priority queue admit a critical ticket ahead of a background one, sees a CircuitBreakerOpenError from an error storm, and watches the p99 hold at 1.9s](./demo.gif)
+[![A terminal session where an SRE lead reads the fleet config, sets an AIMD ceiling, watches a priority queue admit a critical ticket ahead of a background one, sees a CircuitBreakerOpenError from an error storm, and watches the p99 hold at 1.9s](./demo.png)](./demo.mp4)
 
 ## The situation
 

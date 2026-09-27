@@ -8,7 +8,7 @@ invoice with no way to charge it back to the tenant that caused it. Backstop's
 answer is not a smaller pool: it is a cap per tenant, a circuit breaker per
 tenant, and a 402 at the route instead of a line item on the invoice.
 
-![A terminal session where a backend architect scopes 312 tenant budgets on one wrapped client, watches one tenant's circuit open while 311 stay closed, sees a BudgetExceededError become a 402, and reads a per-tenant chargeback](./demo.gif)
+[![The dashboard's Tenants panel with four real per-tenant budgets, where one tenant has been cut off at 0 remaining while the other three keep spending](./demo.png)](./demo.mp4)
 
 ## The situation
 

@@ -8,7 +8,7 @@ noticed for thirteen days. The first needs a hard ceiling. The second needs a
 ratio, a baseline and a window. Backstop ships both, and is explicit that only
 one of them can stop anything.
 
-![A terminal session where an ML engineer wraps an eval loop with a 50,000-token ceiling that blocks 7 of 10 calls before dispatch, then watches the drift detector find a 3.0x cost-per-task regression in shadow mode](./demo.gif)
+[![A terminal session where an ML engineer wraps an eval loop with a 50,000-token ceiling that blocks 7 of 10 calls before dispatch, then watches the drift detector find a 3.0x cost-per-task regression in shadow mode](./demo.png)](./demo.mp4)
 
 ## The situation
 

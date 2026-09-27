@@ -9,7 +9,7 @@ enforcement decision they cannot audit after the fact. Backstop's answer is a
 chained audit log, no new egress, and an RFC 4180 CSV with the honesty columns
 sitting next to the money.
 
-![A terminal session where a compliance engineer turns on an HMAC-chained audit log, traces every outbound byte, admits that the chain proves order rather than authorship, and exports a chargeback CSV grouped by GL code](./demo.gif)
+[![A terminal session where a compliance engineer turns on an HMAC-chained audit log, traces every outbound byte, admits that the chain proves order rather than authorship, and exports a chargeback CSV grouped by GL code](./demo.png)](./demo.mp4)
 
 ## The situation
 

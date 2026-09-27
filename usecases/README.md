@@ -8,10 +8,28 @@ already mediates, it can write a priced, attributed spend ledger to a file — s
 the same deployment that stops a runaway agent can also tell finance which team
 spent the money.
 
-Five situations, five different people. Each one is a rendered terminal capture,
-not a screen recording, and every number on screen is either a real fact from
-this repository or a labelled scenario figure for the fictional company in the
-caption. Where a number is a scenario, the `usecase.md` says so.
+Five situations, five different people, and each one is now shown on the surface
+where it actually happens: the dashboard's own Tenants, Sessions and throughput
+panels, or the real `backstop` CLI. Every number on screen comes from the product
+running — the dashboard frames are Chromium screenshots of `backstop dashboard
+--demo` and of a harness that registers genuine per-tenant budgets, and the
+terminal frames are verbatim stdout of the real commands. Where a number is a
+scenario for the fictional company in the caption, the `usecase.md` says so.
+
+The previous set was five variations on one synthetic terminal canvas, rendered
+as 256-colour GIF. That format was the reason they looked broken: a 256-entry
+palette dithers badly over a dark UI, and a 12.9MB animated GIF gets resampled
+into mush by anything that downsamples it. These are H.264 MP4 — full colour, a
+fraction of the pixels' weight, and no palette. The stills below are the posters;
+each links to the video.
+
+## The whole thing, end to end
+
+A 132-second walkthrough: the problem, the one call that fixes it, the dashboard
+watching a real budget drain, the guardrail firing, per-agent ceilings, the
+ledger, and reconciling the ledger against a statement.
+
+[![The Backstop walkthrough](./walkthrough.png)](./walkthrough.mp4)
 
 ---
 
@@ -20,7 +38,7 @@ caption. Where a number is a scenario, the `usecase.md` says so.
 **A backend architect at a ~500-person AI company with a six-figure invoice and
 no way to answer "which team spent it."**
 
-![A terminal session where a backend architect reads a repo, wraps a client, turns the ledger on, prices every request, builds a per-team chargeback, hits a real CSV error, admits an unpriced model and an unattributed share, and settles](./major-end-to-end/demo.gif)
+[![The dashboard draining a real budget and then the guardrail firing](./major-end-to-end/demo.png)](./major-end-to-end/demo.mp4)
 
 → [Read the full use case](./major-end-to-end/usecase.md)
 
@@ -31,7 +49,7 @@ no way to answer "which team spent it."**
 **A backend architect at a ~200-person multi-tenant AI SaaS whose customers
 share one pool, one process and one provider account.**
 
-![A terminal session where a backend architect scopes 312 tenant budgets on one wrapped client, watches one tenant's circuit open while 311 stay closed, sees a BudgetExceededError become a 402, and reads a per-tenant chargeback](./multi-tenant-saas/demo.gif)
+[![The Tenants panel with four real per-tenant budgets, one cut off at 0 remaining](./multi-tenant-saas/demo.png)](./multi-tenant-saas/demo.mp4)
 
 → [Read the full use case](./multi-tenant-saas/usecase.md)
 
@@ -42,7 +60,7 @@ share one pool, one process and one provider account.**
 **The platform / SRE lead at an ~800-person company running an agent fleet
 against a 2-second p99 SLO through a 10x spike and a provider 429 storm.**
 
-![A terminal session where an SRE lead reads the fleet config, sets an AIMD ceiling, watches a priority queue admit a critical ticket ahead of a background one, sees a CircuitBreakerOpenError from an error storm, and watches the p99 hold at 1.9s](./agent-fleet-slo/demo.gif)
+[![The Sessions panel showing per-agent budget isolation with the KPI tiles above it](./agent-fleet-slo/demo.png)](./agent-fleet-slo/demo.mp4)
 
 → [Read the full use case](./agent-fleet-slo/usecase.md)
 
@@ -54,7 +72,7 @@ against a 2-second p99 SLO through a 10x spike and a provider 429 storm.**
 agent loop burned a night of budget and whose prompt edit tripled cost per task
 without anyone noticing for a fortnight.**
 
-![A terminal session where an ML engineer wraps an eval loop with a 50,000-token ceiling that blocks 7 of 10 calls before dispatch, then watches the drift detector find a 3.0x cost-per-task regression in shadow mode](./runaway-eval-loop/demo.gif)
+[![`backstop demo` with the Wrapped column banded, then the prevention chart at zero](./runaway-eval-loop/demo.png)](./runaway-eval-loop/demo.mp4)
 
 → [Read the full use case](./runaway-eval-loop/usecase.md)
 
@@ -66,20 +84,39 @@ without anyone noticing for a fortnight.**
 finance will not sign off on unreconcilable AI spend and legal will not approve
 prompts leaving the host.**
 
-![A terminal session where a compliance engineer turns on an HMAC-chained audit log, traces every outbound byte, admits that the chain proves order rather than authorship, and exports a chargeback CSV grouped by GL code](./audit-and-compliance/demo.gif)
+[![`backstop ledger demo` — one immutable priced row per request](./audit-and-compliance/demo.png)](./audit-and-compliance/demo.mp4)
 
 → [Read the full use case](./audit-and-compliance/usecase.md)
 
 ---
 
-## About these captures
+## About these videos
 
-They are **rendered terminal captures, not screen recordings** — a compositor in
-[`_build/`](./_build/) draws each frame, so there is no keystroke latency, no
-window chrome, no typos and no scrollback. They are 414 frames, 42.4 seconds,
-~24MB each, and they play once. The ledger, the audit chain, the detection
-window and the CSV in them are all real; the tenant names, the company names, the
-dollar figures and the p99 numbers are scenario.
+Each one is assembled by [`_build/media/`](./_build/media/) from captures of the
+product running, and the source of every frame is stated above.
+
+**The dashboard frames are real.** `backstop dashboard --demo` was started, the
+workload was allowed to drain a real budget, and Chromium screenshotted the live
+page at scripted seconds — full-page frames for the timelapses, and CSS-selector
+element captures for the panels, so a focus ring lands on the pixels it names
+rather than on coordinates someone guessed. The per-tenant frame comes from a
+harness that registers genuine `TenantBudget`s and drives real requests through
+wrapped `openai` clients under `with_budget(...)`; `initech` really does exhaust
+its own ceiling while the other three keep spending.
+
+**The terminal frames are real.** They are the verbatim stdout of
+`backstop demo`, `backstop ledger demo` and `backstop reconcile --demo`, captured
+by running them. The compositor refuses to render any text that a capture did not
+write, so a scene cannot drift into paraphrasing the product.
+
+**The motion is ours.** Cuts, the focus rings, the arrows, the column bands, the
+lower-thirds and the caption timing. Nothing in a frame is a mock-up of a screen
+the product does not have — the earlier set was, which is why this set replaced
+it.
+
+Rebuild them with `python3 _build/media/flagship.py` and
+`python3 _build/media/usecases.py` after re-running the capture step; the inputs
+they read are listed at the top of each file.
 
 If you want the real thing rather than a picture of it:
 

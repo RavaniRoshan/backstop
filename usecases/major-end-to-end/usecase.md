@@ -8,7 +8,7 @@ priced spend — declared no team at all, so nobody can be charged for that mone
 Backstop does not fix this with a better chart. It fixes it by making the answer
 a file, and by printing the part it could not measure next to the part it could.
 
-![A terminal session where a backend architect reads a repo, wraps a client, turns the ledger on, prices every request, builds a per-team chargeback, hits a real CSV error, admits an unpriced model and an unattributed share, and settles](./demo.gif)
+[![A terminal session where a backend architect reads a repo, wraps a client, turns the ledger on, prices every request, builds a per-team chargeback, hits a real CSV error, admits an unpriced model and an unattributed share, and settles](./demo.png)](./demo.mp4)
 
 ## The situation
 
