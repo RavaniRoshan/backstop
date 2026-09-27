@@ -84,7 +84,10 @@ jobs:
         run: npm test
 
   build:
-    needs: test
+    # Both gates. The Python matrix covers the package that reaches PyPI, and
+    # ts-backstop covers the npm package -- this release bumps that version too,
+    # so a release should not go out green-on-Python with a broken npm build.
+    needs: [test, ts-backstop]
     runs-on: ubuntu-latest
     permissions:
       contents: write

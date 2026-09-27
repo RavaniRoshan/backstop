@@ -11,11 +11,33 @@ All notable changes to Backstop should be documented in this file.
 
 ## [Unreleased]
 
+## 0.7.0 — 2026-09-27
+
 The **spend ledger** build: Backstop can now record what a request actually cost,
 attribute it, and export a charge-back. It is opt-in and off by default, and the
-one-wrap-call adoption property is unchanged. Also in this section: nineteen
-correctness fixes, of which four could lose money, one could hand a credential
-to the wrong company, and two could bill you wrongly without looking wrong.
+one-wrap-call adoption property is unchanged. Also in this release: the
+`serve` gateway fixed (it returned HTTP 500 on every request), statement
+reconciliation, and nineteen correctness fixes — of which four could lose
+money, one could hand a credential to the wrong company, and two could bill
+you wrongly without looking wrong.
+
+### Packaging
+
+- **The sdist was shipping things it should not.** It carried a 0-byte file
+  named `=0.40` (created by a botched `pip install 'backstop>=0.40'` whose
+  `>` was read as a redirect), a 2.5MB animated GIF that this release
+  supersedes, 8.5MB of demo video, and `fix_wrapper.py` / `TODO.md` /
+  `videos/` / `.github/`. The tarball was 8.6MB; it is now 640KB, and
+  `twine check` passes. The code, tests, docs, proofs, `install.sh` and
+  `llms.txt` are all still in it.
+- **The version lived in three files with nothing keeping them in step** —
+  `pyproject.toml`, `backstop.__version__`, and `ts/backstop/package.json` —
+  so a release could ship a wheel reporting a different version from the
+  installed package, and the npm package could fall arbitrarily far behind
+  because publishing it is a separate manual step. `tests/test_version.py`
+  now asserts all three agree, that the CHANGELOG has a section for the
+  current version, and that the licence text is present and not merely
+  declared.
 
 ### Added
 
