@@ -185,17 +185,17 @@ wraps them, and confirms HTTP-family detection resolves. It does **not** send a
 request through the wrapped transport, so it cannot prove enforcement works. Use
 `backstop verify` for that.
 
-Known defect: `doctor` imports `httpx2` unconditionally in its wrap smoke test,
-but `httpx2` is not a declared dependency — it only arrives as a dependency of
-`openai>=3` / `anthropic>=1`. On an install that resolves to the older SDK
-family, so that `httpx2` is absent, the import fails and `doctor` exits 1 with a
-`ModuleNotFoundError` traceback. That is a bug in `doctor`, not a broken install:
+`httpx2` is treated as optional. It is not a declared dependency — it only
+arrives transitively with `openai>=3` / `anthropic>=1` — so on an install that
+resolves to the older SDK family it is absent, and `doctor` says so rather than
+failing:
 
 ```bash
-python -c "import httpx2" && echo "httpx2 present" || echo "doctor will exit 1 here"
+python -c "import httpx2" && echo "httpx2 present" || echo "doctor reports the httpx family"
 ```
 
-`backstop verify` is unaffected by this and is the command to trust.
+An earlier version imported `httpx2` unconditionally and exited 1 on any base
+install. That is fixed; `doctor` now exits 0 either way.
 
 ### Probing the live provider
 
@@ -210,9 +210,8 @@ credential is about to be sent there.
 A 200 proves the key exists. It does **not** prove scope, quota, or model
 entitlement.
 
-One flag trap: `--offline` is accepted but inert. The runner only reads
-`--live`, so passing `--offline` together with `--live` still performs the live
-probe. Omit `--live` for no network.
+`--live` and `--offline` are mutually exclusive, and passing both is a usage
+error rather than a live probe. Omit `--live` for no network.
 
 > `wedge` with `provider: anthropic` requires the `anthropic` extra:
 > `pip install "backstop-ai[anthropic]"`. The extra installs the SDK; the

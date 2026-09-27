@@ -519,19 +519,26 @@ a scheduling problem rather than a design one.
 ### R15. The repo ships four defects the ledger half's credibility rests on
 
 **What it is.** Not a market risk, an honesty risk, and it is the reason this
-document exists. Four things in this repository are known, documented, and
-unfixed:
+document exists. The known-defect register below is the one place in the
+repository that is expected to shrink as work lands, so it is kept honest about
+what is still true.
 
-| | defect | why it matters to the ledger story specifically |
-|---|---|---|
-| O1 | The default secret provider is silently dead (`config.py:44` frozen dataclass + `config.py:366-370` bare `except: pass`); I measured that `BACKSTOP_API_KEY_VK_1` never rewrites `Authorization` | The ledger's attribution story depends on virtual keys working. A deployment that believes it has per-tenant credentials and does not is a deployment whose chargeback is built on a fiction. |
-| O20 | `docs/ledger.md` does not exist | The build plan gates it on Task 7, which has landed |
-| O21 | `CHANGELOG.md` `## [Unreleased]` has no ledger or detection entry | Three user-visible commands ship unannounced |
-| O24 | `README.md` does not mention the ledger, the price catalog, or the detector at all | The wedge is not discoverable from the front door |
+**Status as of the current `main`.** Every item in the table has been re-checked
+against the code. O1 was real and is now **fixed**; O20, O21, O22 and O24 are
+also **fixed**. The register is retained rather than deleted, because the next
+audit needs the history of what was found and when.
 
-Plus, adjacent: `docs/install.md:182-198` and `:213-215` still document two CLI
-defects that this build fixed, so the documentation is now wrong in the
-direction of *understating* the product (O22); and `TODO.md` still shows tasks
+| | defect | status | why it mattered to the ledger story specifically |
+|---|---|---|---|
+| O1 | The default secret provider was silently dead: `BackstopConfig` is a frozen dataclass, so `self.secret_provider = SecretProviderChain(...)` in `__post_init__` raised `FrozenInstanceError` and a bare `except Exception: pass` swallowed it. `secret_provider` stayed `None` for every user. | **FIXED** — now installed with `object.__setattr__`, and only when `virtual_keys` are configured, which is the only case where there is anything to resolve. Covered by `test_the_default_secret_provider_is_actually_installed`. | The attribution story depends on virtual keys resolving to real per-tenant credentials. A deployment that believed it had them, and did not, was building its chargeback on a fiction. |
+| O1b | `secrets.py` documented the resolution order with the environment *before* `virtual_keys`, while the code and its tests did the opposite. | **FIXED** — docstring corrected to state the shipped, tested order, with the rationale. No behaviour change. | Anyone reasoning about which credential wins was reasoning from a wrong spec. |
+| O20 | `docs/ledger.md` did not exist | **FIXED** — 731-line user-facing document shipped. | The build plan gates it on Task 7, which has landed. |
+| O21 | `CHANGELOG.md` `## [Unreleased]` had no ledger or detection entry | **FIXED** — the whole build is recorded. | Three user-visible commands had shipped unannounced. |
+| O24 | `README.md` did not mention the ledger, the price catalog, or the detector | **FIXED** — the README documents all three, and `docs/ledger.md` links from it. | The wedge was not discoverable from the front door. |
+
+Plus, adjacent: O22 (`docs/install.md` still describing the two CLI defects this
+build fixed, so the docs understated the product) is **FIXED**; and `TODO.md`
+previously showed tasks
 4-8 unchecked although they shipped (O23).
 
 **Early warning signal.**

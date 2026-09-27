@@ -363,11 +363,23 @@ class BackstopConfig:
             for entry in chain:
                 if not isinstance(entry, dict) or not isinstance(entry.get("model"), str):
                     raise ValueError(f"fallback_chain_for_priority[{prio!r}] entries need a string 'model'")
-        if self.secret_provider is None:
+        if self.secret_provider is None and self.virtual_keys:
+            # `BackstopConfig` is a frozen dataclass, so a plain assignment raises
+            # FrozenInstanceError. That used to be swallowed by a bare
+            # `except Exception: pass`, which meant the documented default
+            # SecretProviderChain was NEVER installed for anyone: a deployment
+            # using virtual keys believed it had per-tenant credentials and
+            # silently did not, and its chargeback was built on a fiction.
+            # object.__setattr__ is the standard idiom for a frozen dataclass.
             try:
                 from .secrets import SecretProviderChain
-                self.secret_provider = SecretProviderChain(self.virtual_keys)
-            except Exception:
+
+                object.__setattr__(
+                    self, "secret_provider", SecretProviderChain(self.virtual_keys)
+                )
+            except ImportError:
+                # the secrets module is always importable, so this is a guard
+                # against a partial install rather than a silent failure path
                 pass
 
     # ------------------------------------------------------------------

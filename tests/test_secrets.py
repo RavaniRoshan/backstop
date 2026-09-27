@@ -90,3 +90,30 @@ def test_try_env_sanitizes_dashes():
 
 def test_try_virtual_keys_missing_key_returns_none():
     assert _try_virtual_keys("missing", {"a": "b"}) is None
+
+
+def test_the_default_secret_provider_is_actually_installed():
+    """Regression: the documented default chain was never installed.
+
+    `BackstopConfig` is a frozen dataclass, so the `self.secret_provider = ...`
+    assignment in `__post_init__` raised `FrozenInstanceError` - which a bare
+    `except Exception: pass` swallowed. So `secret_provider` stayed `None` for
+    every user, the documented default `SecretProviderChain` never existed at
+    runtime, and a deployment using virtual keys believed it had per-tenant
+    credentials while silently sending the virtual key name upstream.
+    """
+    from backstop import BackstopConfig
+    from backstop.secrets import SecretProviderChain
+
+    # no virtual keys means nothing to resolve, so no chain is built
+    assert BackstopConfig().secret_provider is None
+
+    config = BackstopConfig(virtual_keys={"tenant_a": "sk-literal"})
+    assert isinstance(config.secret_provider, SecretProviderChain), (
+        "the default SecretProviderChain was not installed; virtual keys are dead"
+    )
+    assert config.secret_provider("tenant_a") == "sk-literal"
+
+    # and an explicit provider still wins over the default
+    explicit = BackstopConfig(secret_provider=lambda vk: "sk-explicit")
+    assert explicit.secret_provider("anything") == "sk-explicit"

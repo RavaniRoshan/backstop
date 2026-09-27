@@ -2,10 +2,16 @@
 
 Resolution order for a virtual key ``vk``:
 1. ``cfg.secret_provider(vk)`` — explicit callable set by the user
-2. ``BACKSTOP_API_KEY_{upper(vk)}`` — env var derived from virtual key name
-3. ``BACKSTOP_API_KEY`` — fallback env var
-4. ``resolve_virtual_key(vk)`` — ``cfg.virtual_keys[vk]`` mapped to a literal key
+2. ``cfg.virtual_keys[vk]`` — the literal the operator configured for this key
+3. ``BACKSTOP_API_KEY_{upper(vk)}`` — env var derived from the virtual key name
+4. ``BACKSTOP_API_KEY`` — generic fallback env var
 5. No-op provider returns the virtual key itself (single-key mode)
+
+Explicit configuration outranks the environment on purpose: a literal in
+``virtual_keys`` was written for that specific key, whereas
+``BACKSTOP_API_KEY_<NAME>`` is a generically-named fallback. This ordering was
+previously documented the other way round, which contradicted both the code and
+its tests.
 
 The chain is lazy: each link is tried only if the previous one returns None.
 No provider in the chain can raise — exceptions are swallowed and the next
@@ -46,6 +52,10 @@ def _noop(vk: str) -> str | None:
 
 
 def resolve_secret(provider: Callable[[str], str | None] | None, vk: str, virtual_keys: dict[str, str] | None = None) -> str:
+    # Explicit configuration beats an environment fallback: a literal entry in
+    # `virtual_keys` is something the operator wrote on purpose for that key, so
+    # it outranks a generically-named `BACKSTOP_API_KEY_<NAME>`. Only when there
+    # is no literal does the environment get a turn.
     chain = [provider, lambda v: _try_virtual_keys(v, virtual_keys), _try_env, _noop]
     for link in chain:
         if link is None:
