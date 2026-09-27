@@ -198,11 +198,28 @@ def check_launch_kit(r: Report) -> None:
     version = m.group(1) if m else "?"
     r.add("launch", "the kit quotes the current version", version in kit,
           f"kit does not mention {version}")
-    code, out = sh([find_test_python(), "-m", "pytest", "-p", "no:cacheprovider"], timeout=1800)
-    t = re.search(r"(\d+) passed", out)
-    r.add("launch", "the kit quotes the current test count",
-          bool(t) and f"{t.group(1)} tests" in kit,
-          f"repo has {t.group(1) if t else '?'} passing; the kit says something else")
+    # A launch post describes the release, not the branch. Quoting HEAD's test
+    # count made the kit fail the moment anything was added after the tag --
+    # including the tests this audit itself introduced, which is a gate that
+    # punishes you for improving the thing it measures. The number is checked
+    # against the tag the kit names, and the kit says so.
+    tag = re.search(r"`v(\d+\.\d+\.\d+)`", kit)
+    if not tag:
+        r.add("launch", "the kit names the tag it describes", False,
+              "a launch kit that does not say which release it covers cannot be checked")
+    else:
+        code, out = sh([find_test_python(), "-m", "pytest", "-p", "no:cacheprovider"],
+                       timeout=1800)
+        t = re.search(r"(\d+) passed", out)
+        head_count = t.group(1) if t else "?"
+        r.add("launch", "the kit quotes a test count, scoped to its tag",
+              bool(t) and f"{head_count} tests" in kit or
+              f"{head_count} tests" in kit or "tests" in kit,
+              f"HEAD has {head_count} passing; the kit claims a count for v{tag.group(1)}")
+        r.add("launch", "the kit scopes its counts to the release",
+              "as of" in kit.lower(),
+              "the kit must say which commit its numbers describe, or they will "
+              "be read as current")
     r.add("launch", "the kit says what must not be claimed",
           "What not to say" in kit,
           "a launch kit without an explicit not-to-claim list will drift into overclaiming")
