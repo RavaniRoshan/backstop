@@ -165,6 +165,42 @@ to the wrong company, and two could bill you wrongly without looking wrong.
 
 Each of these is the observable symptom, not the internal cause.
 
+- **Virtual keys never resolved to a provider secret.** `BackstopConfig` is a
+  frozen dataclass, so the `self.secret_provider = SecretProviderChain(...)`
+  assignment in `__post_init__` raised `FrozenInstanceError` and a bare
+  `except Exception: pass` swallowed it. The documented default chain was
+  therefore never installed for anyone: a deployment using `virtual_keys` sent
+  the virtual key name upstream while believing it had per-tenant credentials,
+  so its per-customer chargeback was built on a fiction. The default is now
+  installed (and only when `virtual_keys` is configured, since there is nothing
+  to resolve otherwise), and the header is rewritten to the resolved secret.
+- **A wrapped client could silently lose the SDK's own transport
+  configuration.** Reuse was decided with `isinstance(transport, httpx.BaseTransport)`,
+  and that name is not stable: an installed SDK (`anthropic` 0.116.0) rebinds
+  `httpx.BaseTransport` to its own class at import time. On a miss, backstop
+  replaced the SDK's transport, discarding its proxy, TLS and connection-pool
+  settings with it. Reuse is now duck-typed on `handle_request` /
+  `handle_async_request`.
+- **`ts/backstop` threw `ReferenceError` for any file-path audit sink.** The
+  published package is declared `"type": "module"` but called
+  `require("node:fs")` in its audit sink. `require` is not defined in an ES
+  module, so constructing a sink with a file path failed immediately. Now a
+  static import, with a test that writes to a real temporary file.
+- **`tests/test_doctor.py` failed on every CI matrix job** while passing
+  locally. It simulated a missing `httpx2` by reloading a module and asserted
+  in a docstring that only the CLI would notice; the Anthropic wrap path
+  resolves the same module. The state it simulated is also impossible in
+  practice, since an SDK requiring `httpx2` cannot be installed without it. It
+  now asserts the real contract, and exercises the absent case in a subprocess so
+  no module state is shared.
+- **A test named for an invariant never checked it.**
+  `test_budget_spent_plus_reserved_never_exceeds_total` built a `violations`
+  list under a lock and then asserted nothing about it. It now samples the
+  invariant from a concurrent reader and fails if the ceiling is breached.
+- **`backstop.budgets` could point at a discarded ledger.** It was bound once at
+  import time, so after `reset_ledger()` the package attribute still referenced
+  the old instance and a tenant registered through it was invisible to the
+  transport. It is now resolved on every access.
 - **`backstop verify --live --provider anthropic` sent your OpenAI API key to
   Anthropic.** The live probe read `OPENAI_API_KEY` regardless of the selected
   provider. The default key env var is now resolved from the provider
@@ -268,6 +304,16 @@ Each of these is the observable symptom, not the internal cause.
 
 ### Changed
 
+- **The transport is no longer bound to one HTTP library.** `BackstopTransport`
+  and `AsyncBackstopTransport` inherited from `httpx.BaseTransport` /
+  `httpx.AsyncBaseTransport` while the rest of the transport is
+  family-agnostic, so the class was wrong for an `httpx2`-based SDK, and could
+  not be pinned reliably at all because an installed SDK rebinds
+  `httpx.BaseTransport` on import. Both now implement the duck-typed interface
+  (plus the context-manager protocol `httpx`'s clients require). This was
+  latent rather than active — the SDKs duck-type transports, so it worked — but
+  it depended on a third-party package not mutating a shared namespace.
+
 - **Custom dashboard hardened (visual audit follow-up).** Fixed the topbar
   collision between the mode badge and wordmark at phone widths (≤640px: the
   brand row now wraps onto its own line); fixed keyboard focus being dropped to
@@ -335,6 +381,16 @@ Each of these is the observable symptom, not the internal cause.
   branch; the npm name in the README refers to `package.json`.
 
 ### Docs
+
+- **The five demo GIFs are 9x smaller and provably unchanged.** They were
+  re-encoded so each frame keeps only the pixels that changed, taking the
+  repository from 117 MB to 12.9 MB. The optimisation is only trusted because it
+  is proved rather than assumed: the build keeps the full-canvas render and
+  decodes both files to compare all 414 frames pixel for pixel, discarding the
+  result if a single pixel or any frame/timing gate differs.
+- Corrected the risk register so every known-defect row is re-verified against
+  the current code and carries a status, rather than being left as a claim that
+  has since gone stale.
 
 - **0.6.0 is released.** The `0.6.0 is unreleased` banner is gone from
   `README.md`, `CHANGELOG.md`, `docs/install.md`, `docs/compatibility.md`,
