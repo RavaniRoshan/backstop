@@ -161,9 +161,69 @@ to the wrong company, and two could bill you wrongly without looking wrong.
   so a typo fails at `wrap()` rather than silently pricing every event from the
   bundled table.
 
+- **Statement reconciliation (`backstop reconcile`).** The ledger's cost is
+  computed from Backstop's own token counts and a rate card; a provider's
+  statement is computed from the provider's counts and the provider's own rates.
+  Nothing previously compared the two, so a CFO had no way to check the
+  charge-back against the invoice that actually arrived. `reconcile_invoice`
+  returns a per-model and total variance as signed `Decimal`, the token counts
+  on each side and their delta so a difference can be attributed to a price or a
+  count, and a status of `matched`, `within_tolerance`, `variance`,
+  `missing_from_ledger` (the provider billed for something Backstop never
+  recorded) or `missing_from_invoice`. `measure_error_budget` reports the
+  observed variance over the invoices it was given, and says plainly that this is
+  an empirical figure over that population rather than a promise about anyone
+  else's account. `parse_invoice_csv` / `parse_invoice_json` read a statement
+  file; a header that does not match raises naming the row, the field and the
+  accepted spellings rather than quietly reconciling nothing. A model the
+  catalog has no rate for is reported as unpriced and is **never** priced at a
+  default — a missing price stays visible instead of becoming a plausible
+  number, and a row present on one side only is never netted against the other.
+  Money is `Decimal` throughout. `reconciliation_csv` writes the per-model rows
+  as RFC 4180 for finance to join against the charge-back export.
+
+  **Scope, stated plainly:** this reconciles against a *statement file*, and this
+  repository has never run one against a real provider statement. No statement
+  from either provider is committed here and no live smoke test is wired to one.
+  The column names the CSV parser reads are transcribed from the providers'
+  published reporting surfaces, centralised in one marked block for that reason,
+  and marked as needing verification against a real statement. `--demo` is
+  offline, keyless and deterministic, and every row of it differs on purpose —
+  a demo where everything reconciles would teach a reader nothing.
+
 ### Fixed
 
 Each of these is the observable symptom, not the internal cause.
+
+- **`backstop serve` returned HTTP 500 on every request.** The gateway read a
+  local `key` that was assigned only inside `if api_keys is not None`, so with
+  auth disabled — the default, and the configuration the docs lead with — every
+  request raised `NameError`. The gateway has never worked as shipped. A
+  security suite now runs it against a live local upstream rather than a mock,
+  because a mock cannot catch an unbound local or a body that was never read;
+  the existing `test_gateway_proxies_through_backstop` had been failing and
+  invisible, because the whole module was skipped everywhere.
+- **`uvicorn` was imported by `serve` and declared by no extra**, so
+  `pip install "backstop[fastapi]" && backstop serve` raised
+  `ModuleNotFoundError`. It is now declared, and `fastapi` is in the test extra
+  so the gateway tests actually run.
+- **A hung provider held a gateway request open forever.** There was no
+  upstream deadline, so one slow provider could exhaust the worker's
+  concurrency. There is now a configurable one, carried in
+  `request.extensions` because httpx 0.28 accepts a timeout on neither the
+  transport nor the request constructor.
+- **The gateway relayed hop-by-hop headers in both directions**, letting a client
+  inject `Connection`, `Upgrade`, `Transfer-Encoding` or `Proxy-Authorization`
+  at the provider. RFC 7230 §6.1 headers, plus `content-length` and
+  `content-encoding` (which describe the body as it arrived inbound, not as
+  httpx re-serialises it), are now stripped in both directions.
+- **A gateway 502 echoed `str(exc)` to the client**, handing out internal
+  hostnames, ports and tracebacks. The detail is logged; the client gets a fixed
+  body.
+- **The gateway's 1 MB body cap did not bound memory,** because the body was
+  read in full before being measured. `Content-Length` is now checked before
+  buffering, and the buffered length re-checked, since a client may lie about or
+  omit it.
 
 - **Virtual keys never resolved to a provider secret.** `BackstopConfig` is a
   frozen dataclass, so the `self.secret_provider = SecretProviderChain(...)`
