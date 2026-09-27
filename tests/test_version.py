@@ -190,3 +190,45 @@ def test_writing_a_chargeback_csv_states_the_caveat_on_the_console(capsys, tmp_p
     payload = _json.loads(capsys.readouterr().out)
     assert payload["caveats"], "the JSON export dropped the caveats"
     assert "5-minute tier" in payload["caveats"][0]
+
+
+def test_only_publishing_jobs_may_mint_an_oidc_token():
+    """`id-token: write` is a real capability, not a checkbox.
+
+    Both publish jobs -- PyPI and npm -- need it to exchange the workflow
+    identity for a short-lived token. No other job does, and a token any job can
+    mint is a token any compromised dependency in that job can use to publish.
+    Asserting the grant is not spread means widening it later is a deliberate act
+    rather than a copy-paste.
+    """
+    import re
+
+    workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+
+    granted = set()
+    current = None
+    for line in workflow.splitlines():
+        job = re.match(r"^  ([a-z-]+):$", line)
+        if job:
+            current = job.group(1)
+        elif current and "id-token: write" in line:
+            granted.add(current)
+
+    assert granted == {"build", "npm-publish"}, (
+        f"id-token: write is granted to {sorted(granted)}; only the PyPI and npm "
+        "publish jobs should hold it"
+    )
+
+
+def test_the_npm_publish_job_documents_the_trusted_publisher_setup():
+    """The one manual step, recorded where whoever hits E403 will look.
+
+    npm will not accept the workflow until the package names it as a trusted
+    publisher, and that can only be done in npm's UI. The job says so in a
+    comment; this asserts the comment is still there, so it cannot be deleted as
+    clutter while the failure it explains is still live.
+    """
+    workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    assert "Trusted Publisher" in workflow
+    assert "ts/backstop/package.json" in workflow
+    assert "E403" in workflow

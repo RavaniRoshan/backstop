@@ -197,9 +197,14 @@ def check_site(r: Report) -> None:
     status, ctype = http_status(f"{SITE_URL}/og.png")
     r.add("site", "a social card image is served", status == 200 and "image" in ctype,
           f"/og.png -> HTTP {status} {ctype or 'no content-type'}")
+    layout = read("app/layout.tsx", SITE)
     r.add("site", "a social card image is declared in metadata",
-          bool(re.search(r'openGraph[\s\S]{0,400}?images', read("app/layout.tsx", SITE)))
-          and '"og.png"' in read("app/layout.tsx", SITE),
+          bool(re.search(r"openGraph[\s\S]{0,600}?images", layout))
+          # The layout is TSX, so the path is single-quoted. The first version of
+          # this check looked for a double-quoted "/og.png", found nothing, and
+          # reported a failure for a card that was correctly wired -- a gate that
+          # cries wolf is as useless as one that stays silent.
+          and bool(re.search(r"""['"]/og\.png['"]""", layout)),
           "layout declares summary_large_image but must also point at a real file")
     status, _ = http_status(f"{SITE_URL}/walkthrough.mp4")
     r.add("site", "the demo video is served", status == 200, f"HTTP {status}")
