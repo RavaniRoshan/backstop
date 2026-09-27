@@ -31,3 +31,6 @@ agent/
 .agents/skills/
 skills-lock.json
 docs/internal/
+
+# Agent goal-loop scratch state (session-local, not part of the project)
+.opencode/
