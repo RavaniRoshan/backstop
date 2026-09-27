@@ -25,6 +25,17 @@ ledger on gets events and prices; what it wants next is the number finance asks
 for, and that is :func:`build_chargeback` over the same objects rather than a
 reimplementation of them. :func:`read_ledger` is here for the same reason: the
 JSONL file a :class:`JsonlSink` writes is read by the module that wrote it.
+
+The invoice reconciliation is re-exported for the reason the charge-back is, one
+step further along: a number finance cannot check against the provider's own paper
+is a number finance will not run a charge-back off, so
+:func:`~backstop.ledger.reconcile.reconcile_invoice` compares the priced ledger
+against a statement **file** the caller supplies, per model and in total, and
+:func:`~backstop.ledger.reconcile.measure_error_budget` reports the observed
+variance over whatever statements it was handed — measured, and labelled as a
+figure over that population. It calls no provider API and has never been run
+against a real invoice in this repository; see
+:data:`~backstop.ledger.reconcile.RECONCILIATION_SCOPE` and the module docstring.
 """
 from __future__ import annotations
 
@@ -52,6 +63,27 @@ from .export import (
     read_ledger,
     revenue_join,
     write_chargeback_csv,
+)
+from .reconcile import (
+    DEFAULT_TOLERANCE_PCT,
+    DEFAULT_TOLERANCE_USD,
+    INVOICE_COLUMNS,
+    RECONCILIATION_SCOPE,
+    STATUS_MATCHED,
+    STATUS_MISSING_FROM_INVOICE,
+    STATUS_MISSING_FROM_LEDGER,
+    STATUS_VARIANCE,
+    STATUS_WITHIN_TOLERANCE,
+    ErrorBudget,
+    Invoice,
+    InvoiceLine,
+    InvoiceVariance,
+    ModelVariance,
+    measure_error_budget,
+    parse_invoice_csv,
+    parse_invoice_json,
+    reconcile_invoice,
+    reconciliation_csv,
 )
 from .schema import (
     EMITTED_OUTCOMES,
@@ -91,6 +123,16 @@ __all__ = [
     "SECRET_QUERY_RE",
     "UNKNOWN_ENDPOINT",
     "UNATTRIBUTED",
+    "DEFAULT_TOLERANCE_PCT",
+    "DEFAULT_TOLERANCE_USD",
+    "INVOICE_COLUMNS",
+    "RECONCILIATION_SCOPE",
+    "STATUSES",
+    "STATUS_MATCHED",
+    "STATUS_MISSING_FROM_INVOICE",
+    "STATUS_MISSING_FROM_LEDGER",
+    "STATUS_VARIANCE",
+    "STATUS_WITHIN_TOLERANCE",
     "Attribution",
     "BoundedWriter",
     "BudgetLedger",
@@ -98,11 +140,16 @@ __all__ = [
     "ChargebackTotals",
     "CloseReport",
     "CostBreakdown",
+    "ErrorBudget",
+    "Invoice",
+    "InvoiceLine",
+    "InvoiceVariance",
     "JsonlSink",
     "LedgerCorruptionError",
     "LedgerRead",
     "LedgerSink",
     "MemorySink",
+    "ModelVariance",
     "NullSink",
     "Period",
     "PriceCatalog",
@@ -119,9 +166,14 @@ __all__ = [
     "current_attribution",
     "get_current_tenant",
     "get_ledger",
+    "measure_error_budget",
     "money",
     "normalize_endpoint",
+    "parse_invoice_csv",
+    "parse_invoice_json",
     "read_ledger",
+    "reconcile_invoice",
+    "reconciliation_csv",
     "reset_ledger",
     "resolve_cost_type",
     "revenue_join",
