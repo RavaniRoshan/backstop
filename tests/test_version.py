@@ -99,3 +99,94 @@ def test_the_licence_text_is_present_not_just_declared():
     """
     found = [p for p in ROOT.glob("LICENSE*") if p.is_file()]
     assert found, "no LICENSE file, so the declared MIT licence ships no text"
+
+
+def test_the_cache_write_tier_caveat_reaches_every_human_reading_a_chargeback():
+    """A wrong number that looks complete is the worst failure class in the ledger.
+
+    The bundled card prices Anthropic's 5-minute cache-write tier, so a
+    deployment on the 1-hour TTL under-counts that component by 37.5% while every
+    row still lists `cache_write` among its priced components. The event record
+    cannot reveal it, because the ledger never observes the request's
+    cache_control -- so the caveat has to travel with the figure instead.
+
+    "Human-facing" is load-bearing. The markdown report carries it, and so does
+    `doctor`. The CSV deliberately does not: RFC 4180 has no comment syntax, the
+    module's documented contract is minimal quoting, and a leading non-data row
+    breaks every naive `read_csv`. Prose inside a file somebody pivots would be a
+    second wrong thing, so the file stays data and the console carries the words.
+    """
+    from backstop.ledger.demo import demo_events
+    from backstop.ledger.export import (
+        build_chargeback,
+        chargeback_caveats,
+        render_chargeback_csv,
+        render_chargeback_markdown,
+    )
+
+    caveat = chargeback_caveats()
+    assert caveat, "the charge-back caveats went empty"
+    assert "5-minute" in caveat[0]
+    assert "1-hour" in caveat[0]
+    # Quantified, not merely flagged: a reader must be able to size the risk.
+    assert "37.5%" in caveat[0]
+
+    rows = build_chargeback(demo_events())
+    assert caveat[0] in render_chargeback_markdown(rows)
+
+    # The CSV is pure data: a header row, and nothing above it.
+    csv_text = render_chargeback_csv(rows)
+    assert csv_text.splitlines()[0].startswith("team,")
+    assert "CAVEAT" not in csv_text.splitlines()[0]
+
+
+def test_doctor_prints_the_cache_write_tier_caveat(capsys):
+    """doctor is the one command a user is guaranteed to run before quoting a
+    number, so the limitation belongs there rather than only in the docs."""
+    from backstop.cli import main
+
+    main(["doctor"])
+    out = capsys.readouterr().out
+    assert "5-minute tier" in out, "doctor no longer states the cache-write tier"
+    assert "1-hour" in out
+
+
+def test_writing_a_chargeback_csv_states_the_caveat_on_the_console(capsys, tmp_path):
+    """The CSV is data; the console is where a human reads the caveat.
+
+    An earlier attempt put a `# CAVEAT:` comment row at the top of the CSV. It
+    satisfied the warning and broke the file: RFC 4180 has no comment syntax,
+    the module's documented contract is minimal quoting, and a leading non-data
+    row makes every naive `read_csv` fail. So the caveat goes to stdout and into
+    the --json payload, and the file stays exactly the data finance pivots.
+    """
+    import json as _json
+
+    from backstop.cli import main
+    from backstop.ledger.demo import demo_events
+    from backstop.ledger.sink import JsonlSink
+
+    ledger = tmp_path / "ledger.jsonl"
+    sink = JsonlSink(str(ledger))
+    for event in demo_events():
+        sink.write(event)
+    sink.flush()
+    sink.close()
+
+    out_csv = tmp_path / "chargeback.csv"
+    assert main(["ledger", "export", "--path", str(ledger), "--out", str(out_csv)]) == 0
+    printed = capsys.readouterr().out
+    assert "5-minute tier" in printed, "the export command did not state the caveat"
+
+    # And the file itself is still pure data: a header, and no comment row.
+    body = out_csv.read_text(encoding="utf-8")
+    assert not body.lstrip().startswith("#")
+    assert body.splitlines()[0].startswith("team,")
+
+    # The machine-readable path carries it as a field rather than a comment.
+    out_json = tmp_path / "chargeback.json"
+    assert main(["ledger", "export", "--path", str(ledger),
+                 "--out", str(out_json), "--json"]) == 0
+    payload = _json.loads(capsys.readouterr().out)
+    assert payload["caveats"], "the JSON export dropped the caveats"
+    assert "5-minute tier" in payload["caveats"][0]
