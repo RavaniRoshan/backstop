@@ -2,7 +2,7 @@ from .config import BackstopConfig, Priority
 from .cost import CostEstimate
 from .cost import estimate as cost_estimate
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 from .exceptions import (
     BackstopError,
     BudgetExceededError,

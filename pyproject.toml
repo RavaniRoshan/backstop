@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "backstop-ai"
-version = "0.6.0"
+version = "0.7.0"
 description = "In-process OpenAI SDK backpressure, budgets, retries, circuit breaking, and metrics."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -56,7 +56,35 @@ backstop = "backstop.cli:main"
 wedge = "wedge.cli:main"
 
 [tool.hatch.build.targets.sdist]
-exclude = ["/PLAN.md", "/.agents", "/docs/internal"]
+# An sdist is a source distribution, not a media CDN. The first cut of this list
+# shipped a 2.5MB superseded GIF and 8.5MB of demo video inside the Python
+# package, which nobody pip-installs and everybody downloads. What is kept is
+# what a reader or a contributor needs: the code, the tests, the docs, the
+# proofs, and install.sh and llms.txt, which are deliberate artefacts.
+exclude = [
+  "/PLAN.md",
+  "/.agents",
+  "/docs/internal",
+  # Dev scratch, not part of the distribution.
+  "/TODO.md",
+  "/fix_wrapper.py",
+  "/videos",
+  "/research",
+  "/wedge-test-fixture",
+  "/.github",
+  "/ts",                       # published to npm separately, from its own tree
+  # The stale GIF pipeline. Its outputs are gone; see usecases/_build/media/.
+  "/usecases/_build/__pycache__",
+  "/usecases/_build/render.py",
+  "/usecases/_build/make.py",
+  "/usecases/_build/gifenc.py",
+  "/usecases/_build/verify_identical.py",
+  "/usecases/_build/briefs",
+  # 8.5MB of video and poster stills. Read them on GitHub or the site.
+  "/usecases/**/*.mp4",
+  "/usecases/**/*.png",
+  "/usecases/**/*.gif",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/backstop", "src/wedge"]

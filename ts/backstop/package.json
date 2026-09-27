@@ -1,6 +1,6 @@
 {
   "name": "backstop-ai",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "In-process LLM guardrails for the OpenAI SDK — drop-in budget, priority admission, AIMD concurrency, circuit breaker, retry, fallback chains, caching, hooks, audit, and agent guardrails, mirroring the Python backstop.wrap().",
   "license": "MIT",
   "type": "module",
