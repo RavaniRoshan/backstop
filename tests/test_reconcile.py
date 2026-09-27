@@ -1618,3 +1618,46 @@ def test_the_scope_sentence_is_on_every_render() -> None:
     assert RECONCILIATION_SCOPE in result.to_markdown()
     assert result.to_dict()["scope"] == RECONCILIATION_SCOPE
     assert isinstance(result, InvoiceVariance)
+
+
+def test_a_parsed_statement_records_which_column_satisfied_each_field(tmp_path):
+    """The parser's assumptions must be visible, not buried in a source constant.
+
+    The accepted column names are transcribed from published reporting surfaces
+    and have never been checked against a real statement file. A parser that
+    picked the wrong column would produce a confident, wrong variance, so the
+    choice is recorded on the invoice and printed by the CLI, where whoever runs
+    it can check it against their provider's own dashboard.
+    """
+    from backstop.ledger.reconcile import parse_invoice_csv
+
+    header = (
+        "date,model,input_uncached_tokens,input_cached_tokens,"
+        "input_cache_write_tokens,output_tokens,cost_usd\n"
+    )
+    row = "2026-09-01,gpt-4o,1000,200,0,500,0.0125\n"
+    path = tmp_path / "statement.csv"
+    path.write_text(header + row, encoding="utf-8")
+
+    invoice = parse_invoice_csv(path)
+
+    used = invoice.columns_used
+    # Every logical field this parser resolved is named, and each is a real
+    # column of the file rather than a default it invented.
+    assert used["input"] == "input_uncached_tokens"
+    assert used["cache_read"] == "input_cached_tokens"
+    assert used["charged_usd"] == "cost_usd"
+    assert used["period"] == "date"
+    # The *values* are the file's columns; the keys are Backstop's own logical
+    # vocabulary and are not expected to appear in a provider's statement.
+    assert set(used.values()) <= set(header.strip().split(","))
+    assert "input <- input_uncached_tokens" in invoice.assumptions()
+
+
+def test_a_built_statement_says_so_rather_than_claiming_columns(tmp_path):
+    """A synthetic invoice must not imply a file was parsed."""
+    from backstop.ledger.reconcile import demo_invoice
+
+    for invoice in demo_invoice():
+        assert invoice.matched_fields == ()
+        assert invoice.assumptions().startswith("no column provenance")

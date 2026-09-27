@@ -486,11 +486,17 @@ Python package:
 - It covers roughly half the Python `BackstopConfig` surface: budget, circuit,
   retry, fallback, cache, audit, agent guard, admission. No semantic cache, no
   Redis shared budget, no OTel, no gateway, no shadow mode, no Wedge.
-- It is **not in CI.** `.github/workflows/ci.yml` is Python-only; the TypeScript
-  tests run only when someone runs `npm test` in `ts/backstop/` by hand.
+- It **is** in CI, as a `ts-backstop` job that installs, typechecks, tests, and
+  checks that `package-lock.json` agrees with `package.json`. That last check is
+  not ceremony: it is what caught the 0.7.0 release being bumped in
+  `package.json` and missed in the lockfile.
 
 Use the Python package when you need the full feature set or Anthropic. Treat
 the npm package as a smaller subset and verify it against your own SDK version.
+
+Both distributions are called `backstop-ai` — one on PyPI, one on npm — and they
+are not the same package. If you are reading this on PyPI you have the full
+thing. If you are reading it on npm you have roughly half of it, OpenAI only.
 
 ---
 

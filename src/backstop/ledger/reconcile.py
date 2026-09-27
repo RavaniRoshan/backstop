@@ -654,6 +654,28 @@ class Invoice:
     source: str
     lines: tuple[InvoiceLine, ...]
     currency: str = CURRENCY
+    #: Which column of the file satisfied each logical field, e.g.
+    #: ``{"input": "input_uncached_tokens", "charged_usd": "cost_usd"}``.
+    #:
+    #: This exists because the accepted column names are transcribed from
+    #: published reporting surfaces and have never been checked against a real
+    #: statement file. A reconciliation that silently picked the wrong column
+    #: would produce a confident, wrong variance. Recording the choice turns the
+    #: assumption into something the reader can check against their own
+    #: dashboard in one glance, which is the only honest way to ship an
+    #: unverified parser.
+    matched_fields: tuple[tuple[str, str], ...] = ()
+
+    @property
+    def columns_used(self) -> dict[str, str]:
+        """The same mapping as a dict, for display."""
+        return dict(self.matched_fields)
+
+    def assumptions(self) -> str:
+        """A one-line, human-checkable statement of what this parse assumed."""
+        if not self.matched_fields:
+            return "no column provenance recorded (this invoice was built, not parsed)"
+        return ", ".join(f"{logical} <- {column}" for logical, column in self.matched_fields)
 
     def __post_init__(self) -> None:
         for name in ("provider", "period", "source", "currency"):
@@ -1955,6 +1977,7 @@ def parse_invoice_csv(path: str | os.PathLike[str], provider: str | None = None)
         period=period,
         source=location,
         lines=_lines_from_rows(rows, name, period, location),
+        matched_fields=tuple(sorted(resolved.items())),
     )
 
 

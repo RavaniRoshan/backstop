@@ -920,6 +920,18 @@ def _run_reconcile(args: argparse.Namespace) -> int:
         f"- **ledger file:** `{args.ledger}`",
         f"- **statement file:** `{invoice.source}`",
     ]
+    # Say which column satisfied which field. The accepted names are transcribed
+    # from published docs and have never met a real statement, so the reader is
+    # told what the parser assumed and can check it against their own dashboard
+    # in one glance rather than taking the variance on trust.
+    assumed = invoice.assumptions()
+    if assumed and not assumed.startswith("no column provenance"):
+        lines.append(f"- **columns read:** {assumed}")
+    else:
+        lines.append(
+            "- **columns read:** none recorded; this statement was synthesised rather "
+            "than parsed from a file, so there is nothing to check."
+        )
     if skipped:
         lines.append(
             f"- **{skipped} event(s) in the ledger name another provider** and were not "
