@@ -1,7 +1,7 @@
 {
   "name": "backstop-ai",
   "version": "0.7.0",
-  "description": "In-process LLM guardrails for the OpenAI SDK — drop-in budget, priority admission, AIMD concurrency, circuit breaker, retry, fallback chains, caching, hooks, audit, and agent guardrails, mirroring the Python backstop.wrap().",
+  "description": "In-process LLM guardrails for the OpenAI SDK \u2014 drop-in budget, priority admission, AIMD concurrency, circuit breaker, retry, fallback chains, caching, hooks, audit, and agent guardrails, mirroring the Python backstop.wrap().",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
@@ -33,5 +33,14 @@
     "@types/node": "^26.2.0",
     "tsx": "^4",
     "typescript": "^5"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/RavaniRoshan/backstop.git",
+    "directory": "ts/backstop"
+  },
+  "homepage": "https://github.com/RavaniRoshan/backstop#readme",
+  "bugs": {
+    "url": "https://github.com/RavaniRoshan/backstop/issues"
   }
 }
