@@ -111,8 +111,24 @@ from .sink import (
     MemorySink,
     NullSink,
 )
+from .statement import (
+    CostRow,
+    JoinResult,
+    UsageRow,
+    join_statement,
+    join_statement_files,
+    read_cost_export,
+    read_usage_export,
+)
 
 __all__ = [
+    "CostRow",
+    "JoinResult",
+    "UsageRow",
+    "join_statement",
+    "join_statement_files",
+    "read_cost_export",
+    "read_usage_export",
     "DRAIN_THREAD_NAME",
     "EMITTED_OUTCOMES",
     "EVENT_ID_RE",

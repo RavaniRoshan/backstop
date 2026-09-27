@@ -100,11 +100,44 @@ read what the cost report says.
   "reconcile against the invoice" is becoming "reconcile against the export",
   and a tool that only reads an invoice line will stop working.
 
-## What this means for the launch
+## What this means — and what changed
 
-`backstop reconcile` is **not** calibrated. It parses a single file that no
-provider actually publishes. The honest claim is narrower: it will parse a
-statement in the documented shape, it reports the columns it read so a reader
-can check them, and it refuses rather than guesses. The gap between that and
-"reconciles against a real invoice" is a join across two exports per provider,
-which is not built.
+This document found the gap. `backstop.ledger.statement` is the answer to it.
+
+```python
+from backstop.ledger import join_statement_files, reconcile_invoice
+
+joined = join_statement_files("usage.csv", "cost.csv")   # provider sniffed
+variance = reconcile_invoice(events, joined.invoice)
+```
+
+The join reads both of a provider's exports and produces the statement the
+reconciler always wanted: one line per model, carrying that model's token
+counts **and** the amount the provider charged for them.
+
+| | before | after |
+|---|---|---|
+| statement | one file, which no provider publishes | the join of the two they do |
+| OpenAI | refused the real column | joins **per model** on (day, `line_item`) |
+| Anthropic | per-model, unsupported | joins at **account total**, and says so |
+| charged with no tokens | dropped or misread | kept, named, reported |
+| tokens with no charge | read as free | kept as *not billed* |
+
+Two limits remain, and they are properties of the providers' exports rather than
+of this code:
+
+- **Anthropic cannot be joined per model.** Its cost report carries a
+  `cost_type`, not a model, and at least one integration vendor reports the table
+  as having no model dimension at all. The join reconciles the account total and
+  says so on the result rather than inventing an attribution.
+- **A bare `amount` column is still refused**, because its units remain
+  contested between the providers' own sources. This needs one real statement to
+  settle, not a code change.
+
+So the claim is now: *it reconciles a statement built from the exports the
+provider actually publishes, per model where the provider's cost export names a
+model and at account level where it does not, and it says which it achieved.*
+What is still unproven is the **numbers** — every fixture here is transcribed
+from documentation rather than read off a real statement, so the parse is shaped
+correctly and the field names are now documented-correct, but no real invoice has
+been through it.
