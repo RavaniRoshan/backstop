@@ -26,9 +26,22 @@ sys.modules["consumer_ready"] = audit
 _spec.loader.exec_module(audit)
 
 
-def test_the_audit_points_at_this_repository_and_this_site():
+def test_the_audit_points_at_this_repository():
     assert audit.REPO == ROOT, f"the audit reads {audit.REPO}, not {ROOT}"
-    assert (audit.SITE / "package.json").exists(), f"no site at {audit.SITE}"
+
+
+def test_the_audit_survives_having_no_site_checkout():
+    """This test used to assert the site exists at a hard-coded local path.
+
+    Which is false on CI, on a fresh clone, and on anybody else's machine -- so
+    it failed on thirteen CI legs for a reason that had nothing to do with the
+    product. The site is a separate repository; a checkout of this one cannot
+    contain it, and the audit has to say so rather than crash or pretend.
+    """
+    if audit.SITE is None:
+        assert audit.SITE_URL.startswith("https://"), "the live site URL must always be known"
+        return
+    assert (audit.SITE / "package.json").exists(), f"no site package.json at {audit.SITE}"
 
 
 def test_every_probe_group_is_callable_and_wired():

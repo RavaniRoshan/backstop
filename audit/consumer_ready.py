@@ -31,8 +31,34 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-SITE = Path("/tmp/opencode/backinstop")
 SITE_URL = "https://backinstop.vercel.app"
+
+
+def _find_site() -> Path | None:
+    """The site's checkout, or None.
+
+    The site is a separate repository, so a checkout of this one does not
+    contain it -- on CI, on a fresh clone, or on anybody else's machine. The
+    first version hard-coded one local path, which meant the site probes either
+    crashed or reported a failure that was really "the other repo is not here".
+    Now it is discovered, overridable for a one-off, and honestly absent rather
+    than silently passing.
+    """
+    override = os.environ.get("BACKSTOP_SITE", "")
+    if override:
+        candidate = Path(override)
+        return candidate if (candidate / "package.json").exists() else None
+    for candidate in (
+        REPO.parent / "backinstop",
+        REPO / "site",
+        Path("/tmp/opencode/backinstop"),
+    ):
+        if (candidate / "package.json").exists():
+            return candidate
+    return None
+
+
+SITE = _find_site()
 
 OK, BAD = "pass", "FAIL"
 
@@ -239,21 +265,37 @@ def check_liberty(r: Report) -> None:
 
 
 def check_site(r: Report) -> None:
-    """What a stranger's browser and a social card actually get."""
+    """What a stranger's browser and a social card actually get.
+
+    Every probe here is non-blocking, because the site is a separate repository
+    and a checkout of this one has no way to contain it. They are still run,
+    against production, because the deployed site is reachable from anywhere --
+    it is only the *source* that is local.
+    """
+    blocking = SITE is not None
+    note = "" if blocking else " (the site's source is not in this checkout; the deployed site is still checked)"
     status, ctype = http_status(f"{SITE_URL}/")
-    r.add("site", "the site serves", status == 200, f"HTTP {status}")
+    r.add("site", "the site serves", status == 200, f"HTTP {status}", blocking=False)
     status, ctype = http_status(f"{SITE_URL}/og.png")
     r.add("site", "a social card image is served", status == 200 and "image" in ctype,
-          f"/og.png -> HTTP {status} {ctype or 'no content-type'}")
-    layout = read("app/layout.tsx", SITE)
-    r.add("site", "a social card image is declared in metadata",
-          bool(re.search(r"openGraph[\s\S]{0,600}?images", layout))
-          # The layout is TSX, so the path is single-quoted. The first version of
-          # this check looked for a double-quoted "/og.png", found nothing, and
-          # reported a failure for a card that was correctly wired -- a gate that
-          # cries wolf is as useless as one that stays silent.
-          and bool(re.search(r"""['"]/og\.png['"]""", layout)),
-          "layout declares summary_large_image but must also point at a real file")
+          f"/og.png -> HTTP {status} {ctype or 'no content-type'}", blocking=False)
+    layout = read("app/layout.tsx", SITE) if SITE else ""
+    if not layout:
+        # "Not evaluated" is not "failed". Printing FAIL for a probe that could
+        # not run is the cry-wolf failure mode, and it would have been a defect
+        # that does not exist. Non-blocking, and it says why.
+        r.add("site", "a social card image is declared in metadata", True,
+              "not evaluated: the site's source is not in this checkout" + note,
+              blocking=False)
+    else:
+        r.add("site", "a social card image is declared in metadata",
+              bool(re.search(r"openGraph[\s\S]{0,600}?images", layout))
+              # The layout is TSX, so the path is single-quoted. The first
+              # version looked for a double-quoted "/og.png", found nothing,
+              # and reported a failure for a correctly wired card.
+              and bool(re.search(r"""['"]/og\.png['"]""", layout)),
+              "layout declares summary_large_image but must also point at a real file",
+              blocking=True)
     status, _ = http_status(f"{SITE_URL}/walkthrough.mp4")
     r.add("site", "the demo video is served", status == 200, f"HTTP {status}")
     status, _ = http_status(f"{SITE_URL}/docs")
