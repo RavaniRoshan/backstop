@@ -1,5 +1,6 @@
 from wedge.report import generate_report
 
+
 def test_generate_report():
     diff_results = {
         "main.py": {
@@ -12,9 +13,9 @@ def test_generate_report():
         {"runner_id": "R0", "test_passed": True, "budget_remaining": 15000},
         {"runner_id": "R1", "test_passed": False, "budget_remaining": 10000},
     ]
-    
+
     report = generate_report("Test Task", diff_results, runners)
-    
+
     assert "Wedge Run Report: Test Task" in report
     assert "Runner R0" in report
     assert "Budget remaining: 15000" in report

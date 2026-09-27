@@ -14,8 +14,8 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
-from backstop.config import BackstopConfig, Priority
 from backstop.circuit import CircuitState
+from backstop.config import BackstopConfig, Priority
 from backstop.latency import _LatencyTracker
 from backstop.ledger import TenantBudget, get_ledger, reset_ledger, with_budget
 from backstop.notifications import BudgetAlertManager

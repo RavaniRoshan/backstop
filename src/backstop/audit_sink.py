@@ -146,8 +146,10 @@ class BigQueryAuditSink(AuditSink):
         self._pii = pii
         self._bq = None
         try:
-            from google.cloud import bigquery  # type: ignore
-            from google.cloud import storage  # type: ignore
+            from google.cloud import (
+                bigquery,  # type: ignore
+                storage,  # type: ignore
+            )
 
             self._bq = bigquery
             self._gcs_client = storage.Client()

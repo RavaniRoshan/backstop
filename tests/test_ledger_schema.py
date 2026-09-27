@@ -34,8 +34,8 @@ from backstop.ledger.schema import (
     PRIORITIES,
     SCHEMA_VERSION,
     UNKNOWN_ENDPOINT,
-    normalize_endpoint,
     new_event_id,
+    normalize_endpoint,
     resolve_cost_type,
     utc_now,
 )
@@ -1113,7 +1113,6 @@ def test_concurrent_tasks_keep_their_own_scopes():
 
 def test_top_level_package_reexports_the_ledger_public_api():
     import backstop
-
     from backstop import ledger
 
     assert backstop.Attribution is ledger.Attribution

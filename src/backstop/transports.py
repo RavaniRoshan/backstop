@@ -4,9 +4,9 @@ import asyncio
 import json
 import time
 from collections.abc import Awaitable, Callable
+from typing import Any
 
 import httpx
-from typing import Any
 
 from ._httpcompat import HTTPX, _HttpCompat
 from .budget import Reservation
@@ -25,6 +25,8 @@ from .hooks import AfterResponseHook, BeforeRequestHook
 from .latency import _LatencyTracker, extract_backstop_headers
 from .ledger import (
     ReservationTicket as LedgerReservation,
+)
+from .ledger import (
     SpendEvent,
     current_attribution,
     get_current_tenant,

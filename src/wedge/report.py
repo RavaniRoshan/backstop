@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, Any, List
+from typing import Any, Dict, List
 
 # Per-runner Backstop budget cap (mirrors WedgeRunner's wrap budget).
 RUNNER_BUDGET = 20_000

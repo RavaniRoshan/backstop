@@ -1,10 +1,11 @@
-from wedge.diff_engine import compute_similarity, compare_patches
+from wedge.diff_engine import compare_patches, compute_similarity
+
 
 def test_compute_similarity():
     assert compute_similarity("", "") == 1.0
     assert compute_similarity("a", "a") == 1.0
     assert compute_similarity("a", "b") == 0.0
-    
+
     # 50% similar
     sim = compute_similarity("abc", "abd")
     assert sim > 0.6 and sim < 0.7  # (2*2) / (3+3) = 4/6 = 0.666

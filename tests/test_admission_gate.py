@@ -12,9 +12,9 @@ import time
 
 import pytest
 
+from backstop.admission import PriorityGate
 from backstop.aimd import AIMDController
 from backstop.config import BackstopConfig, Priority
-from backstop.admission import PriorityGate
 
 QUEUE_TIMEOUT = 0.05
 DISCARD_TIMEOUT = 0.25

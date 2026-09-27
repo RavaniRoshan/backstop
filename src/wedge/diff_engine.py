@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import difflib
 import re
-from typing import Dict, List, Any
-
+from typing import Any, Dict, List
 
 _TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 

@@ -20,7 +20,6 @@ from __future__ import annotations
 
 from typing import Any
 
-
 _OTEL: Any | None = None
 
 # Optional dependency-free consumer (the built-in dashboard). ``None`` unless a

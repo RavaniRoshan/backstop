@@ -11,7 +11,6 @@ import random
 import threading
 import time
 
-
 from backstop.budget import Budget
 from backstop.exceptions import BudgetExceededError
 

@@ -3,7 +3,6 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-
 repo_root = next(
     parent
     for parent in Path(__file__).resolve().parents

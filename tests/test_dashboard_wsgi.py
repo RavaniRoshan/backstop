@@ -10,8 +10,7 @@ import time
 
 import pytest
 
-from backstop.dashboard_app import make_dashboard_app, serve
-from backstop.dashboard_app import Dashboard, dashboard_wsgi_app
+from backstop.dashboard_app import Dashboard, dashboard_wsgi_app, make_dashboard_app, serve
 from backstop.telemetry import get_registry, get_sink, install_sink, uninstall_sink
 
 SNAPSHOT_KEYS = {

@@ -419,14 +419,15 @@ class VerifyRunner:
         t0 = time.perf_counter()
         try:
             # Create a cache-enabled config (ResponseCache is used by BackstopTransport)
+            import httpx
+
             from .config import BackstopConfig
             from .state import BackstopState
             from .transports import BackstopTransport
-            import httpx
-            
+
             # Create a state with cache enabled
             state = BackstopState.create(
-                1_000_000, 
+                1_000_000,
                 BackstopConfig(cache_enabled=True, cache_max_entries=16)
             )
             client = httpx.Client(
@@ -438,15 +439,15 @@ class VerifyRunner:
             response1 = client.post("/v1/chat/completions", json=body)
             if response1.status_code != 200:
                 raise Exception(f"First request failed with status {response1.status_code}")
-            
+
             # Very small delay to ensure cache state is properly recorded
             time.sleep(0.001)
-            
+
             # Second identical request - this should hit the cache
             response2 = client.post("/v1/chat/completions", json=body)
             if response2.status_code != 200:
                 raise Exception(f"Second request failed with status {response2.status_code}")
-                
+
             client.close()
             dt = (time.perf_counter() - t0) * 1000
             # Safe metric access for cache hits - use the exact same access as in _check_budget_block

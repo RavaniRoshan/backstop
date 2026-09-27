@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import threading
-from contextvars import ContextVar
 from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 
 from ..exceptions import BudgetExceededError

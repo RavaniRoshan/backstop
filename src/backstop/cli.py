@@ -11,7 +11,8 @@ import time
 import httpx
 
 from .config import BackstopConfig
-from .dashboard_app import DEFAULT_HOST, DEFAULT_PORT, Dashboard, serve as serve_dashboard
+from .dashboard_app import DEFAULT_HOST, DEFAULT_PORT, Dashboard
+from .dashboard_app import serve as serve_dashboard
 from .harness import DEFAULT_SEED, run_harness
 from .metrics import start_metrics_server
 from .real_anthropic import run_real_anthropic_smoke
@@ -20,7 +21,6 @@ from .state import BackstopState
 from .telemetry import DEFAULT_SAMPLE_INTERVAL
 from .transports import BackstopTransport
 from .verify import run_verify
-
 
 SCENARIOS = ["burst", "steady-state", "error-storm", "budget-hit"]
 
@@ -167,7 +167,7 @@ def _run_benchmark(publish: bool) -> int:
 def _run_doctor() -> int:
     print("# Backstop Doctor\n")
     print(f"- Python: {platform.python_version()} ({platform.system()})")
-    
+
     # Check if we can import backstop's version without triggering metrics
     try:
         # Read the __init__.py directly to get version
@@ -205,11 +205,10 @@ def _run_doctor() -> int:
 
     print("\n## Wrap smoke test (mock transport)")
     try:
-        from .config import BackstopConfig
-        from .wrapper import Backstop
-        
         # Verify the _httpcompat module works
         from . import _httpcompat
+        from .config import BackstopConfig
+        from .wrapper import Backstop
         print("- [ok] _httpcompat module loaded successfully")
 
         # Test with httpx mock transport (this is what the actual tests use)
@@ -247,14 +246,14 @@ def _run_doctor() -> int:
     # Test actual SDK client wrapping (missing from original smoke test)
     print("\n## Actual SDK client wrapping test")
     provider_status = {}
-    
+
     # OpenAI client wrapping
     try:
         import openai
         openai_client = openai.OpenAI(api_key="dummy-key")
         Backstop.wrap(openai_client, budget=10_000, config=BackstopConfig())
         print("- [ok] OpenAI client wrapped successfully")
-        
+
         # Report SDK version
         try:
             print(f"- [ok] OpenAI SDK version: {openai.__version__}")
@@ -262,7 +261,7 @@ def _run_doctor() -> int:
         except Exception:
             print("- [--] OpenAI SDK version: not available")
             provider_status['openai'] = {'version': 'unknown', 'supported': True, 'wrapped': True}
-            
+
     except Exception as e:
         print(f"- [!!] OpenAI client wrapping failed: {e}")
         provider_status['openai'] = {'version': 'unknown', 'supported': False, 'wrapped': False}
@@ -270,14 +269,14 @@ def _run_doctor() -> int:
         print(f"\n- [!!] Wrap path failed for OpenAI: {e}")
         print("\nDoctor check failed: Some provider paths are not supported.")
         return 1
-    
-    # Anthropic client wrapping  
+
+    # Anthropic client wrapping
     try:
         import anthropic
         anthropic_client = anthropic.Anthropic(api_key="dummy-key")
         Backstop.wrap(anthropic_client, budget=10_000, config=BackstopConfig())
         print("- [ok] Anthropic client wrapped successfully")
-        
+
         # Report SDK version
         try:
             print(f"- [ok] Anthropic SDK version: {anthropic.__version__}")
@@ -285,7 +284,7 @@ def _run_doctor() -> int:
         except Exception:
             print("- [--] Anthropic SDK version: not available")
             provider_status['anthropic'] = {'version': 'unknown', 'supported': True, 'wrapped': True}
-            
+
     except Exception as e:
         print(f"- [!!] Anthropic client wrapping failed: {e}")
         provider_status['anthropic'] = {'version': 'unknown', 'supported': False, 'wrapped': False}

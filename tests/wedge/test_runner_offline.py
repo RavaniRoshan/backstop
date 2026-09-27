@@ -13,7 +13,6 @@ import yaml
 import wedge.cli as wedge_cli
 from wedge.runner import WedgeRunner, _extract_patch_from_output, apply_patch
 
-
 FAKE_PATCH = (
     "--- a/main.py\n"
     "+++ b/main.py\n"

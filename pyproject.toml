@@ -71,3 +71,16 @@ markers = [
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+
+# The rule set is pinned EXPLICITLY on purpose. With only `ruff>=0.6` and ruff's
+# implicit defaults, a new ruff release can enable a rule and turn a green
+# branch red - which is exactly what happened: a newer ruff started reporting
+# I001 (unsorted imports) and failed the build on code that had never changed.
+# Lint that can break without a code change is not a gate, it is a coin flip.
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+# E501 is deliberately not enforced. `line-length` is set for the formatter, but
+# this project has never held a 100-character limit and enabling it retrofits
+# 216 unrelated lines, which is churn with real risk and no correctness value.
+# The rule that actually matters - a name used but never defined (F821) - is on.
+ignore = ["E501"]

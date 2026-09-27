@@ -3,13 +3,13 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING, Any
 
-from .ledger import ReservationTicket as LedgerReservation
 from ._httpcompat import _HttpCompat, compat_for
+from .ledger import ReservationTicket as LedgerReservation
 
 if TYPE_CHECKING:
+    from ._httpcompat import _HttpCompat
     from .budget import Reservation
     from .state import BackstopState
-    from ._httpcompat import _HttpCompat
     # httpx is imported conditionally below to avoid runtime dependency on httpx2 vs httpx
     # The actual response type is ensured via _ensure_response_family at runtime.
 

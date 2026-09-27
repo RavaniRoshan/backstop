@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 
-from backstop.secrets import _try_env, _try_virtual_keys, resolve_secret, SecretProviderChain
+from backstop.secrets import SecretProviderChain, _try_env, _try_virtual_keys, resolve_secret
 
 
 def test_resolve_secret_explicit_provider_wins():

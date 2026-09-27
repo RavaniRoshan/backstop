@@ -243,7 +243,7 @@ def test_streaming_reconciles_to_actual_usage():
             headers={"content-type": "text/event-stream"},
         )
 
-    # Estimate: prompt_chars/4 + max_tokens(50) = ~50. Actual: 13. 
+    # Estimate: prompt_chars/4 + max_tokens(50) = ~50. Actual: 13.
     state = BackstopState.create(50_000, BackstopConfig(default_max_output_tokens=50))
     client = httpx.Client(
         transport=BackstopTransport(state, httpx.MockTransport(handler)),

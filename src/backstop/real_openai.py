@@ -9,7 +9,6 @@ from typing import Literal
 from .config import BackstopConfig
 from .wrapper import Backstop
 
-
 DEFAULT_REAL_MODEL = "gpt-4.1-mini"
 SmokeAPI = Literal["responses", "chat"]
 

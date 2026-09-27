@@ -14,7 +14,6 @@ from backstop.verify import (
     run_verify,
 )
 
-
 _REAL_GET = httpx.Client.get
 
 # (base_url, headers) of every intercepted live auth probe.

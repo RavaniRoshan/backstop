@@ -4,7 +4,6 @@ import pytest
 
 from backstop.real_openai import arun_real_openai_smoke, run_real_openai_smoke
 
-
 pytestmark = pytest.mark.real_openai
 
 

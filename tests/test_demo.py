@@ -3,6 +3,7 @@ from __future__ import annotations
 import gc
 import json
 import time
+
 import pytest
 
 from backstop.demo import DemoResult, run_demo

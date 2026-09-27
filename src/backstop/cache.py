@@ -7,7 +7,6 @@ from collections import OrderedDict
 from collections.abc import Callable
 from typing import Any
 
-
 _HYPERPARAMS = frozenset({
     "temperature", "top_p", "max_tokens", "max_output_tokens", "max_completion_tokens",
     "n", "stop", "frequency_penalty", "presence_penalty", "seed", "logit_bias",

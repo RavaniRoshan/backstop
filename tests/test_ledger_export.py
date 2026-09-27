@@ -36,7 +36,6 @@ from backstop.ledger import (
     chargeback_totals,
     compute_cost,
 )
-from backstop.pricing_catalog import LEDGER_CONTEXT
 from backstop.ledger.export import (
     CSV_TERMINATOR,
     DEFAULT_GROUP_BY,
@@ -62,6 +61,7 @@ from backstop.ledger.export import (
     revenue_join,
     write_chargeback_csv,
 )
+from backstop.pricing_catalog import LEDGER_CONTEXT
 
 MONEY_CELL = re.compile(r"^-?\d+\.\d{2}$")
 CATALOG = PriceCatalog()
