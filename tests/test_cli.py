@@ -476,3 +476,374 @@ def test_cli_ledger_requires_a_subcommand(capsys):
     with pytest.raises(SystemExit) as caught:
         main(["ledger"])
     assert caught.value.code == 2
+
+
+# --------------------------------------------------------------------------
+# backstop reconcile
+# --------------------------------------------------------------------------
+
+
+@pytest.fixture
+def reconcile_ledger(tmp_path: Path) -> Path:
+    """A JSONL ledger with two priced models, written through the ledger's own sink.
+
+    1,000,000 input tokens on gpt-4o is 2.500000 at the bundled $2.50/Mtok and
+    2,000,000 on gpt-4.1 is 4.000000 at $2.00/Mtok. The figures below are those, and
+    the test asserts the report's variance against them rather than re-deriving it.
+    """
+    from dataclasses import replace
+
+    from backstop.ledger import Attribution, PriceCatalog, SpendEvent, compute_cost
+    from backstop.ledger.sink import JsonlSink
+
+    catalog = PriceCatalog()
+    sink = JsonlSink(tmp_path / "ledger.jsonl")
+    for index, (model, tokens) in enumerate((("gpt-4o", 1_000_000), ("gpt-4.1", 2_000_000))):
+        event = SpendEvent(
+            event_id=f"{index:032x}",
+            occurred_at=f"2026-09-26T0{index}:00:00.000000Z",
+            provider="openai",
+            model=model,
+            endpoint="/v1/chat/completions",
+            priority="default",
+            outcome="success",
+            input_tokens=tokens,
+            output_tokens=0,
+            estimated=False,
+            attribution=Attribution(team="payments", feature="checkout-v2"),
+        )
+        cost = compute_cost(event, catalog)
+        sink.write(replace(event, cost=cost))
+    sink.close()
+    return tmp_path / "ledger.jsonl"
+
+
+@pytest.fixture
+def reconcile_statement(tmp_path: Path) -> Path:
+    """A statement that bills gpt-4o a quarter of a dollar more than the ledger priced
+    it, and gpt-4.1 exactly what the ledger priced it."""
+    path = tmp_path / "openai.csv"
+    path.write_text(
+        "date,model,input_uncached_tokens,output_tokens,cost_usd\n"
+        "2026-09-26,gpt-4o,1000000,0,2.750000\n"
+        "2026-09-26,gpt-4.1,2000000,0,4.000000\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_cli_reconcile_demo_exits_zero_and_prints_a_variance_table(capsys):
+    code = main(["reconcile", "--demo"])
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "# Backstop Reconciliation" in out
+    assert "| provider | model | status | ledger_usd | invoice_usd | variance_usd |" in out
+    assert "## Error budget, measured over these inputs" in out
+    assert "\x1b[" not in out
+
+
+def test_cli_reconcile_demo_reports_a_variance_and_a_match_not_a_clean_sheet(capsys):
+    """A demo where everything reconciles teaches nothing about what the tool is
+    for, so the synthetic statement is declared to disagree in five ways."""
+    code = main(["reconcile", "--demo"])
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "matched" in out
+    assert "variance" in out
+    assert "missing_from_ledger" in out
+    assert "missing_from_invoice" in out
+    assert "every row below differs" in out
+
+
+def test_cli_reconcile_demo_says_it_is_not_a_real_invoice(capsys):
+    assert main(["reconcile", "--demo"]) == 0
+    out = capsys.readouterr().out
+    assert "not** a reconciliation against a real" in out
+    assert "has never run one" in out
+    assert "verification against a real statement" in out
+
+
+def test_cli_reconcile_demo_is_byte_identical_across_two_runs(capsys):
+    assert main(["reconcile", "--demo"]) == 0
+    first = capsys.readouterr().out
+    assert main(["reconcile", "--demo"]) == 0
+    second = capsys.readouterr().out
+    assert first.encode("utf-8") == second.encode("utf-8")
+    assert first != ""
+
+
+def test_cli_reconcile_demo_needs_no_key_and_makes_no_network_call(capsys, monkeypatch):
+    for name in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_BASE_URL"):
+        monkeypatch.delenv(name, raising=False)
+
+    def refuse(*args, **kwargs):
+        raise AssertionError("backstop reconcile --demo must not touch the network")
+
+    monkeypatch.setattr(socket, "socket", refuse)
+    monkeypatch.setattr(socket, "create_connection", refuse)
+    assert main(["reconcile", "--demo"]) == 0
+    assert "# Backstop Reconciliation" in capsys.readouterr().out
+
+
+def test_cli_reconcile_demo_json_carries_the_counts_and_the_budget(capsys):
+    code = main(["reconcile", "--demo", "--json"])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["simulated"] is True
+    assert payload["network_calls"] == 0
+    assert payload["deterministic"] is True
+    assert len(payload["reconciliations"]) == 2
+    counts = payload["reconciliations"][0]["counts"]
+    assert counts["events"] > 0
+    assert counts["invoice_lines"] > 0
+    assert counts["models"] > 0
+    assert "empirical figure" in payload["error_budgets"][0]["note"]
+    # Every money field is a string, so nothing downstream can re-round it.
+    for reconciliation in payload["reconciliations"]:
+        for row in reconciliation["rows"]:
+            assert isinstance(row["variance_usd"], str)
+            assert isinstance(row["ledger_usd"], str)
+
+
+def test_cli_reconcile_reads_a_ledger_and_a_statement(capsys, reconcile_ledger, reconcile_statement):
+    code = main(
+        [
+            "reconcile",
+            "--ledger",
+            str(reconcile_ledger),
+            "--invoice",
+            str(reconcile_statement),
+        ]
+    )
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "# Ledger vs statement — openai, 2026-09-26" in out
+    assert f"**ledger file:** `{reconcile_ledger}`" in out
+    assert "## Ledger file integrity" in out
+    # The two loss counters a file read cannot answer are stated as unknown, beside
+    # the reconciliation rather than buried in it.
+    assert "dropped_events: unknown" in out
+    assert "sink_errors: unknown" in out
+    assert "## Reconciliation" in out
+    # gpt-4o's exact signed variance: 2.500000 priced against 2.750000 charged.
+    assert "-0.250000 USD" in out
+    assert "| openai | gpt-4o | variance | 2.50 | 2.75 | -0.25 |" in out
+    # gpt-4.1 reconciles exactly, so the tool can say so.
+    assert "| openai | gpt-4.1 | matched | 4.00 | 4.00 | 0.00 |" in out
+    assert "## Error budget, measured over these inputs" in out
+
+
+def test_cli_reconcile_json_carries_the_file_reports_and_the_budget(
+    capsys, reconcile_ledger, reconcile_statement
+):
+    code = main(
+        [
+            "reconcile",
+            "--ledger",
+            str(reconcile_ledger),
+            "--invoice",
+            str(reconcile_statement),
+            "--json",
+        ]
+    )
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["provider"] == "openai"
+    assert payload["counts"]["events"] == 2
+    assert payload["counts"]["invoice_lines"] == 2
+    assert payload["counts"]["reconciled_models"] == 1
+    assert payload["totals"]["variance_usd"] == "-0.250000"
+    assert payload["error_budget"]["worst_model"] == "gpt-4o"
+    assert payload["error_budget"]["observed_abs_variance_usd"] == "0.250000"
+    # The ledger's own integrity report travels with the reconciliation, and the
+    # markdown above it states the two loss counters as unknown rather than as zero.
+    assert payload["ledger"]["events"] == 2
+    assert payload["ledger"]["lines_seen"] == 2
+    assert payload["ledger"]["torn_write"] is None
+    assert payload["invoice"]["lines"][0]["charged_usd"] == "2.750000"
+    assert payload["scope"].startswith("This reconciles the ledger against a statement FILE")
+
+
+def test_cli_reconcile_reports_the_rows_it_skipped_because_they_name_another_provider(
+    capsys, reconcile_ledger, reconcile_statement
+):
+    """A statement is one provider's, so the other provider's traffic is not silently
+    dropped and not silently reconciled against it either."""
+    code = main(
+        ["reconcile", "--ledger", str(reconcile_ledger), "--invoice", str(reconcile_statement)]
+    )
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "0 event(s) in the ledger name another provider" not in out
+
+    other = reconcile_statement.with_name("other.csv")
+    other.write_text(
+        "date,model,uncached_input_tokens,output_tokens,cache_read_input_tokens,cost_usd\n"
+        "2026-09-26,claude-opus-5,100000,0,0,0.500000\n",
+        encoding="utf-8",
+    )
+    assert main(["reconcile", "--ledger", str(reconcile_ledger), "--invoice", str(other)]) == 0
+    out = capsys.readouterr().out
+    assert "2 event(s) in the ledger name another provider" in out
+    assert "claude-opus-5" in out
+    assert "missing_from_ledger" in out
+
+
+def test_cli_reconcile_tolerance_flags_are_parameters_and_never_floats(
+    capsys, reconcile_ledger, reconcile_statement
+):
+    """argparse's ``type=`` hands the string to ``Decimal``, so a tolerance typed on a
+    command line is exact rather than a binary float."""
+    code = main(
+        [
+            "reconcile",
+            "--ledger",
+            str(reconcile_ledger),
+            "--invoice",
+            str(reconcile_statement),
+            "--tolerance-usd",
+            "0",
+            "--tolerance-pct",
+            "0",
+            "--json",
+        ]
+    )
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["tolerance_usd"] == "0"
+    assert payload["tolerance_pct"] == "0"
+    # gpt-4.1 matched exactly, so a zero tolerance does not change it; gpt-4o is
+    # still a variance at a quarter of a dollar.
+    assert payload["counts"]["reconciled_models"] == 1
+
+
+def test_cli_reconcile_reads_a_json_statement_too(capsys, reconcile_ledger, tmp_path):
+    statement = tmp_path / "openai.json"
+    statement.write_text(
+        json.dumps(
+            {
+                "provider": "openai",
+                "period": "2026-09-26",
+                "lines": [
+                    {
+                        "date": "2026-09-26",
+                        "model": "gpt-4o",
+                        "input_uncached_tokens": "1000000",
+                        "output_tokens": "0",
+                        "cost_usd": "2.500000",
+                    },
+                    {
+                        "date": "2026-09-26",
+                        "model": "gpt-4.1",
+                        "input_uncached_tokens": "2000000",
+                        "output_tokens": "0",
+                        "cost_usd": "4.000000",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    code = main(["reconcile", "--ledger", str(reconcile_ledger), "--invoice", str(statement)])
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "| openai | gpt-4o | matched | 2.50 | 2.50 | 0.00 |" in out
+    assert "| openai | gpt-4.1 | matched | 4.00 | 4.00 | 0.00 |" in out
+
+
+def test_cli_reconcile_refuses_a_statement_it_cannot_parse(capsys, reconcile_ledger, tmp_path):
+    """A statement with no charged-amount column would reconcile as 0.00 against a
+    ledger and look perfect. It raises, names the field, and exits 1."""
+    statement = tmp_path / "no-cost.csv"
+    statement.write_text(
+        "date,model,input_uncached_tokens,output_tokens\n2026-09-26,gpt-4o,1000000,0\n",
+        encoding="utf-8",
+    )
+    code = main(["reconcile", "--ledger", str(reconcile_ledger), "--invoice", str(statement)])
+    assert code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "'charged_usd'" in captured.err
+    assert "refuses it rather than reporting zeros" in captured.err
+
+
+def test_cli_reconcile_refuses_a_statement_format_it_does_not_read(
+    capsys, reconcile_ledger, tmp_path
+):
+    statement = tmp_path / "statement.xml"
+    statement.write_text("<statement/>", encoding="utf-8")
+    code = main(["reconcile", "--ledger", str(reconcile_ledger), "--invoice", str(statement)])
+    assert code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "expected a .csv or a .json" in captured.err
+
+
+def test_cli_reconcile_fails_on_a_corrupt_ledger_without_printing_a_report(
+    capsys, reconcile_ledger, reconcile_statement
+):
+    lines = reconcile_ledger.read_text(encoding="utf-8").splitlines(True)
+    corrupt = reconcile_ledger.with_name("corrupt.jsonl")
+    corrupt.write_text("".join([lines[0], "{not json}\n", lines[1]]), encoding="utf-8")
+    code = main(["reconcile", "--ledger", str(corrupt), "--invoice", str(reconcile_statement)])
+    assert code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "line 2" in captured.err
+
+
+def test_cli_reconcile_fails_on_a_missing_ledger_file(capsys, tmp_path, reconcile_statement):
+    code = main(
+        [
+            "reconcile",
+            "--ledger",
+            str(tmp_path / "nope.jsonl"),
+            "--invoice",
+            str(reconcile_statement),
+        ]
+    )
+    assert code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "cannot read ledger" in captured.err
+
+
+def test_cli_reconcile_diagnoses_a_decimal_failure(monkeypatch, capsys, reconcile_ledger, reconcile_statement):
+    def explode(*args, **kwargs):
+        raise decimal.InvalidOperation("quantize")
+
+    monkeypatch.setattr("backstop.ledger.reconcile.measure_error_budget", explode)
+    code = main(["reconcile", "--ledger", str(reconcile_ledger), "--invoice", str(reconcile_statement)])
+    assert code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "backstop reconcile could not total" in captured.err
+    assert "InvalidOperation" in captured.err
+
+
+def test_cli_reconcile_demo_diagnoses_a_decimal_failure(monkeypatch, capsys):
+    def explode(*args, **kwargs):
+        raise decimal.InvalidOperation("quantize")
+
+    monkeypatch.setattr("backstop.ledger.reconcile.run_demo", explode)
+    code = main(["reconcile", "--demo"])
+    assert code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "backstop reconcile --demo could not total" in captured.err
+
+
+def test_cli_reconcile_needs_a_mode(capsys):
+    with pytest.raises(SystemExit) as caught:
+        main(["reconcile"])
+    assert caught.value.code == 2
+    assert "--demo" in capsys.readouterr().err
+
+
+def test_cli_reconcile_ledger_without_an_invoice_is_a_usage_error(capsys, reconcile_ledger):
+    """There is nothing to reconcile against, and a report over an empty comparison
+    reads exactly like a report over a clean one."""
+    with pytest.raises(SystemExit) as caught:
+        main(["reconcile", "--ledger", str(reconcile_ledger)])
+    assert caught.value.code == 2
+    assert "--ledger also needs --invoice" in capsys.readouterr().err

@@ -488,7 +488,47 @@ def main(argv: list[str] | None = None) -> int:
     )
     ledger_export.add_argument("--json", action="store_true", help="emit JSON instead of Markdown")
 
+    reconcile = subparsers.add_parser(
+        "reconcile", help="reconcile the priced ledger against a provider statement file"
+    )
+    reconcile_demo = reconcile.add_mutually_exclusive_group(required=True)
+    reconcile_demo.add_argument(
+        "--demo",
+        action="store_true",
+        help="reconcile fixed, offline, synthetic events against a synthetic statement "
+        "(no key, no network, no file)",
+    )
+    reconcile_demo.add_argument(
+        "--ledger", help="path to a JSONL ledger file to reconcile"
+    )
+    reconcile.add_argument(
+        "--invoice", help="path to the provider statement (.csv or .json); required with --ledger"
+    )
+    reconcile.add_argument("--json", action="store_true", help="emit JSON instead of Markdown")
+    reconcile.add_argument(
+        "--tolerance-usd",
+        type=decimal.Decimal,
+        default=None,
+        help="per-model-row dollar tolerance (default 0.01; see DEFAULT_TOLERANCE_USD)",
+    )
+    reconcile.add_argument(
+        "--tolerance-pct",
+        type=decimal.Decimal,
+        default=None,
+        help="per-model-row percentage tolerance (default 0.5; the looser of the two wins)",
+    )
+
     args = parser.parse_args(argv)
+
+    if args.command == "reconcile" and args.ledger and not args.invoice:
+        # A usage error, and exit 2, rather than a run that reconciles the ledger
+        # against nothing and prints a clean-looking zero: there is no statement
+        # file here to check the money on, and a report over an empty comparison
+        # reads exactly like a report over a clean one.
+        parser.error(
+            "--ledger also needs --invoice: there is nothing to reconcile the ledger "
+            "against without a statement file"
+        )
 
     if args.command == "harness":
         result = run_harness(args.scenario, seed=args.seed)
@@ -598,6 +638,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "ledger":
         return _run_ledger(args)
+
+    if args.command == "reconcile":
+        return _run_reconcile(args)
 
     if args.command == "real-openai":
         try:
@@ -730,7 +773,13 @@ def _run_ledger(args: argparse.Namespace) -> int:
     return 0
 
 
-def _decimal_failure(args: argparse.Namespace, exc: BaseException) -> int:
+def _decimal_failure(
+    args: argparse.Namespace,
+    exc: BaseException,
+    *,
+    command: str | None = None,
+    path: str | None = None,
+) -> int:
     """Report a decimal arithmetic failure as a diagnosis, not a traceback.
 
     A ``decimal`` context is process-global, and money that cannot be
@@ -744,11 +793,16 @@ def _decimal_failure(args: argparse.Namespace, exc: BaseException) -> int:
     wrong or absent" code a corrupt line gets, because it is the same class of
     outcome. The ambient context is printed because it is the first thing worth
     ruling out and it is the one thing the operator cannot see from the output.
+
+    ``command`` and ``path`` let a caller outside the ``ledger`` subcommand reuse
+    the same diagnosis; the ``ledger`` calls take their own two names from the
+    namespace, as they always did.
     """
     context = decimal.getcontext()
-    where = getattr(args, "path", None)
+    where = path if path is not None else getattr(args, "path", None)
+    label = f"backstop ledger {args.ledger_command}" if command is None else command
     print(
-        f"error: backstop ledger {args.ledger_command} could not total "
+        f"error: {label} could not total "
         f"{where!r}: {type(exc).__name__}: {exc} "
         f"(ambient decimal context: prec={context.prec}, Emax={context.Emax}). "
         "The ledger's own money arithmetic runs at prec=28 regardless of that "
@@ -758,6 +812,133 @@ def _decimal_failure(args: argparse.Namespace, exc: BaseException) -> int:
         file=sys.stderr,
     )
     return 1
+
+
+def _run_reconcile(args: argparse.Namespace) -> int:
+    """Dispatch ``backstop reconcile --demo | --ledger FILE --invoice FILE``.
+
+    Two modes, no framework. The arithmetic is in
+    :mod:`backstop.ledger.reconcile`; what is left here is argument plumbing, the
+    two tolerance overrides, a readable report, and an exit code.
+
+    Exit codes carry meaning, and they are the ledger's: ``0`` means the
+    reconciliation ran and printed a report — **whatever the report says**. A
+    variance is a finding, not a failure, and a command that exited non-zero on a
+    variance would train an operator to ignore it. ``1`` means there is no report
+    to read: a ledger that will not open, a corrupt line, a statement that does not
+    parse, an unreadable path, or an amount too large to total. Nothing is
+    reconciled silently past one of those, because a reconciliation over a file that
+    failed to parse is the one output this command must never produce.
+    """
+    from pathlib import Path
+
+    from .ledger import export as ledger_export
+    from .ledger import reconcile as ledger_reconcile
+
+    tolerance_usd = (
+        args.tolerance_usd
+        if args.tolerance_usd is not None
+        else ledger_reconcile.DEFAULT_TOLERANCE_USD
+    )
+    tolerance_pct = (
+        args.tolerance_pct
+        if args.tolerance_pct is not None
+        else ledger_reconcile.DEFAULT_TOLERANCE_PCT
+    )
+
+    if args.demo:
+        try:
+            result = ledger_reconcile.run_demo()
+        except decimal.DecimalException as exc:
+            return _decimal_failure(
+                args, exc, command="backstop reconcile --demo", path="the synthetic statement"
+            )
+        print(result.to_json() if args.json else result.to_markdown())
+        return 0
+
+    try:
+        read = ledger_export.read_ledger(args.ledger)
+    except ledger_export.LedgerCorruptionError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    except OSError as exc:
+        print(f"error: cannot read ledger {args.ledger!r}: {exc}", file=sys.stderr)
+        return 1
+
+    suffix = Path(args.invoice).suffix.lower()
+    parser_for = {".csv": ledger_reconcile.parse_invoice_csv, ".json": ledger_reconcile.parse_invoice_json}
+    read_invoice = parser_for.get(suffix)
+    if read_invoice is None:
+        print(
+            f"error: cannot tell what kind of statement {args.invoice!r} is: expected a "
+            f".csv or a .json, got {suffix or '(no extension)'}. Backstop parses a "
+            "statement FILE and does not guess a format.",
+            file=sys.stderr,
+        )
+        return 1
+    try:
+        invoice = read_invoice(args.invoice)
+    except (ValueError, TypeError) as exc:
+        # A statement that does not parse is refused, never read as zeros. The
+        # message names the row and the field, and a report over a file that failed
+        # to parse would look exactly like a report over a clean one.
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    except OSError as exc:
+        print(f"error: cannot read statement {args.invoice!r}: {exc}", file=sys.stderr)
+        return 1
+
+    # One statement is one provider's, and so is one reconciliation: comparing
+    # OpenAI's statement against Anthropic's traffic would report models as unbilled
+    # that are billed on the other statement, which is a false variance.
+    events = [event for event in read.events if event.provider == invoice.provider]
+    skipped = len(read.events) - len(events)
+    try:
+        variance = ledger_reconcile.reconcile_invoice(
+            events, invoice, tolerance_usd=tolerance_usd, tolerance_pct=tolerance_pct
+        )
+        budget = ledger_reconcile.measure_error_budget(
+            events, (invoice,), tolerance_usd=tolerance_usd, tolerance_pct=tolerance_pct
+        )
+    except decimal.DecimalException as exc:
+        return _decimal_failure(
+            args, exc, command="backstop reconcile", path=args.invoice
+        )
+
+    if args.json:
+        payload = variance.to_dict()
+        payload["error_budget"] = budget.to_dict()
+        payload["ledger"] = read.to_dict()
+        payload["invoice"] = invoice.to_dict()
+        payload["events_skipped_other_provider"] = skipped
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
+
+    lines = [
+        f"# Ledger vs statement — {variance.provider}, {variance.period}",
+        "",
+        f"- **ledger file:** `{args.ledger}`",
+        f"- **statement file:** `{invoice.source}`",
+    ]
+    if skipped:
+        lines.append(
+            f"- **{skipped} event(s) in the ledger name another provider** and were not "
+            f"reconciled against this `{invoice.provider}` statement. Reconcile the "
+            "providers separately."
+        )
+    lines.extend(["", "## Ledger file integrity", ""])
+    lines.extend(ledger_export.format_file_delivery(read))
+    lines.extend(
+        [
+            "",
+            "## Reconciliation",
+            "",
+            variance.to_markdown_body(),
+            budget.to_markdown(),
+        ]
+    )
+    print("\n".join(lines))
+    return 0
 
 
 def _ledger_show_markdown(read, shown, totals, rows_total: int) -> str:
