@@ -24,7 +24,6 @@ import re
 from pathlib import Path
 
 import pytest
-import tomllib
 
 import backstop
 
@@ -32,8 +31,18 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def _pyproject_version() -> str:
-    data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    return str(data["project"]["version"])
+    """Read ``[project] version`` by pattern, not by parsing TOML.
+
+    ``tomllib`` is stdlib from 3.11 and this package supports 3.10, so importing
+    it broke collection on the two oldest interpreters in the matrix. A regex is
+    the wrong tool for TOML in general and the right one here: the assertion is
+    only that the four version strings agree, and `twine check` is what actually
+    validates the built metadata.
+    """
+    text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    m = re.search(r'^version\s*=\s*"([^"]+)"', text, re.M)
+    assert m, "no version in pyproject.toml"
+    return m.group(1)
 
 
 def _installer_version() -> str:
