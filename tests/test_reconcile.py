@@ -21,7 +21,9 @@ import csv
 import decimal
 import io
 import json
+import os
 import socket
+import tempfile
 from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
@@ -1661,3 +1663,52 @@ def test_a_built_statement_says_so_rather_than_claiming_columns(tmp_path):
     for invoice in demo_invoice():
         assert invoice.matched_fields == ()
         assert invoice.assumptions().startswith("no column provenance")
+
+
+def test_a_cost_only_export_is_named_rather_than_mistaken_for_the_wrong_provider():
+    """Neither provider ships tokens and money in one file, and that is a fact
+    a reader holding one of the real exports needs stated.
+
+    OpenAI publishes tokens from `GET /v1/organization/usage/completions` and
+    money from `GET /v1/organization/costs`; Anthropic publishes them from
+    `usage_report/messages` and `cost_report`. Both providers' dashboard exports
+    are two separate downloads. A cost export carries `amount_value` and no token
+    categories, so detection -- which works off the token category names -- used
+    to report "cannot tell which provider's statement this is", which is true and
+    useless to someone holding a legitimate file.
+    """
+    import csv
+
+    from backstop.ledger.reconcile import parse_invoice_csv
+
+    row = {
+        "start_time": "1736553600", "end_time": "1736640000",
+        "amount_value": "0.130804", "currency": "usd", "line_item": "gpt-4o",
+    }
+    with tempfile.NamedTemporaryFile("w", suffix=".csv", delete=False, newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=list(row))
+        writer.writeheader()
+        writer.writerow(row)
+        path = fh.name
+    try:
+        with pytest.raises(ValueError) as caught:
+            parse_invoice_csv(path)
+        message = str(caught.value)
+        assert "COST export" in message
+        assert "amount_value" in message
+        # It must name the export to fetch next, or the reader is stuck again.
+        assert "/v1/organization/costs" in message
+        assert "does not yet join" in message
+    finally:
+        os.unlink(path)
+
+
+def test_the_openai_costs_api_column_is_accepted():
+    """`amount_value` is the column OpenAI actually publishes, and it was
+    missing -- so the parser refused the only real spelling and demanded a field
+    that does not exist. Found by reading the provider's documentation."""
+    from backstop.ledger.reconcile import OPENAI_STATEMENT_FIELDS
+
+    assert "amount_value" in OPENAI_STATEMENT_FIELDS["charged_usd"]
+    # Most-canonical first, so it is preferred over the invented spellings.
+    assert OPENAI_STATEMENT_FIELDS["charged_usd"][0] == "amount_value"
