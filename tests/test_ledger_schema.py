@@ -1472,3 +1472,79 @@ def test_the_budgets_alias_is_never_a_stale_snapshot():
 
     with pytest.raises(AttributeError):
         backstop.definitely_not_an_attribute
+
+
+def test_no_module_binds_the_ledger_at_import_time():
+    """Structural guard for the whole class of bug, not just `backstop.budgets`.
+
+    Any module-level name assigned from `get_ledger()` captures one instance at
+    import. `reset_ledger()` then discards it, and the holder silently keeps
+    operating on a ledger that nothing else can see. Reading `get_ledger()` inside
+    a function is correct; binding it at the top level is not, and the failure is
+    invisible until a caller writes to a dead object.
+
+    Walks the AST of every shipped module rather than grepping text, so a mention
+    inside a docstring or a comment cannot be mistaken for code.
+    """
+    import ast
+    import pathlib
+
+    import backstop
+
+    root = pathlib.Path(backstop.__file__).parent
+    offenders: list[str] = []
+
+    for path in sorted(root.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        # Class and function bodies run on every call, not at import. Only the
+        # module's own top level is an import-time binding.
+        for node in tree.body:
+            if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+                continue
+            value = node.value
+            if value is None:
+                continue
+            if not any(
+                isinstance(inner, ast.Call)
+                and isinstance(inner.func, ast.Name)
+                and inner.func.id == "get_ledger"
+                for inner in ast.walk(value)
+            ):
+                continue
+            rel = path.relative_to(root)
+            offenders.append(f"{rel}:{node.lineno}")
+
+    assert not offenders, (
+        "these modules bind the ledger at import time and will go stale on "
+        f"reset_ledger(): {offenders}"
+    )
+
+
+def test_every_get_ledger_call_in_shipped_code_is_inside_a_function():
+    """The same invariant from the other side: call sites are lazy, not eager.
+
+    A bare `get_ledger()` in a function body resolves per call, which is what
+    the transport relies on. This asserts there is no module-level call, and
+    reports the location if one appears.
+    """
+    import ast
+    import pathlib
+
+    import backstop
+
+    root = pathlib.Path(backstop.__file__).parent
+    eager: list[str] = []
+
+    for path in sorted(root.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in tree.body:
+            # A top-level Expr that is just a call: `get_ledger()` on its own.
+            if (
+                isinstance(node, ast.Expr)
+                and isinstance(node.value, ast.Call)
+                and isinstance(node.value.func, ast.Name)
+                and node.value.func.id == "get_ledger"
+            ):
+                eager.append(f"{path.relative_to(root)}:{node.lineno}")
+
+    assert not eager, f"these modules call get_ledger() at import time: {eager}"
