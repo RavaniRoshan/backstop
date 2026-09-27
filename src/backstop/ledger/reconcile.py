@@ -914,12 +914,18 @@ class ModelVariance:
         rendered: dict[str, str] = {}
         for name in columns:
             value = exact[name]
-            if name in _MONEY_COLUMNS:
-                rendered[name] = ABSENT if value == ABSENT else money(Decimal(value))
+            if value is None or value == ABSENT:
+                # One branch for every absent figure, so no cell in the file can ever
+                # be a Python ``None``: the marker, or nothing. The two cases are
+                # separate — a count that is ``None`` reaches here from the record, a
+                # money figure that is absent arrives already rendered — and a
+                # blanket ``== ABSENT`` on the money branch would be a second path
+                # for the same answer.
+                rendered[name] = ABSENT
+            elif name in _MONEY_COLUMNS:
+                rendered[name] = money(Decimal(value))
             elif isinstance(value, list):
                 rendered[name] = "|".join(value) or NO_VALUE
-            elif isinstance(value, int):
-                rendered[name] = str(value)
             else:
                 rendered[name] = str(value)
         return tuple(rendered[name] for name in columns)

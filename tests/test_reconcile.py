@@ -977,6 +977,33 @@ def test_the_reconciliation_csv_is_rfc_4180_with_two_decimal_money() -> None:
     assert rows["gpt-4.1"][INVOICE_COLUMNS.index("ledger_events")] == "0"
 
 
+def test_no_cell_in_the_reconciliation_csv_is_a_python_none() -> None:
+    """A row with no figure on one side leaves several cells with no value, and the
+    one rendering path has to turn every one of them into the marker rather than
+    str() of a None — which is what a ``None`` in a CSV column is."""
+    events = [event(1, model="gpt-4o", input_tokens=1_000_000)]
+    statement = invoice(
+        line("gpt-4o", charged_usd="2.750000", categories=openai_categories(1_000_000, 0)),
+        line("gpt-4.1", charged_usd="9.990000", categories=openai_categories(0, 0)),
+        line("claude-opus-5", charged_usd="1.000000", categories=anthropic_categories(1, 0)),
+    )
+    result = reconcile_invoice(events, statement, CATALOG)
+
+    text = reconciliation_csv(result)
+
+    assert "None" not in text
+    parsed = list(csv.reader(io.StringIO(text, newline=""), lineterminator=CSV_TERMINATOR))
+    by_model = {row[1]: row for row in parsed[1:]}
+    missing = by_model["gpt-4.1"]
+    assert missing[INVOICE_COLUMNS.index("ledger_usd")] == NO_VALUE
+    assert missing[INVOICE_COLUMNS.index("variance_pct")] == NO_VALUE
+    # Every token delta is absent for a row with no ledger side, and every one of
+    # them is the marker rather than a zero.
+    for component in ("input", "output", "cache_read", "cache_write"):
+        assert missing[INVOICE_COLUMNS.index(f"{component}_token_delta")] == NO_VALUE
+        assert missing[INVOICE_COLUMNS.index(f"ledger_{component}_tokens")] == "0"
+
+
 def test_the_reconciliation_csv_column_order_is_stable_and_ends_with_the_reason() -> None:
     """Stable order is what lets finance join the file to the charge-back CSV."""
     assert INVOICE_COLUMNS[:8] == (
