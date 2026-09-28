@@ -1,3 +1,7 @@
+<p align="center">
+  <img width="80" alt="Backstop logo" src="../../docs/assets/backstop-logo.svg" />
+</p>
+
 # backstop-ai
 
 In-process LLM guardrails for the **OpenAI SDK** — a TypeScript port of the

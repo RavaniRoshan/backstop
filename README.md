@@ -1,5 +1,5 @@
 <div align="center">
-  <img width="900" alt="Backstop — in-process AI guardrails" src="docs/assets/backstop-logo.svg" />
+  <img width="80" alt="Backstop logo" src="docs/assets/backstop-logo.svg" />
 </div>
 
 <p align="center">
