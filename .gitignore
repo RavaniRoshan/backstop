@@ -35,3 +35,19 @@ docs/internal/
 # Agent goal-loop scratch state (session-local, not part of the project)
 .opencode/
 .superpowers/
+
+# Internal planning & research — not part of the published repo
+PLAN.md
+research/
+docs/planning/
+.agents/orchestrator_1/
+videos/PLAN-films.md
+
+# Build artifacts & generated media
+usecases/_build/
+usecases/_build/showcase/env/
+usecases/_build/showcase/capture/
+videos/backstop-film/snapshots/
+videos/backstop-reel/snapshots/
+videos/backstop-film/renders/
+videos/backstop-reel/renders/
