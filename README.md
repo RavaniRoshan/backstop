@@ -1,5 +1,5 @@
 <div align="center">
-  <img width="80" alt="Backstop logo" src="docs/assets/backstop-logo.svg" />
+  <img width="300" alt="Backstop — Hard limits. Real control." src="docs/assets/backstop-logo.svg" />
 </div>
 
 <p align="center">

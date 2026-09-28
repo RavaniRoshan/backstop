@@ -1,5 +1,5 @@
 <p align="center">
-  <img width="80" alt="Backstop logo" src="../../docs/assets/backstop-logo.svg" />
+  <img width="200" alt="Backstop logo" src="../../docs/assets/backstop-logo.svg" />
 </p>
 
 # backstop-ai
