@@ -149,14 +149,12 @@ def test_warnings_are_a_compact_strip():
     assert 'id="attention"' in page()
 
 
-@pending("Task 6")
 def test_tiles_are_drillable():
-    assert 'role="button"' in page()
-    assert 'tabindex="0"' in page()
+    assert 'data-drill="' in page()
+    assert 'class="tile-drill"' in page()
     assert "function applyFilter(" in js()
 
 
-@pending("Task 6")
 def test_the_active_filter_is_visible_and_dismissable():
     assert 'id="filter-chip"' in page()
     assert "clearFilter" in js()

@@ -66,53 +66,54 @@ PAGE_HTML = """<!doctype html>
 
 <div class="data-status" id="data-status" role="status" aria-live="polite">Loading telemetry...</div>
 <div class="attention" id="attention" hidden></div>
+<div class="attention" id="filter-chip" hidden></div>
 
 <main id="main" aria-busy="true">
   <section class="tiles" aria-label="Key indicators">
     <article class="tile" id="tile-budget">
-      <h2>Budget remaining</h2>
+      <h2><button class="tile-drill" type="button" data-drill="budget" aria-label="Show the rows behind budget remaining">Budget remaining</button></h2>
       <p class="status" data-slot="status">NO DATA</p>
       <p class="value" data-slot="value">--</p>
       <p class="meta" data-slot="meta"></p>
       <canvas class="spark" data-slot="spark"></canvas>
     </article>
     <article class="tile" id="tile-spend">
-      <h2>Token spend</h2>
+      <h2><button class="tile-drill" type="button" data-drill="spend" aria-label="Show the rows behind token spend">Token spend</button></h2>
       <p class="status" data-slot="status">NO DATA</p>
       <p class="value" data-slot="value">--</p>
       <p class="meta" data-slot="meta"></p>
       <canvas class="spark" data-slot="spark"></canvas>
     </article>
     <article class="tile" id="tile-prevented">
-      <h2>Spend prevented</h2>
+      <h2><button class="tile-drill" type="button" data-drill="prevented" aria-label="Show the rows behind spend prevented">Spend prevented</button></h2>
       <p class="status" data-slot="status">NO DATA</p>
       <p class="value" data-slot="value">--</p>
       <p class="meta" data-slot="meta"></p>
       <canvas class="spark" data-slot="spark"></canvas>
     </article>
     <article class="tile" id="tile-requests">
-      <h2>Requests</h2>
+      <h2><button class="tile-drill" type="button" data-drill="requests" aria-label="Show the rows behind requests">Requests</button></h2>
       <p class="status" data-slot="status">NO DATA</p>
       <p class="value" data-slot="value">--</p>
       <p class="meta" data-slot="meta"></p>
       <canvas class="spark" data-slot="spark"></canvas>
     </article>
     <article class="tile" id="tile-latency">
-      <h2>Request latency p95</h2>
+      <h2><button class="tile-drill" type="button" data-drill="latency" aria-label="Show the rows behind request latency p95">Request latency p95</button></h2>
       <p class="status" data-slot="status">NO DATA</p>
       <p class="value" data-slot="value">--</p>
       <p class="meta" data-slot="meta"></p>
       <canvas class="spark" data-slot="spark"></canvas>
     </article>
     <article class="tile" id="tile-concurrency">
-      <h2>Concurrency</h2>
+      <h2><button class="tile-drill" type="button" data-drill="concurrency" aria-label="Show the rows behind concurrency">Concurrency</button></h2>
       <p class="status" data-slot="status">NO DATA</p>
       <p class="value" data-slot="value">--</p>
       <p class="meta" data-slot="meta"></p>
       <canvas class="spark" data-slot="spark"></canvas>
     </article>
     <article class="tile" id="tile-circuit">
-      <h2>Circuit</h2>
+      <h2><button class="tile-drill" type="button" data-drill="circuit" aria-label="Show the rows behind circuit">Circuit</button></h2>
       <p class="status" data-slot="status">NO DATA</p>
       <p class="value" data-slot="value">--</p>
       <p class="meta" data-slot="meta"></p>
@@ -390,6 +391,16 @@ select:focus-visible, .theme-toggle:focus-visible, .skip:focus, a:focus-visible 
   margin: 12px 16px 0; display: flex; flex-wrap: wrap; gap: 6px;
 }
 .attention .chip { padding: 3px 7px; max-width: 100%; }
+#filter-chip .chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+#filter-chip .chip button {
+  font: inherit; font-size: 13px; line-height: 1; color: inherit;
+  background: none; border: 0; padding: 0 2px; cursor: pointer;
+}
+#filter-chip .chip button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .attention .chip.long {
   white-space: normal; overflow-wrap: anywhere; text-transform: none;
   letter-spacing: 0; font-size: 10.5px;
@@ -429,6 +440,17 @@ main { padding: 12px 16px 24px; }
    from data-health and is redundant with this token. That is also what keeps
    amber and red apart for a colour-blind reader: two states never differ by
    colour alone. */
+/* The tile title is the drill-down control: activating it filters the tables
+   below to the rows that explain that number. */
+.tile-drill {
+  font: inherit; color: inherit; letter-spacing: inherit; text-transform: inherit;
+  font-weight: inherit; background: none; border: 0; padding: 0; cursor: pointer;
+  text-align: start;
+}
+.tile-drill:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tile[data-drill-active="1"] { border-color: var(--accent); }
+.tile[data-drill-active="1"] .tile-drill { text-decoration: underline; }
+
 .tile .status {
   font-size: 10px; font-weight: 600; letter-spacing: 0.09em;
   text-transform: uppercase; color: var(--dim);
@@ -1331,6 +1353,98 @@ APP_JS = """
     host.hidden = chips.length === 0;
   }
 
+  /* --- drill-down -------------------------------------------------------- */
+
+  // Activating a tile title filters the tables below to the rows that explain
+  // that number. The filter chip shows what is active and clears it.
+  var activeFilter = null;
+
+  var FILTER_LABEL = {
+    budget: "budget", spend: "spend", prevented: "prevented calls",
+    requests: "requests", latency: "latency", concurrency: "concurrency",
+    circuit: "circuit",
+  };
+
+  function clearFilter() {
+    activeFilter = null;
+    Array.prototype.forEach.call(document.querySelectorAll(".tile"), function (tile) {
+      tile.dataset.drillActive = "0";
+    });
+    var chip = document.getElementById("filter-chip");
+    if (chip) { clear(chip); chip.hidden = true; }
+    if (latest) render(latest);
+  }
+
+  function setFilter(key) {
+    if (activeFilter === key) { clearFilter(); return; }
+    activeFilter = key;
+    Array.prototype.forEach.call(document.querySelectorAll(".tile"), function (tile) {
+      var button = tile.querySelector(".tile-drill");
+      tile.dataset.drillActive = (button && button.dataset.drill === key) ? "1" : "0";
+    });
+    var chip = document.getElementById("filter-chip");
+    if (chip) {
+      clear(chip);
+      chip.hidden = false;
+      var label = node("span", "chip", "showing " + (FILTER_LABEL[key] || key) + " only");
+      var close = node("button", null, "×");
+      close.type = "button";
+      close.setAttribute("aria-label", "clear the table filter");
+      close.addEventListener("click", function (ev) {
+        ev.stopPropagation();
+        clearFilter();
+      });
+      label.appendChild(close);
+      chip.appendChild(label);
+    }
+    if (latest) render(latest);
+  }
+
+  function applyFilter(key, snap) {
+    var sessions = snap.sessions || [];
+    var events = snap.events || [];
+    var tenants = snap.tenants || [];
+    var out = { sessions: sessions, events: events, tenants: tenants };
+    if (!key) return out;
+    var reason = function (ev) {
+      return String((ev && ev.reason) || "").toLowerCase();
+    };
+    var decision = function (ev) {
+      return String((ev && ev.decision) || "").toLowerCase();
+    };
+    if (key === "circuit") {
+      out.sessions = sessions.filter(function (row) { return row.circuit !== "closed"; });
+      out.events = events.filter(function (ev) { return reason(ev).indexOf("circuit") >= 0; });
+    } else if (key === "prevented") {
+      out.events = events.filter(function (ev) {
+        var d = decision(ev);
+        return d.indexOf("deny") === 0 || d.indexOf("block") === 0 ||
+          d.indexOf("exceed") >= 0;
+      });
+    } else if (key === "budget") {
+      out.sessions = sessions.filter(function (row) { return (row.budget_spent || 0) > 0; });
+      out.events = events.filter(function (ev) { return reason(ev).indexOf("budget") >= 0; });
+    } else if (key === "spend") {
+      out.tenants = tenants.filter(function (row) { return (row.used || 0) > 0; });
+    }
+    return out;
+  }
+
+  function bindTiles() {
+    Array.prototype.forEach.call(document.querySelectorAll(".tile-drill"), function (button) {
+      button.addEventListener("click", function (ev) {
+        ev.stopPropagation();
+        setFilter(button.dataset.drill);
+      });
+    });
+    Array.prototype.forEach.call(document.querySelectorAll(".tile"), function (tile) {
+      tile.addEventListener("click", function () {
+        var button = tile.querySelector(".tile-drill");
+        if (button) setFilter(button.dataset.drill);
+      });
+    });
+  }
+
   /* --- render ----------------------------------------------------------- */
   function render(snap) {
     var kpi = snap.kpi;
@@ -1496,12 +1610,16 @@ APP_JS = """
     axisStrip("axis-traffic", windowed.times);
     axisStrip("axis-burn", windowed.times);
 
-    fillTable("#tbl-sessions", snap.sessions, sessionRow,
-      "No live sessions. Wrap a client in this process, or run with --demo.");
-    fillTable("#tbl-events", snap.events, eventRow,
-      "No audit log configured, or no enforcement decision recorded yet.");
-    fillTable("#tbl-tenants", snap.tenants, tenantRow,
-      "No request-scoped tenant budgets registered.");
+    var filtered = applyFilter(activeFilter, snap);
+    var filterNote = activeFilter
+      ? " No rows match the " + (FILTER_LABEL[activeFilter] || activeFilter) + " filter."
+      : "";
+    fillTable("#tbl-sessions", filtered.sessions, sessionRow,
+      "No live sessions" + filterNote + " Wrap a client in this process, or run with --demo.");
+    fillTable("#tbl-events", filtered.events, eventRow,
+      "No enforcement decision recorded yet" + filterNote);
+    fillTable("#tbl-tenants", filtered.tenants, tenantRow,
+      "No request-scoped tenant budgets registered" + filterNote + ".");
     renderOutcomes(snap.outcomes);
 
     renderAttention(snap);
@@ -1703,6 +1821,7 @@ APP_JS = """
         ticker();
       });
     }
+    bindTiles();
     var windowSelect = document.getElementById("window");
     if (windowSelect) {
       windowSelect.value = String(windowSeconds);
