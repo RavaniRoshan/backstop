@@ -643,6 +643,7 @@ APP_JS = """
     var f = fit(canvas), ctx = f.ctx, w = f.w, h = f.h;
     ctx.clearRect(0, 0, w, h);
     var pts = (values || []).filter(function (v) { return !isNil(v); });
+    canvas.__hasData = pts.length >= 2;
     if (pts.length < 2) return;
     var min = Math.min.apply(null, pts), max = Math.max.apply(null, pts);
     var span = (max - min) || 1, pad = 3;
