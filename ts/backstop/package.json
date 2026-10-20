@@ -14,7 +14,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test --import tsx tests/*.test.ts"
+    "test": "node --test --import tsx tests/*.test.ts",
+    "prepare": "npm run build"
   },
   "keywords": [
     "openai",
@@ -42,5 +43,8 @@
   "homepage": "https://github.com/RavaniRoshan/backstop#readme",
   "bugs": {
     "url": "https://github.com/RavaniRoshan/backstop/issues"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

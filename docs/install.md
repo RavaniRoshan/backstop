@@ -50,6 +50,21 @@ source, which is not a pinned release. Set `BACKSTOP_NO_GITFALLBACK=1` to
 fail instead. The 0.8.0 release verification installed from PyPI directly with
 pip, not through this script.
 
+**On an externally managed Python** — Debian, Ubuntu 23.04+, Fedora — a
+`pip install --user` is refused with `error: externally-managed-environment`.
+The installer detects that and creates a virtualenv at
+`~/.local/share/backstop-venv` instead, then tells you to put it on your
+`PATH`. It does **not** reach for `--break-system-packages`: a guardrail that
+breaks the system's Python to install itself is a bad guardrail. Override the
+location with `BACKSTOP_VENV=...`.
+
+**A piped script cannot verify its own checksum.** When the script is run as
+`curl ... | sh`, it has already been executed by the time anything could
+check it, so the installer says so and points at the download-then-run flow
+above, which can verify it. The earlier version copied `$0` — which, in the
+piped flow, is the shell rather than the script — so a checksum that had
+existed would have failed every install.
+
 > The script supports macOS and Linux; on Windows use Python's official
 > installer and `pip`. Prefer a virtual environment and the pip commands above
 > over the convenience installer.
