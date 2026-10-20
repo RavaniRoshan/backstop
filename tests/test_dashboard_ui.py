@@ -38,19 +38,16 @@ def test_the_page_loads_no_external_origin():
     assert "@import" not in css()
 
 
-@pending("Task 2")
 def test_the_removed_compact_formatter_is_not_used():
     assert "function compact(" not in js()
     assert "compact(" not in js()
 
 
-@pending("Task 2")
 def test_the_axis_uses_a_nice_scale_not_max_over_four():
     assert "function niceScale(" in js()
     assert "maxV / 4" not in js()
 
 
-@pending("Task 2")
 def test_one_formatter_per_quantity():
     for name in ("count(", "axis(", "rate(", "usd(", "ms(", "dur(", "pct("):
         assert "function " + name in js()
@@ -58,15 +55,13 @@ def test_one_formatter_per_quantity():
     assert "compact(" not in js()
 
 
-@pending("Task 2")
 def test_the_traffic_chart_has_no_ad_hoc_formatter():
     assert "yFormat: function" not in js()
 
 
-@pending("Task 2")
 def test_nice_scale_produces_round_steps():
-    # The scale must land on 1/2/2.5/5/10 x 10^n.
-    assert "step = n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10" in js
+    # The scale must land on 1/2/5/10 x 10^n.
+    assert "step = n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10" in js()
 
 
 @pending("Task 3")

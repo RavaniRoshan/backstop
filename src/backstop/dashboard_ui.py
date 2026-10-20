@@ -527,30 +527,57 @@ APP_JS = """
   }
   function clear(el) { while (el && el.firstChild) el.removeChild(el.firstChild); }
 
-  /* --- formatting ------------------------------------------------------- */
+  /* --- formatting -------------------------------------------------------
+     One formatter per quantity, and one textual shape per formatter. A
+     quantity never changes shape mid-scale, so a reader never has to
+     re-learn what "12.3k" or "12.50" means. */
   function isNil(v) { return v === null || v === undefined; }
 
-  function compact(v) {
+  // At most `digits` significant digits, trailing zeros stripped, magnitude
+  // preserved: 20 stays "20", 12.5 stays "12.5", 1250 stays "1250".
+  function sig(v, digits) {
+    if (v === 0) return "0";
+    return String(Number(v.toPrecision(digits)));
+  }
+
+  function count(v) {
     if (isNil(v)) return "--";
     var abs = Math.abs(v);
-    if (abs >= 1e9) return (v / 1e9).toFixed(2) + "B";
-    if (abs >= 1e6) return (v / 1e6).toFixed(2) + "M";
-    if (abs >= 1e4) return (v / 1e3).toFixed(1) + "k";
-    if (abs >= 1000) return Math.round(v).toLocaleString();
-    if (abs >= 10) return v.toFixed(1);
-    if (abs >= 1) return v.toFixed(2);
-    return abs === 0 ? "0" : v.toFixed(3);
+    if (abs >= 1e9) return sig(v / 1e9, 3) + "B";
+    if (abs >= 1e6) return sig(v / 1e6, 3) + "M";
+    if (abs >= 1e4) return sig(v / 1e3, 3) + "k";
+    return Math.round(v).toLocaleString();
   }
-  function count(v) { return isNil(v) ? "--" : Math.round(v).toLocaleString(); }
+
+  function axis(v) {
+    if (isNil(v)) return "--";
+    var abs = Math.abs(v);
+    if (abs >= 1e9) return sig(v / 1e9, 3) + "B";
+    if (abs >= 1e6) return sig(v / 1e6, 3) + "M";
+    if (abs >= 1e4) return sig(v / 1e3, 3) + "k";
+    return sig(v, 3);
+  }
+
+  function rate(v) {
+    if (isNil(v)) return "--";
+    if (v === 0) return "0";
+    var abs = Math.abs(v);
+    if (abs >= 100) return String(Math.round(v));
+    if (abs >= 10) return String(Math.round(v * 10) / 10);
+    return String(Math.round(v * 100) / 100);
+  }
+
+  function usd(v) {
+    if (isNil(v)) return "--";
+    if (v === 0) return "$0";
+    // Magnitude-tiered on purpose: sub-cent lower bounds are real, and a
+    // lower bound that rounded to $0.00 would read as "free".
+    return "$" + (Math.abs(v) < 1 ? v.toFixed(4) : v.toFixed(2));
+  }
   function ms(v) {
     if (isNil(v)) return "--";
     if (v === 0) return "0 ms";
     return v < 10 ? v.toFixed(2) + " ms" : v.toFixed(0) + " ms";
-  }
-  function usd(v) {
-    if (isNil(v)) return "--";
-    if (v === 0) return "$0";
-    return "$" + (v < 1 ? v.toFixed(4) : v.toFixed(2));
   }
   function dur(seconds) {
     if (isNil(seconds)) return "--";
@@ -621,12 +648,17 @@ APP_JS = """
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     return { ctx: ctx, w: w, h: h };
   }
-  function niceMax(v) {
-    if (v <= 1) return 1;
-    var mag = Math.pow(10, Math.floor(Math.log10(v)));
-    var n = v / mag;
-    var step = n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10;
-    return step * mag;
+  // A scale whose step is 1, 2, 5 or 10 times a power of ten, so every
+  // gridline label is a round number an operator can do arithmetic on.
+  function niceScale(max, count) {
+    var target = count || 4;
+    if (!(max > 0)) return { max: 1, step: 0.25 };
+    var raw = max / target;
+    var mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    var n = raw / mag;
+    var step = n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10;
+    step *= mag;
+    return { max: Math.ceil(max / step) * step, step: step };
   }
   function trace(ctx, data, xAt, yAt) {
     var started = false;
@@ -729,11 +761,13 @@ APP_JS = """
       s.data.forEach(function (v) { if (!isNil(v) && v > maxV) maxV = v; });
     });
     if (!isNil(spec.threshold)) maxV = Math.max(maxV, spec.threshold);
-    maxV = niceMax(maxV <= 0 ? 1 : maxV);
+    var scale = niceScale(maxV <= 0 ? 1 : maxV, 4);
+    maxV = scale.max;
+    var step = scale.step;
 
     var xAt = function (i) { return PAD_L + (i / (t.length - 1)) * innerW; };
     var yAt = function (v) { return PAD_T + innerH - (Math.max(0, v) / maxV) * innerH; };
-    var yFmt = spec.yFormat || compact;
+    var yFmt = spec.yFormat || axis;
 
     ctx.strokeStyle = THEME.line;
     ctx.lineWidth = 1;
@@ -741,12 +775,15 @@ APP_JS = """
     ctx.font = "10px " + MONO;
     ctx.textAlign = "right";
     ctx.textBaseline = "middle";
-    for (var g = 0; g <= 4; g++) {
-      var gv = (maxV / 4) * g;
+    var tickLabels = [];
+    for (var gv = 0; gv <= maxV + step * 0.001; gv += step) {
       var gy = Math.round(yAt(gv)) + 0.5;
       ctx.beginPath(); ctx.moveTo(PAD_L, gy); ctx.lineTo(w - PAD_R, gy); ctx.stroke();
-      ctx.fillText(yFmt(gv), PAD_L - 7, gy);
+      var label = yFmt(gv);
+      tickLabels.push(label);
+      ctx.fillText(label, PAD_L - 7, gy);
     }
+    canvas.__tickLabels = tickLabels;
 
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
@@ -826,7 +863,7 @@ APP_JS = """
         var v = s.data[idx];
         rows.push({
           label: s.name,
-          value: isNil(v) ? "--" : (s.format ? s.format(v) : compact(v)),
+          value: isNil(v) ? "--" : (s.format ? s.format(v) : axis(v)),
         });
       });
       showTip(rows, point.x, point.y);
@@ -1017,12 +1054,12 @@ APP_JS = """
       }
     }
     renderTile("#tile-budget", {
-      value: compact(budget.remaining),
+      value: count(budget.remaining),
       unit: isNil(budget.remaining) ? "" : "tokens",
       health: budgetHealth,
       meta: [
         isNil(budget.pct_used) ? "no cap configured" : Math.round(budget.pct_used) + "% of cap used",
-        budget.burn_tokens_per_min ? compact(budget.burn_tokens_per_min) + "/min burn" : null,
+        budget.burn_tokens_per_min ? rate(budget.burn_tokens_per_min) + "/min burn" : null,
         isNil(budget.eta_seconds)
           ? null
           : {
@@ -1036,11 +1073,11 @@ APP_JS = """
 
     var spend = kpi.spend;
     renderTile("#tile-spend", {
-      value: isNil(spend.usd_lower_bound) ? compact(spend.tokens) : usd(spend.usd_lower_bound),
+      value: isNil(spend.usd_lower_bound) ? count(spend.tokens) : usd(spend.usd_lower_bound),
       unit: isNil(spend.usd_lower_bound) ? "tokens" : "USD",
       health: "ok",
       meta: [
-        isNil(spend.usd_lower_bound) ? null : compact(spend.tokens) + " tokens",
+        isNil(spend.usd_lower_bound) ? null : count(spend.tokens) + " tokens",
         isNil(spend.usd_lower_bound) ? "set --cost-model for USD" : "input-rate lower bound",
       ],
       spark: series.burn_tokens_per_min,
@@ -1063,7 +1100,7 @@ APP_JS = """
 
     var traffic = kpi.traffic;
     renderTile("#tile-requests", {
-      value: traffic.rps >= 10 ? traffic.rps.toFixed(0) : traffic.rps.toFixed(2),
+      value: rate(traffic.rps),
       unit: "req/s",
       health: traffic.requests > 0 ? "ok" : "idle",
       meta: [
@@ -1111,7 +1148,6 @@ APP_JS = """
       ? THEME.bad : THEME.neutral;
     chart("chart-traffic", {
       t: series.t,
-      yFormat: function (v) { return v >= 10 ? v.toFixed(0) : v.toFixed(1); },
       series: [
         { name: "requests/s", color: THEME.accent, data: series.rps, fill: true },
         { name: "prevented/s", color: preventionColor, data: series.prevented_rps },
@@ -1130,7 +1166,7 @@ APP_JS = """
           color: THEME.accent,
           data: series.burn_tokens_per_min,
           fill: true,
-          format: function (v) { return compact(v) + " tok/min"; },
+          format: function (v) { return count(v); },
         },
       ],
     });
