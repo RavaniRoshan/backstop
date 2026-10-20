@@ -81,6 +81,18 @@ def make_gateway_app(
     state = BackstopState.create(budget, config)
     app = FastAPI(title="Backstop Gateway")
 
+    # The upstream transport is built once, here, and reused for every
+    # request. It used to be built inside the handler, which meant a new
+    # `httpx.AsyncHTTPTransport()` — and therefore a new connection pool —
+    # per proxied request: no connection reuse, and a fresh TCP and TLS
+    # handshake to the provider every time. The same mistake also gave every
+    # request its own response cache (always empty), its own shadow
+    # collector (so the would_* counters always read 0 or 1), and its own
+    # alert manager (so the 24-hour alert dedup never deduplicated anything
+    # and the same alert fired on every request).
+    upstream = httpx.AsyncHTTPTransport()
+    transport = AsyncBackstopTransport(state, upstream)
+
     # Per-key rate limiters: key -> TokenBucketLimiter
     limiters: dict[str, TokenBucketLimiter] = {}
     if rate_limit_per_key and api_keys:
@@ -154,7 +166,6 @@ def make_gateway_app(
                 "pool": deadline.pool,
             }},
         )
-        transport = AsyncBackstopTransport(state, httpx.AsyncHTTPTransport())
         try:
             resp = await transport.handle_async_request(req)
         except Exception:

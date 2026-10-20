@@ -36,6 +36,22 @@ class BackstopError(Exception):
     """Base class for Backstop failures."""
 
 
+class AdmissionTimeoutError(BackstopError, TimeoutError):
+    """Raised when a request waits longer than ``queue_timeout`` for a slot.
+
+    It inherits from **both** :class:`BackstopError` and the builtin
+    :class:`TimeoutError` on purpose. A queue timeout used to be raised as the
+    bare builtin, so ``except TimeoutError`` caught it and ``except
+    BackstopError`` — the class every other enforcement failure belongs to —
+    did not. A user who wrote the one handler that covers all of Backstop's
+    failures silently missed the one that fires under load.
+
+    Inheriting from both means neither handler breaks: existing code that
+    catches ``TimeoutError`` keeps working, and code that catches
+    ``BackstopError`` starts working.
+    """
+
+
 _PROVIDER_BASES = _provider_bases()
 
 

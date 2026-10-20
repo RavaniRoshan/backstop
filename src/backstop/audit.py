@@ -35,12 +35,18 @@ class AuditLog:
         if fields:
             rec.update(fields)
         payload = json.dumps(rec, sort_keys=True, default=str).encode("utf-8")
+        # One lock for the whole record. It used to be taken twice — once to
+        # compute the chain hash and again to write the line — so another
+        # thread could append a record between the two. The file's order and
+        # the chain's order then disagreed, and `verify()`, which replays the
+        # chain in file order, failed on a log that had not been tampered
+        # with. The hash covers the previous chain value, so computing it and
+        # writing the line have to be one indivisible step.
         with self._lock:
             chain = _chain_hash(self._prev, payload, self._key)
             rec["_chain"] = chain
             self._prev = bytes.fromhex(chain)
-        line = json.dumps(rec, sort_keys=True, default=str)
-        with self._lock:
+            line = json.dumps(rec, sort_keys=True, default=str)
             if self._file is not None:
                 self._file.write(line + "\n")
                 self._file.flush()
@@ -49,20 +55,36 @@ class AuditLog:
         return rec
 
     def verify(self, lines: list[str] | None = None) -> bool:
+        """Replay the chain and report whether every record is intact.
+
+        Returns ``False`` for anything that is not an intact chain, including
+        a line that is not valid JSON, is missing its chain field, or carries a
+        chain value that is not hex. It used to raise ``KeyError`` or
+        ``ValueError`` on those, which is the opposite of what a verification
+        function is for: a tampered log is a *failed verification*, and the
+        caller has to be able to act on that.
+        """
         prev = b""
         source = lines if lines is not None else self._read_lines()
         for line in source:
             line = line.strip()
             if not line:
                 continue
-            rec = json.loads(line)
-            payload = json.dumps(
-                {k: v for k, v in rec.items() if k != "_chain"}, sort_keys=True, default=str
-            ).encode("utf-8")
-            chain = _chain_hash(prev, payload, self._key)
-            if chain != rec.get("_chain"):
+            try:
+                rec = json.loads(line)
+                payload = json.dumps(
+                    {k: v for k, v in rec.items() if k != "_chain"}, sort_keys=True, default=str
+                ).encode("utf-8")
+                chain = _chain_hash(prev, payload, self._key)
+                recorded = rec.get("_chain")
+                if not isinstance(recorded, str) or chain != recorded:
+                    return False
+                prev = bytes.fromhex(recorded)
+            except (ValueError, TypeError, KeyError, AttributeError):
+                # A line that cannot be parsed, has no chain, or has a chain
+                # that is not hex, is a broken chain. That is a failed
+                # verification, not an exception for the caller to handle.
                 return False
-            prev = bytes.fromhex(rec["_chain"])
         return True
 
     def _read_lines(self) -> list[str]:

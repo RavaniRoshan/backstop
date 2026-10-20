@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "backstop-ai"
-version = "0.7.0"
+dynamic = ["version"]
 description = "In-process OpenAI SDK backpressure, budgets, retries, circuit breaking, and metrics."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -54,6 +54,13 @@ Documentation = "https://github.com/RavaniRoshan/backstop/blob/main/docs/install
 [project.scripts]
 backstop = "backstop.cli:main"
 wedge = "wedge.cli:main"
+
+[tool.hatch.version]
+# The version lives in exactly one place — ``src/backstop/__init__.py`` — and
+# the build reads it from there. A static ``version = "..."`` here would be a
+# second place, and two places is how a wheel ends up reporting a different
+# number from the package it was built from.
+path = "src/backstop/__init__.py"
 
 [tool.hatch.build.targets.sdist]
 # An sdist is a source distribution, not a media CDN. The first cut of this list

@@ -164,21 +164,35 @@ def _run_benchmark(publish: bool) -> int:
     return 0
 
 
+def _version_string() -> str:
+    """The version, from the one place it is written.
+
+    ``backstop.__version__`` is the single source: ``pyproject.toml`` reads it
+    at build time through hatchling's dynamic version, so a wheel cannot report
+    a different number from the package it was built from.
+
+    It is deliberately *not* read from ``importlib.metadata``: that reports the
+    version the distribution was *installed* with, which in an editable
+    checkout is however old the install was — a source tree at 0.8.0 reporting
+    0.6.0 because of a stale ``.dist-info`` is exactly the drift this release
+    is removing.
+    """
+    try:
+        from . import __version__
+
+        return str(__version__)
+    except Exception:
+        return "unknown"
+
+
 def _run_doctor() -> int:
     print("# Backstop Doctor\n")
     print(f"- Python: {platform.python_version()} ({platform.system()})")
 
-    # Check if we can import backstop's version without triggering metrics
+    # The version comes from one place, so `backstop --version` and
+    # `backstop doctor` can never disagree.
     try:
-        # Read the __init__.py directly to get version
-        import pathlib
-        init_path = pathlib.Path(__file__).parent / '__init__.py'
-        content = init_path.read_text()
-        # Simple regex-like extraction of __version__
-        import re
-        version_match = re.search(r'__version__\s*=\s*["\']([^"\']+)["\']', content)
-        backstop_version = version_match.group(1) if version_match else 'unknown'
-        print(f"- Backstop: {backstop_version}")
+        print(f"- Backstop: {_version_string()}")
     except Exception as exc:
         print(f"- Backstop: NOT IMPORTABLE ({exc})")
         return 1
@@ -305,7 +319,14 @@ def _run_doctor() -> int:
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
+def build_parser() -> argparse.ArgumentParser:
+    """Build the ``backstop`` argument parser.
+
+    Split out from :func:`main` so the command surface is a value a test can
+    inspect: ``llms.txt`` lists the commands an agent may run, and the only
+    way to keep that list honest is to compare it against the parser rather
+    than against a hand-maintained copy of it.
+    """
     # Imported here rather than at module scope: every other subcommand in this
     # dispatcher works without the ledger, and an operator running `backstop
     # doctor` should not pay for importing the export module. The ledger commands
@@ -313,7 +334,16 @@ def main(argv: list[str] | None = None) -> int:
     # once, here, where they are used.
     from .ledger.export import DEFAULT_GROUP_BY as DEFAULT_LEDGER_GROUP_BY
 
-    parser = argparse.ArgumentParser(prog="backstop")
+    parser = argparse.ArgumentParser(
+        prog="backstop",
+        description="In-process token budget, circuit breaking and concurrency control.",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=_version_string(),
+        help="print the installed version and exit",
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     harness = subparsers.add_parser("harness", help="run a local mock-provider load scenario")
@@ -518,6 +548,11 @@ def main(argv: list[str] | None = None) -> int:
         help="per-model-row percentage tolerance (default 0.5; the looser of the two wins)",
     )
 
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
     args = parser.parse_args(argv)
 
     if args.command == "reconcile" and args.ledger and not args.invoice:

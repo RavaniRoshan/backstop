@@ -51,7 +51,15 @@ class TenantBudget:
             return
         with self._lock:
             self.reserved = max(0, self.reserved - ticket.tokens)
-            self.used = min(self.limit_tokens, self.used + (actual or ticket.tokens))
+            # ``actual`` is a measurement, and zero is a measurement. The old
+            # ``actual or ticket.tokens`` treated a zero as "no measurement
+            # available" and charged the *estimate* instead — so a request
+            # that really did use no tokens was billed for the estimate, and
+            # a tenant budget drifted upward for every such request. The
+            # distinction the code needs is "None" from "zero", so it is
+            # spelled out.
+            charge = ticket.tokens if actual is None else actual
+            self.used = min(self.limit_tokens, self.used + charge)
         if self.parent is not None and self.parent is not self:
             self.parent.commit(ReservationTicket(self.parent.tenant_id, ticket.tokens), actual)
 

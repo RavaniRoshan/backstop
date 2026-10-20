@@ -11,6 +11,112 @@ All notable changes to Backstop should be documented in this file.
 
 ## [Unreleased]
 
+## 0.8.0 — "One Policy, Two Drivers"
+
+The release theme is **every claim the product makes becomes true**. The same
+enforcement logic was written twice — once in the sync transport, once in the
+async one — and it drifted: the async path emitted 2 of the 7 audit decisions
+the sync path did, its semantic cache was never constructed, and its shadow
+mode consulted a different branch. A user on `AsyncOpenAI` was running a
+different guardrail from a user on `OpenAI`, and nothing in the test suite
+noticed.
+
+### Added
+
+- **A sync/async parity test** (`tests/test_parity.py`) that drives both
+  transports through the same scripted scenarios and asserts the same audit
+  decisions, the same metric names *and* labels, and the same outcome. It
+  would have caught every divergence listed below, and it makes future drift
+  impossible rather than merely unlikely.
+- **A mixed-mode admission test** (`tests/test_admission_mixed.py`) that
+  reproduces the deadlock the two-condition gate allowed.
+- **A documentation-truthfulness test** (`tests/test_docs_consistency.py`)
+  that checks the version every version-claiming document names, that
+  `llms.txt` lists every command the parser actually has, and that
+  `from backstop.ledger import *` works.
+- **`backstop --version`**, which exits 0. It did not exist, so the flag
+  exited 2 with a usage error.
+- **`AdmissionTimeoutError`**, which inherits from both `BackstopError` and
+  the builtin `TimeoutError`. A queue timeout used to be raised as the bare
+  builtin, so `except BackstopError` — the class every other enforcement
+  failure belongs to — silently missed it.
+
+### Fixed
+
+- **A sync release never woke an async waiter.** `PriorityGate` guarded one
+  set of counters and one set of queues with two independent conditions, one
+  for each path. A request could wait forever for a slot that was already
+  free.
+- **The async transport emitted 2 of 7 audit decisions.** Budget denial,
+  downgrade, fallback and circuit-open produced no audit row at all on
+  `AsyncOpenAI` / `AsyncAnthropic`.
+- **The shadow-mode audit trail was always empty.** The shadow collector
+  called `.record()` on `config.audit_sink`, which is documented as a file
+  path or a callable; a `str` has no `.record`, and the resulting
+  `AttributeError` was swallowed.
+- **Sync shadow mode denied what it promised to let through**, on the tenant
+  downgrade path — the opposite of the documented behaviour.
+- **The semantic cache was silently disabled for every async client**, while
+  `cache_semantic_hits` still incremented — a metric that could never fire.
+- **`fallback_chain_for_priority` validated only the last priority's chain.**
+  Whether a malformed chain was caught depended on the order the dict keys
+  happened to be written in.
+- **`backstop serve` built a new transport — and a new connection pool — per
+  request.** No connection reuse, a fresh TLS handshake every time, an always
+  empty response cache, shadow counters that reset on every request, and an
+  alert dedup that never deduplicated.
+- **`AuditLog.verify()` raised** `KeyError`/`ValueError` on a tampered line
+  instead of returning `False`. A verification function that raises is a
+  verification function a caller cannot act on.
+- **The audit log took its lock twice per record**, so the file's order and
+  the chain's order could disagree and an untampered log could fail its own
+  verification.
+- **`TenantBudget.commit` treated a zero token count as "no measurement"**
+  and charged the estimate instead, so a tenant budget drifted upward for
+  every request that really used nothing.
+- **The audit log's file handle was never closed** by `Backstop.close()`.
+- **`backstop.cost` was a fake module** shadowing the real `backstop/cost.py`;
+  `backstop.cost.CostEstimate` did not exist.
+- **`from backstop.ledger import *` raised `AttributeError`** — `__all__`
+  named a symbol the module never imported.
+- **`max_wrap_sessions` counted lifetime wraps, not live ones**, and was never
+  decremented, so a process that wrapped and closed a client in a loop kept
+  warning about a ceiling it was nowhere near.
+- **`Metrics` could not be constructed twice** — every instrument was
+  registered on the global default registry, so a second instance raised
+  `DuplicateTimeseries`. The registry is now injectable, and a second
+  instance takes a private registry.
+- **The semantic cache's embedding dict was never bounded**, so a process with
+  the semantic cache on leaked one vector per distinct request.
+- **`cache_semantic_hits` was missing from the OpenTelemetry mirror**, so it
+  was dropped for OTel users.
+- **The OTel gauge dict was read and written without a lock**, from
+  arbitrary request threads.
+- **`import backstop` read `~/.cache/backstop/pricing.json` on every import**
+  — a file that could never be written, because the only writer was dead code.
+- **`log_json` / `log_sink` were documented and validated but never
+  implemented.** They are removed rather than shipped as a promise.
+- **`backstop doctor` re-derived the version** by regexing `__init__.py`.
+  The version now has one source, and the build reads it from there.
+
+### Changed
+
+- **The version has one home.** `src/backstop/__init__.py` holds it, and
+  `pyproject.toml` reads it at build time through hatchling's dynamic version.
+  The npm package, the npm lockfile, `install.sh` and the `wedge` package are
+  copies, and a test now checks that they agree with the source.
+- **`RateLimitError` and `GuardrailViolationError` are exported** from
+  `backstop`. Both are raised by the transport, and a user had to know to
+  import them from a submodule to catch them.
+- **The OpenTelemetry mirror no longer keeps its own exemplar map.** An OTel
+  exemplar is a trace link the SDK attaches from the active span; the
+  hand-kept mapping was a second mechanism that nothing ever wrote to.
+
+### Removed
+
+- `log_json` and `log_sink` — documented, validated, and never implemented.
+  A configuration knob that does nothing is worse than no knob.
+
 ## 0.7.0 — 2026-09-27
 
 The **spend ledger** build: Backstop can now record what a request actually cost,

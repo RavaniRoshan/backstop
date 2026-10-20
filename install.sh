@@ -109,7 +109,7 @@ if ! python3 -m pip --version >/dev/null 2>&1; then
 fi
 
 EXTRAS="${BACKSTOP_EXTRAS:-anthropic}"
-BACKSTOP_VERSION="0.7.0"
+BACKSTOP_VERSION="0.8.0"
 SPEC="backstop-ai[$EXTRAS]==${BACKSTOP_VERSION}"
 
 info "Installing $SPEC (user scheme)..."

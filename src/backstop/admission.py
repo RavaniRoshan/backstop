@@ -9,6 +9,7 @@ from dataclasses import dataclass
 
 from .aimd import AIMDController
 from .config import BackstopConfig, Priority
+from .exceptions import AdmissionTimeoutError
 
 
 @dataclass
@@ -55,7 +56,7 @@ class PriorityGate:
                         self._condition.wait()
                     else:
                         if not self._condition.wait(timeout=effective):
-                            raise TimeoutError("gate acquire timed out")
+                            raise AdmissionTimeoutError("gate acquire timed out")
                 self._queues[priority].popleft()
                 self._active += 1
                 acquired = True
@@ -88,7 +89,7 @@ class PriorityGate:
                         else:
                             await asyncio.wait_for(self._async_condition.wait(), effective)
                     except asyncio.TimeoutError:
-                        raise TimeoutError("gate acquire timed out")
+                        raise AdmissionTimeoutError("gate acquire timed out")
                 self._queues[priority].popleft()
                 self._active += 1
                 acquired = True

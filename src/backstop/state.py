@@ -141,6 +141,11 @@ class BackstopState:
         hook, self._atexit_hook = self._atexit_hook, None
         if hook is not None:
             atexit.unregister(hook)
+        # The audit log owns a file handle when it was given a path, and
+        # nothing else ever closed it: a deployment that turned the audit log
+        # on held an open descriptor for the life of the process.
+        if self.audit is not None:
+            self.audit.close()
         return self.ledger.close()
 
     @classmethod
