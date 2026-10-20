@@ -32,6 +32,10 @@ All notable changes to Backstop should be documented in this file.
 - **No more empty panels.** Panels size to their content, a tile's sparkline
   fills the tile, and a flat series is drawn across the middle instead of
   glued to the bottom edge where it reads as a crash.
+- **The tile grid has no holes.** Seven tiles do not divide evenly, so the
+  grid is a twelve-column one: the first row takes four tiles, the last row
+  takes three of four columns each, and on a narrow screen the last tile
+  becomes a full-width status bar. No value is ever truncated to fit.
 - **Removed the Sessions "Provider" column**, which was always `--`:
   `BackstopState` has no such attribute.
 - **"vs previous window" deltas** on every tile that has a series,

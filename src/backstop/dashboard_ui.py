@@ -421,9 +421,31 @@ select:focus-visible, .theme-toggle:focus-visible, .skip:focus, a:focus-visible 
 
 /* Layout ------------------------------------------------------------------ */
 main { padding: 12px 16px 24px; }
+/* Seven tiles do not divide evenly, so the grid is a 12-column one: the
+   first row takes four tiles, and the last row takes three tiles of four
+   columns each, so the row is filled instead of leaving a hole in it. */
 .tiles {
   display: grid; gap: var(--gap);
-  grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+}
+.tile { grid-column: span 3; }
+.tiles > .tile:nth-child(5),
+.tiles > .tile:nth-child(6),
+.tiles > .tile:nth-child(7) { grid-column: span 4; }
+@media (min-width: 1401px) {
+  /* Wide enough for all seven on one row. */
+  .tiles { grid-template-columns: repeat(28, minmax(0, 1fr)); }
+  .tile { grid-column: span 4; }
+  .tiles > .tile:nth-child(5),
+  .tiles > .tile:nth-child(6),
+  .tiles > .tile:nth-child(7) { grid-column: span 4; }
+}
+@media (max-width: 1100px) {
+  .tile { grid-column: span 4; }
+  .tiles > .tile:nth-child(5),
+  .tiles > .tile:nth-child(6),
+  .tiles > .tile:nth-child(7) { grid-column: span 4; }
+  .tiles > .tile:last-child:nth-child(odd) { grid-column: span 12; }
 }
 .panels {
   display: grid; gap: var(--gap); margin-top: var(--gap);
@@ -604,9 +626,32 @@ td.mut { color: var(--muted); }
 }
 body[data-connection="error"] .data-status { border-color: var(--bad); }
 body[data-connection="stale"] .data-status { border-color: var(--warn); }
+/* Seven tiles do not divide evenly, so the last one takes the whole row
+   rather than leaving a hole in the grid. */
+@media (max-width: 1100px) {
+  /* A tile that takes the whole row reads as a status bar, not as a big
+     empty box: title, state, value and chips share one line, and the
+     sparkline runs underneath it. */
+  .tiles > .tile:last-child:nth-child(odd) {
+    flex-direction: row; flex-wrap: wrap; align-items: baseline;
+    column-gap: 10px; row-gap: 6px;
+  }
+  .tiles > .tile:last-child:nth-child(odd) h2 { order: 1; }
+  .tiles > .tile:last-child:nth-child(odd) .status { order: 2; }
+  .tiles > .tile:last-child:nth-child(odd) .value { order: 3; }
+  .tiles > .tile:last-child:nth-child(odd) .meta { order: 4; flex: 0 1 auto; }
+  .tiles > .tile:last-child:nth-child(odd) .spark {
+    /* The height is explicit: a canvas with an auto height derives it from
+       its intrinsic aspect ratio, which the canvas backing store then feeds
+       back into — and the tile grows without bound. */
+    order: 5; flex: 1 1 100%; height: 30px; min-height: 30px;
+  }
+}
 @media (max-width: 640px) {
-  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .tiles > .tile:last-child:nth-child(odd) { grid-column: 1 / -1; }
+  .tile { grid-column: span 6; }
+  .tiles > .tile:nth-child(5),
+  .tiles > .tile:nth-child(6) { grid-column: span 6; }
+  .tiles > .tile:last-child:nth-child(odd) { grid-column: span 12; }
 }
 /* On a narrow phone two tiles share the row, so the headline number has to
    shrink rather than be ellipsised: a truncated value is a wrong value. */

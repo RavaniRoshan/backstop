@@ -124,7 +124,16 @@ INVARIANTS = """
     }
   });
 
-  // 8. Nothing overflows the viewport horizontally.
+  // 8. No tile has run away: a tile is a number and a sparkline, not a
+  //    page. This catches a canvas whose auto height feeds back on itself.
+  doc.querySelectorAll('.tile').forEach((tile) => {
+    const h = tile.getBoundingClientRect().height;
+    if (h > 420) {
+      fails.push('tile ' + tile.id + ' is ' + Math.round(h) + 'px tall');
+    }
+  });
+
+  // 9. Nothing overflows the viewport horizontally.
   if (doc.documentElement.scrollWidth > window.innerWidth + 1) {
     fails.push('horizontal page overflow: ' + doc.documentElement.scrollWidth +
       ' > ' + window.innerWidth);
