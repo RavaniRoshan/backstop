@@ -142,12 +142,12 @@ def test_the_axis_uses_a_nice_scale_not_max_over_four():
 @pending("Task 7")
 def test_canvases_declare_a_text_alternative():
     assert 'role="img"' in page()
-    assert "aria-label" in js
+    assert "aria-label" in js()
 
 
 @pending("Task 7")
 def test_the_tooltip_can_be_dismissed_with_escape():
-    assert '"Escape"' in js
+    assert '"Escape"' in js()
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**
@@ -365,7 +365,7 @@ def main() -> int:
                             panel.screenshot(path=str(panels_dir / f"{name}-{theme}-{slug}.png"))
                         except Exception:
                             pass
-                    for problem in page.evaluate(INVARIANTS):
+                    for problem in page().evaluate(INVARIANTS):
                         failures.append(f"[{name}-{theme}] {problem}")
                     page.close()
             browser.close()
@@ -444,7 +444,7 @@ def test_the_traffic_chart_has_no_ad_hoc_formatter():
 
 def test_nice_scale_produces_round_steps():
     # The scale must land on 1/2/5/10 x 10^n.
-    assert "step = n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10" in js
+    assert "step = n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10" in js()
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**
@@ -633,22 +633,22 @@ this task's assertions and add any assertion that is not already listed:
 ```python
 def test_the_window_control_offers_ranges():
     assert 'id="window"' in page()
-    for value in ("1m", "5m", "15m", "all"):
-        assert 'value="%s"' % value in page()
+    for label in ("1m", "5m", "15m", "all"):
+        assert ">%s</option>" % label in page()
 
 
 def test_the_axis_is_wall_clock_not_relative():
-    assert "function absoluteTimes(" in js
-    assert 'rel(' not in js
+    assert "function absoluteTimes(" in js()
+    assert 'rel(' not in js()
 
 
 def test_the_refresh_can_be_paused():
     assert '<option value="0">off</option>' in page()
-    assert "paused" in js
+    assert "paused" in js()
 
 
 def test_the_live_region_is_only_written_on_a_transition():
-    assert "function announce(" in js
+    assert "function announce(" in js()
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**
@@ -1006,7 +1006,7 @@ this task's assertions and add any assertion that is not already listed:
 ```python
 def test_tiles_carry_a_status_token():
     assert page().count('data-slot="status"') == 7
-    assert "STATUS_TOKEN" in js
+    assert "STATUS_TOKEN" in js()
 
 
 def test_panels_do_not_stretch_to_the_tallest():
@@ -1014,8 +1014,8 @@ def test_panels_do_not_stretch_to_the_tallest():
 
 
 def test_the_sparkline_fills_the_tile():
-    assert ".tile .spark" in css
-    assert "flex: 1" in css
+    assert ".tile .spark" in css()
+    assert "flex: 1" in css()
 
 
 def test_the_sessions_table_has_no_dead_provider_column():
@@ -1023,9 +1023,9 @@ def test_the_sessions_table_has_no_dead_provider_column():
 
 
 def test_tables_have_keyboard_row_navigation():
-    assert "function tableKeyNav(" in js
+    assert "function tableKeyNav(" in js()
     for key in ("ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "Home", "End"):
-        assert '"%s"' % key in js
+        assert '"%s"' % key in js()
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**
@@ -1227,13 +1227,13 @@ this task's assertions and add any assertion that is not already listed:
 
 ```python
 def test_tiles_show_a_change_against_the_previous_window():
-    assert "function delta(" in js
-    assert "vs prev" in js
+    assert "function delta(" in js()
+    assert "vs prev" in js()
 
 
 def test_enforcement_events_are_annotated_on_the_chart():
-    assert "function eventMarks(" in js
-    assert "spec.marks" in js
+    assert "function eventMarks(" in js()
+    assert "spec.marks" in js()
 
 
 def test_warnings_are_a_compact_strip():
@@ -1454,12 +1454,12 @@ this task's assertions and add any assertion that is not already listed:
 def test_tiles_are_drillable():
     assert 'role="button"' in page()
     assert 'tabindex="0"' in page()
-    assert "function applyFilter(" in js
+    assert "function applyFilter(" in js()
 
 
 def test_the_active_filter_is_visible_and_dismissable():
     assert 'id="filter-chip"' in page()
-    assert "clearFilter" in js
+    assert "clearFilter" in js()
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**
@@ -1618,13 +1618,13 @@ this task's assertions and add any assertion that is not already listed:
 
 ```python
 def test_charts_have_a_text_alternative():
-    assert "function chartSummary(" in js
-    assert "function renderChartTable(" in js
+    assert "function chartSummary(" in js()
+    assert "function renderChartTable(" in js()
 
 
 def test_the_tooltip_is_dismissible_and_hoverable():
-    assert '"Escape"' in js
-    assert "pointer-events: auto" in css
+    assert '"Escape"' in js()
+    assert "pointer-events: auto" in css()
 
 
 def test_the_chart_can_be_read_as_a_table():
@@ -1813,12 +1813,12 @@ this task's assertions and add any assertion that is not already listed:
 
 ```python
 def test_no_data_is_distinct_from_zero():
-    assert "NO DATA" in js
-    assert "nothing blocked yet" in js
+    assert "NO DATA" in js()
+    assert "nothing blocked yet" in js()
 
 
 def test_a_sparkline_without_points_draws_a_baseline():
-    assert "no data" in js
+    assert "no data" in js()
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**

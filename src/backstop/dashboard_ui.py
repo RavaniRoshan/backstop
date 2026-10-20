@@ -39,13 +39,24 @@ PAGE_HTML = """<!doctype html>
   <div class="topbar-right">
     <span class="badge" id="mode-badge">__MODE__</span>
     <span class="conn" id="conn" data-state="pending" title="snapshot freshness"></span>
-    <span class="muted" id="updated" role="status" aria-live="polite">connecting</span>
+    <span class="muted" id="conn-label">connecting</span>
+    <span class="muted" id="updated">connecting</span>
+    <span class="chip" id="paused-chip" hidden>paused</span>
     <label class="muted refresh-field">refresh
       <select id="refresh">
         <option value="1000">1s</option>
         <option value="2000">2s</option>
         <option value="5000">5s</option>
         <option value="30000">30s</option>
+        <option value="0">off</option>
+      </select>
+    </label>
+    <label class="muted refresh-field">window
+      <select id="window">
+        <option value="60">1m</option>
+        <option value="300">5m</option>
+        <option value="900">15m</option>
+        <option value="0">all</option>
       </select>
     </label>
     <button class="badge theme-toggle" id="theme-toggle" type="button"
@@ -53,65 +64,74 @@ PAGE_HTML = """<!doctype html>
   </div>
 </header>
 
-<div class="data-status" id="data-status" role="status">Loading telemetry...</div>
+<div class="data-status" id="data-status" role="status" aria-live="polite">Loading telemetry...</div>
 <div class="warnings" id="warnings" hidden></div>
 
 <main id="main" aria-busy="true">
   <section class="tiles" aria-label="Key indicators">
     <article class="tile" id="tile-budget">
       <h2>Budget remaining</h2>
+      <p class="status" data-slot="status">NO DATA</p>
       <p class="value" data-slot="value">--</p>
       <p class="meta" data-slot="meta"></p>
-      <canvas class="spark" data-slot="spark" height="28"></canvas>
+      <canvas class="spark" data-slot="spark"></canvas>
     </article>
     <article class="tile" id="tile-spend">
       <h2>Token spend</h2>
+      <p class="status" data-slot="status">NO DATA</p>
       <p class="value" data-slot="value">--</p>
       <p class="meta" data-slot="meta"></p>
-      <canvas class="spark" data-slot="spark" height="28"></canvas>
+      <canvas class="spark" data-slot="spark"></canvas>
     </article>
     <article class="tile" id="tile-prevented">
       <h2>Spend prevented</h2>
+      <p class="status" data-slot="status">NO DATA</p>
       <p class="value" data-slot="value">--</p>
       <p class="meta" data-slot="meta"></p>
-      <canvas class="spark" data-slot="spark" height="28"></canvas>
+      <canvas class="spark" data-slot="spark"></canvas>
     </article>
     <article class="tile" id="tile-requests">
       <h2>Requests</h2>
+      <p class="status" data-slot="status">NO DATA</p>
       <p class="value" data-slot="value">--</p>
       <p class="meta" data-slot="meta"></p>
-      <canvas class="spark" data-slot="spark" height="28"></canvas>
+      <canvas class="spark" data-slot="spark"></canvas>
     </article>
     <article class="tile" id="tile-latency">
       <h2>Request latency p95</h2>
+      <p class="status" data-slot="status">NO DATA</p>
       <p class="value" data-slot="value">--</p>
       <p class="meta" data-slot="meta"></p>
-      <canvas class="spark" data-slot="spark" height="28"></canvas>
+      <canvas class="spark" data-slot="spark"></canvas>
     </article>
     <article class="tile" id="tile-concurrency">
       <h2>Concurrency</h2>
+      <p class="status" data-slot="status">NO DATA</p>
       <p class="value" data-slot="value">--</p>
       <p class="meta" data-slot="meta"></p>
-      <canvas class="spark" data-slot="spark" height="28"></canvas>
+      <canvas class="spark" data-slot="spark"></canvas>
     </article>
     <article class="tile" id="tile-circuit">
       <h2>Circuit</h2>
+      <p class="status" data-slot="status">NO DATA</p>
       <p class="value" data-slot="value">--</p>
       <p class="meta" data-slot="meta"></p>
-      <canvas class="spark" data-slot="spark" height="28"></canvas>
+      <canvas class="spark" data-slot="spark"></canvas>
     </article>
   </section>
 
   <section class="panels">
     <article class="panel span-2">
       <header><h2>Throughput and prevention</h2><span class="unit">per second</span></header>
-      <div class="chart-wrap"><canvas id="chart-traffic"></canvas></div>
+      <div class="chart-wrap"><canvas id="chart-traffic" role="img" aria-label="throughput and prevention"></canvas></div>
+      <div class="chart-axis" id="axis-traffic"></div>
       <div class="legend" id="legend-traffic"></div>
     </article>
 
     <article class="panel">
       <header><h2>Budget burn</h2><span class="unit">tokens / min</span></header>
-      <div class="chart-wrap"><canvas id="chart-burn"></canvas></div>
+      <div class="chart-wrap"><canvas id="chart-burn" role="img" aria-label="budget burn"></canvas></div>
+      <div class="chart-axis" id="axis-burn"></div>
       <div class="legend" id="legend-burn"></div>
     </article>
 
@@ -120,7 +140,7 @@ PAGE_HTML = """<!doctype html>
       <div class="table-wrap">
         <table id="tbl-sessions">
           <thead><tr>
-            <th>Session</th><th>Provider</th><th class="num">Budget used</th>
+            <th>Session</th><th class="num">Budget used</th>
             <th class="num">Remaining</th><th class="num">Concurrency</th>
             <th>Circuit</th><th class="num">Age</th>
           </tr></thead>
@@ -345,6 +365,19 @@ select:focus-visible, .theme-toggle:focus-visible, .skip:focus, a:focus-visible 
 .conn[data-state="ok"] { background: var(--ok); }
 .conn[data-state="stale"] { background: var(--warn); }
 .conn[data-state="error"] { background: var(--bad); }
+/* The dot is redundant with this label: the state is never colour alone. */
+#conn-label { min-width: 52px; }
+#paused-chip {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 40%, transparent);
+}
+
+/* Context strip: the window a chart actually shows, so the x-axis does not
+   have to carry the range on every tick. */
+.chart-axis {
+  color: var(--dim); font-size: 10px; font-family: var(--mono);
+  display: flex; justify-content: space-between; gap: 10px;
+}
 
 /* Warnings ---------------------------------------------------------------- */
 .warnings {
@@ -365,6 +398,10 @@ main { padding: 12px 16px 24px; }
 .panels {
   display: grid; gap: var(--gap); margin-top: var(--gap);
   grid-template-columns: repeat(3, minmax(0, 1fr));
+  /* A short panel stays short. Without this, the outcome-mix panel is
+     stretched to the height of the sessions table and renders two bars in
+     291 pixels of space. */
+  align-items: start;
 }
 .span-2 { grid-column: span 2; }
 @media (max-width: 900px) {
@@ -382,6 +419,19 @@ main { padding: 12px 16px 24px; }
   color: var(--muted); font-size: 10px; font-weight: 600;
   letter-spacing: 0.08em; text-transform: uppercase;
 }
+/* The status token is the text that carries the state; colour is applied
+   from data-health and is redundant with this token. That is also what keeps
+   amber and red apart for a colour-blind reader: two states never differ by
+   colour alone. */
+.tile .status {
+  font-size: 10px; font-weight: 600; letter-spacing: 0.09em;
+  text-transform: uppercase; color: var(--dim);
+  align-self: flex-start; border: 1px solid var(--line);
+  border-radius: 3px; padding: 0 5px;
+}
+.tile[data-health="ok"] .status { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
+.tile[data-health="warn"] .status { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
+.tile[data-health="bad"] .status { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, transparent); }
 .tile .value {
   font-size: 25px; font-weight: 550; letter-spacing: -0.02em; line-height: 1.1;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -394,7 +444,9 @@ main { padding: 12px 16px 24px; }
   color: var(--muted); font-size: 11px; min-height: 15px;
   display: flex; flex-wrap: wrap; gap: 4px 8px;
 }
-.tile .spark { width: 100%; height: 28px; display: block; }
+/* The sparkline grows into the tile's remaining height instead of sitting
+   as a 28px strip on the bottom edge with a void above it. */
+.tile .spark { width: 100%; flex: 1 1 34px; min-height: 34px; display: block; }
 
 /* Health states drive colour on the value, never on decoration. */
 .tile[data-health="ok"] .value { color: var(--text); }
@@ -516,6 +568,9 @@ APP_JS = """
 (function () {
   var CONFIG = document.body.dataset;
   var CADENCE = { ok: 2000 };
+  // 0 means "the whole in-memory ring": the ring is bounded, so all there is.
+  var windowSeconds = 0;
+  var paused = false;
 
   /* --- DOM helpers ------------------------------------------------------ */
   function $(sel, root) { return (root || document).querySelector(sel); }
@@ -595,17 +650,74 @@ APP_JS = """
     var d = new Date(t * 1000);
     return d.toLocaleTimeString(undefined, { hour12: false });
   }
-  function rel(offsetSeconds) {
-    var s = Math.round(offsetSeconds);
-    var m = Math.floor(s / 60);
-    return m + ":" + String(s % 60).padStart(2, "0");
+
+  /* The snapshot carries sampled_at (the absolute epoch of the newest sample)
+     and series.t (offsets from the sampler's start). Recovering the sampler's
+     start gives absolute wall-clock time for every point, so a spike can be
+     lined up with a log line instead of a moving relative label. */
+  function absoluteTimes(snap) {
+    var series = (snap && snap.series) || {};
+    var offsets = series.t || [];
+    if (!offsets.length) return [];
+    var sampledAt = snap.sampled_at;
+    if (isNil(sampledAt)) return [];
+    var last = offsets[offsets.length - 1];
+    return offsets.map(function (offset) { return sampledAt - (last - offset); });
+  }
+
+  /* The index range the selected window covers. 0 seconds means the whole
+     in-memory ring: the ring is bounded, so "all" is all there is. */
+  function windowRange(times) {
+    if (!times.length) return { from: 0, to: 0 };
+    if (!windowSeconds) return { from: 0, to: times.length - 1 };
+    var newest = times[times.length - 1];
+    var oldest = newest - windowSeconds;
+    var from = 0;
+    for (var i = 0; i < times.length; i++) {
+      if (times[i] >= oldest) { from = i; break; }
+      from = i;
+    }
+    return { from: from, to: times.length - 1 };
+  }
+
+  /* Slices the series to the selected window. The KPI values are left alone:
+     they are live gauges, not window aggregates, and pretending otherwise
+     would make the headline number disagree with the chart under it. */
+  var SERIES_KEYS = [
+    "requests", "rps", "prevented", "prevented_rps", "circuit_open_rps",
+    "provider_calls", "latency_p95_ms", "budget_remaining",
+    "burn_tokens_per_min", "concurrency_active",
+  ];
+
+  function sliceSeries(snap) {
+    var times = absoluteTimes(snap);
+    var range = windowRange(times);
+    var series = (snap && snap.series) || {};
+    var sliced = { t: (series.t || []).slice(range.from, range.to + 1) };
+    SERIES_KEYS.forEach(function (key) {
+      sliced[key] = (series[key] || []).slice(range.from, range.to + 1);
+    });
+    return {
+      series: sliced,
+      times: times.slice(range.from, range.to + 1),
+    };
   }
 
   /* --- tiles ------------------------------------------------------------ */
+
+  // The text that carries a tile's state. Colour is applied from
+  // data-health and is redundant with this token, so the state never
+  // depends on colour alone.
+  var STATUS_TOKEN = {
+    ok: "OK", warn: "WATCH", bad: "BREACH", idle: "IDLE", none: "NO DATA",
+  };
+
   function renderTile(selector, opts) {
     var tile = $(selector);
     if (!tile) return;
     tile.dataset.health = opts.health || "idle";
+    var status = $('[data-slot="status"]', tile);
+    if (status) status.textContent = STATUS_TOKEN[opts.health] || STATUS_TOKEN.idle;
 
     var value = $('[data-slot="value"]', tile);
     clear(value);
@@ -721,7 +833,7 @@ APP_JS = """
   function hideTip() { if (TIP) TIP.dataset.on = "0"; }
 
   var CHARTS = {};
-  var PAD_L = 46, PAD_R = 10, PAD_T = 10, PAD_B = 22;
+  var PAD_L = 54, PAD_R = 10, PAD_T = 10, PAD_B = 22;
 
   function chart(id, spec) {
     var canvas = document.getElementById(id);
@@ -792,7 +904,8 @@ APP_JS = """
     ticks.forEach(function (index, position) {
       if (position > 0 && ticks[position - 1] === index) return;
       ctx.textAlign = index === 0 ? "left" : index === lastIndex ? "right" : "center";
-      ctx.fillText(rel(t[index]), xAt(index), PAD_T + innerH + 5);
+      var stamp = spec.times ? spec.times[index] : null;
+      ctx.fillText(isNil(stamp) ? "--" : clock(stamp), xAt(index), PAD_T + innerH + 5);
     });
 
     if (!isNil(spec.threshold)) {
@@ -858,7 +971,11 @@ APP_JS = """
     requestAnimationFrame(function () {
       canvas.__raf = false;
       drawChart(canvas, spec);
-      var rows = [{ label: "t+" + rel(spec.t[idx]), value: "" }];
+      var stamp = spec.times ? spec.times[idx] : null;
+      var rows = [{
+        label: isNil(stamp) ? "t+" + Math.round(spec.t[idx]) + "s" : clock(stamp),
+        value: "",
+      }];
       spec.series.forEach(function (s) {
         var v = s.data[idx];
         rows.push({
@@ -885,6 +1002,24 @@ APP_JS = """
     });
   }
 
+  /* The window a chart shows, printed once in its own strip: the x-axis
+     carries wall-clock times, and the range and the unit live here. */
+  function axisStrip(id, times) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    clear(el);
+    if (!times.length) {
+      el.appendChild(node("span", null, "no samples yet"));
+      el.appendChild(node("span", null, ""));
+      el.appendChild(node("span", null, ""));
+      return;
+    }
+    var span = times[times.length - 1] - times[0];
+    el.appendChild(node("span", null, clock(times[0])));
+    el.appendChild(node("span", null, "window " + dur(span)));
+    el.appendChild(node("span", null, clock(times[times.length - 1])));
+  }
+
   /* --- tables ----------------------------------------------------------- */
   function tableAffordance(wrap) {
     var horizontal = !wrap.hidden && wrap.scrollWidth > wrap.clientWidth + 1;
@@ -900,6 +1035,40 @@ APP_JS = """
       else wrap.removeAttribute("aria-describedby");
     }
   }
+  /* The scroll hint promises arrow-key navigation, so the tables have to
+     deliver it: up/down move between rows, left/right scroll, home/end jump. */
+  function tableKeyNav(wrap) {
+    if (wrap.__keyNav) return;
+    wrap.__keyNav = true;
+    wrap.addEventListener("keydown", function (ev) {
+      var body = wrap.querySelector("tbody");
+      if (!body) return;
+      var rows = Array.prototype.slice.call(body.querySelectorAll("tr"));
+      if (!rows.length) return;
+      var active = document.activeElement;
+      var index = rows.indexOf(active ? active.closest("tr") : null);
+      if (ev.key === "ArrowDown") {
+        ev.preventDefault();
+        (rows[Math.min(rows.length - 1, index + 1)] || rows[0]).focus();
+      } else if (ev.key === "ArrowUp") {
+        ev.preventDefault();
+        (rows[Math.max(0, index - 1)] || rows[0]).focus();
+      } else if (ev.key === "ArrowLeft") {
+        ev.preventDefault();
+        wrap.scrollLeft -= 80;
+      } else if (ev.key === "ArrowRight") {
+        ev.preventDefault();
+        wrap.scrollLeft += 80;
+      } else if (ev.key === "Home") {
+        ev.preventDefault();
+        rows[0].focus();
+      } else if (ev.key === "End") {
+        ev.preventDefault();
+        rows[rows.length - 1].focus();
+      }
+    });
+  }
+
   function fillTable(selector, rows, build, emptyMessage) {
     var body = $(selector + " tbody");
     if (!body) return;
@@ -928,6 +1097,7 @@ APP_JS = """
     wrap.hidden = !empty.hidden;
     (rows || []).forEach(function (row) { body.appendChild(build(row)); });
     tableAffordance(wrap);
+    tableKeyNav(wrap);
     if (index >= 0 && !wrap.hidden) {
       var fresh = key ? Array.from(body.children).find(function (row) {
         return row.dataset.focusKey === key;
@@ -969,7 +1139,6 @@ APP_JS = """
     tr.tabIndex = -1;
     tr.dataset.focusKey = row.session_id;
     tr.appendChild(cell(row.session_id, "mono"));
-    tr.appendChild(cell(row.provider, row.provider ? "" : "mut"));
     var used = node("td", "num");
     used.appendChild(node("span", null, count(row.budget_spent)));
     if (!isNil(row.budget_limit)) {
@@ -991,6 +1160,7 @@ APP_JS = """
 
   function eventRow(ev) {
     var tr = node("tr");
+    tr.tabIndex = -1;
     tr.appendChild(cell(ev.ts ? clock(ev.ts) : null, "num mut"));
     tr.appendChild(chipCell(ev.decision, decisionTone(ev.decision)));
     tr.appendChild(cell(ev.reason, "mut"));
@@ -1002,6 +1172,7 @@ APP_JS = """
 
   function tenantRow(tenant) {
     var tr = node("tr");
+    tr.tabIndex = -1;
     tr.appendChild(cell(tenant.tenant_id, "mono"));
     tr.appendChild(cell(count(tenant.used), "num"));
     tr.appendChild(cell(count(tenant.remaining), "num"));
@@ -1042,10 +1213,11 @@ APP_JS = """
   /* --- render ----------------------------------------------------------- */
   function render(snap) {
     var kpi = snap.kpi;
-    var series = snap.series || {};
+    var windowed = sliceSeries(snap);
+    var series = windowed.series;
 
     var budget = kpi.budget;
-    var budgetHealth = "idle";
+    var budgetHealth = "none";
     if (!isNil(budget.remaining)) {
       var usedPct = budget.pct_used || 0;
       budgetHealth = usedPct >= 95 ? "bad" : usedPct >= 80 ? "warn" : "ok";
@@ -1063,8 +1235,9 @@ APP_JS = """
         isNil(budget.eta_seconds)
           ? null
           : {
+              // A projection, not an error: it is never outlined as a breach.
               text: "exhausts in " + dur(budget.eta_seconds),
-              tone: budget.eta_seconds <= 3600 ? "bad" : "warn",
+              tone: "warn",
             },
       ],
       spark: series.budget_remaining,
@@ -1075,7 +1248,7 @@ APP_JS = """
     renderTile("#tile-spend", {
       value: isNil(spend.usd_lower_bound) ? count(spend.tokens) : usd(spend.usd_lower_bound),
       unit: isNil(spend.usd_lower_bound) ? "tokens" : "USD",
-      health: "ok",
+      health: (isNil(spend.usd_lower_bound) && isNil(spend.tokens)) ? "none" : "ok",
       meta: [
         isNil(spend.usd_lower_bound) ? null : count(spend.tokens) + " tokens",
         isNil(spend.usd_lower_bound) ? "set --cost-model for USD" : "input-rate lower bound",
@@ -1088,7 +1261,8 @@ APP_JS = """
     renderTile("#tile-prevented", {
       value: count(prevention.total),
       unit: "calls",
-      health: prevention.total > 0 ? "ok" : "idle",
+      health: prevention.total > 0 ? "ok"
+        : (series.prevented_rps || []).length ? "idle" : "none",
       meta: [
         { text: count(prevention.budget_blocked) + " budget", tone: prevention.budget_blocked > 0 ? "warn" : null },
         { text: count(prevention.circuit_open) + " circuit", tone: prevention.circuit_open > 0 ? "bad" : null },
@@ -1102,7 +1276,8 @@ APP_JS = """
     renderTile("#tile-requests", {
       value: rate(traffic.rps),
       unit: "req/s",
-      health: traffic.requests > 0 ? "ok" : "idle",
+      health: traffic.requests > 0 ? "ok"
+        : (series.rps || []).length ? "idle" : "none",
       meta: [
         count(traffic.requests) + " total",
         count(traffic.provider_calls) + " provider calls",
@@ -1117,7 +1292,7 @@ APP_JS = """
     var latency = kpi.latency;
     renderTile("#tile-latency", {
       value: ms(latency.p95_ms),
-      health: "ok",
+      health: (series.latency_p95_ms || []).length ? "ok" : "none",
       meta: ["p50 " + ms(latency.p50_ms), "p99 " + ms(latency.p99_ms), "incl. provider"],
       spark: series.latency_p95_ms,
       color: THEME.accent,
@@ -1127,7 +1302,7 @@ APP_JS = """
     var saturation = concurrency.capacity ? concurrency.active / concurrency.capacity : 0;
     renderTile("#tile-concurrency", {
       value: concurrency.active + " / " + concurrency.capacity,
-      health: saturation >= 0.9 ? "warn" : "ok",
+      health: concurrency.capacity ? (saturation >= 0.9 ? "warn" : "ok") : "none",
       meta: [count(concurrency.queued) + " queued", "AIMD limit"],
       spark: series.concurrency_active,
       color: THEME.accent,
@@ -1141,13 +1316,19 @@ APP_JS = """
         count(circuit.trips) + " trips",
         { text: count(kpi.isolation.sessions) + " sessions", tone: null },
       ],
-      color: circuit.state === "open" ? THEME.bad : THEME.ok,
+      // The breaker has no rate of its own, so it charts the requests the
+      // open circuit turned away: a flat line is the honest picture of a
+      // breaker that has never opened.
+      spark: series.circuit_open_rps,
+      color: circuit.state === "open" ? THEME.bad
+        : circuit.state === "half_open" ? THEME.warn : THEME.ok,
     });
 
     var preventionColor = (series.prevented_rps || []).some(function (v) { return v > 0; })
       ? THEME.bad : THEME.neutral;
     chart("chart-traffic", {
       t: series.t,
+      times: windowed.times,
       series: [
         { name: "requests/s", color: THEME.accent, data: series.rps, fill: true },
         { name: "prevented/s", color: preventionColor, data: series.prevented_rps },
@@ -1160,6 +1341,7 @@ APP_JS = """
 
     chart("chart-burn", {
       t: series.t,
+      times: windowed.times,
       series: [
         {
           name: "burn",
@@ -1171,6 +1353,9 @@ APP_JS = """
       ],
     });
     renderLegend("legend-burn", [{ label: "tokens / min", color: THEME.accent }]);
+
+    axisStrip("axis-traffic", windowed.times);
+    axisStrip("axis-burn", windowed.times);
 
     fillTable("#tbl-sessions", snap.sessions, sessionRow,
       "No live sessions. Wrap a client in this process, or run with --demo.");
@@ -1238,13 +1423,17 @@ APP_JS = """
   function schedule() {
     clearTimeout(timer);
     timer = null;
+    // A paused dashboard does not poll. An auto-updating surface has to be
+    // pausable (WCAG 2.2.2); the sample age keeps counting so the data's age
+    // stays visible while it is paused.
+    if (paused) return;
     if (!document.hidden && !inFlight) timer = setTimeout(tick, refreshMs);
   }
 
   async function tick() {
     clearTimeout(timer);
     timer = null;
-    if (document.hidden || inFlight) return;
+    if (paused || document.hidden || inFlight) return;
     inFlight = true;
     var controller = new AbortController();
     var started = performance.now();
@@ -1291,42 +1480,72 @@ APP_JS = """
     }
   }
 
+  /* The live region is written only when the connection state *changes*, so a
+     screen reader hears "connection lost" once rather than once a second. */
+  var lastAnnounced = null;
+  function announce(message) {
+    var notice = document.getElementById("data-status");
+    if (!notice) return;
+    if (message === lastAnnounced) return;
+    lastAnnounced = message;
+    notice.textContent = message;
+    notice.hidden = !message;
+  }
+
   function ticker() {
     var el = document.getElementById("updated");
-    var notice = document.getElementById("data-status");
+    var label = document.getElementById("conn-label");
     if (!el) return;
     var age = ageNow();
     var interval = latest && Number(latest.sample_interval_s) > 0
       ? Number(latest.sample_interval_s) * 1000 : refreshMs;
-    var stale = !isNil(age) && age * 1000 > Math.max(interval, refreshMs) * 3;
+    var stale = !isNil(age) && age * 1000 > Math.max(interval, refreshMs || 1) * 3;
     var quiet = !isNil(lastContact) && performance.now() - lastContact > refreshMs * 3;
+    var state = "pending";
+    var word = "connecting";
     var message = "";
     if (disconnected) {
-      setConn("error");
-      el.textContent = "disconnected";
+      state = "error";
+      word = "lost";
       message = latest
         ? "Connection lost. Showing stale data" + (isNil(age) ? "" : " from " + dur(age) + " ago") + ". Retrying automatically."
         : "Unable to load telemetry. Retrying automatically.";
     } else if (!latest) {
-      setConn("pending");
-      el.textContent = "connecting";
+      state = "pending";
+      word = "connecting";
       message = "Loading telemetry...";
     } else if (isNil(age)) {
-      setConn(quiet ? "stale" : "pending");
-      el.textContent = "waiting for samples";
+      state = quiet ? "stale" : "pending";
+      word = "waiting";
       message = "No telemetry samples yet. Waiting for the sampler.";
     } else if (stale || quiet) {
-      setConn("stale");
-      el.textContent = "sample " + dur(age) + " old";
+      state = "stale";
+      word = "stale";
       message = "Showing stale data. Last sample " + dur(age) + " ago; waiting for fresh telemetry.";
     } else {
-      setConn("ok");
+      state = "ok";
+      word = "live";
+    }
+    if (paused) {
+      state = "pending";
+      word = "paused";
+    }
+    setConn(state);
+    if (label) label.textContent = word;
+    if (paused) {
+      el.textContent = "paused";
+    } else if (disconnected) {
+      el.textContent = "disconnected";
+    } else if (!latest) {
+      el.textContent = "connecting";
+    } else if (isNil(age)) {
+      el.textContent = "waiting for samples";
+    } else if (stale || quiet) {
+      el.textContent = "sample " + dur(age) + " old";
+    } else {
       el.textContent = age < 2 ? "sample just now" : "sample " + dur(age) + " ago";
     }
-    if (notice) {
-      notice.hidden = !message;
-      notice.textContent = message;
-    }
+    announce(message);
     document.getElementById("main").setAttribute("aria-busy", String(!latest && !disconnected));
   }
 
@@ -1342,8 +1561,21 @@ APP_JS = """
     if (select) {
       select.value = String(refreshMs);
       select.addEventListener("change", function () {
-        refreshMs = parseInt(select.value, 10) || 2000;
+        refreshMs = parseInt(select.value, 10) || 0;
+        paused = refreshMs === 0;
+        var chip = document.getElementById("paused-chip");
+        if (chip) chip.hidden = !paused;
+        if (!paused) tick();
         schedule();
+        ticker();
+      });
+    }
+    var windowSelect = document.getElementById("window");
+    if (windowSelect) {
+      windowSelect.value = String(windowSeconds);
+      windowSelect.addEventListener("change", function () {
+        windowSeconds = parseInt(windowSelect.value, 10) || 0;
+        if (latest) render(latest);
       });
     }
     // Theme cycle: auto -> dark -> light -> auto. Stored per browser so the

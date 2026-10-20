@@ -421,7 +421,6 @@ def session_view() -> dict[str, Any]:
         rows.append(
             {
                 "session_id": row.session_id,
-                "provider": str(getattr(state, "provider", "") or ""),
                 "age_s": max(0.0, now - row.created_at),
                 "budget_limit": int(total) if total is not None else None,
                 "budget_spent": spent,
@@ -609,6 +608,7 @@ class Sample:
     success: float = 0.0
     errors: float = 0.0
     prevented: float = 0.0
+    circuit_open: float = 0.0
     provider_calls: float = 0.0
     cache_hits: float = 0.0
     retries: float = 0.0
@@ -643,6 +643,10 @@ def collect_sample(sink: TelemetrySink) -> Sample:
         success=success,
         errors=errors,
         prevented=prevented,
+        # Cumulative count of requests the open circuit turned away. It is
+        # what the circuit tile charts: a breaker that has never opened has
+        # nothing to show, and a flat line is the honest picture of that.
+        circuit_open=sink.counter_total("requests", {"outcome": "circuit_open"}),
         # Every retry is an additional provider call, so it is counted here.
         provider_calls=success + errors + fallback + retries,
         cache_hits=sink.counter_total("cache_hits") + sink.counter_total("cache_semantic_hits"),
@@ -942,6 +946,7 @@ def build_snapshot(
             "rps": _rate_series(samples, "requests"),
             "prevented": [int(sample.prevented) for sample in samples],
             "prevented_rps": _rate_series(samples, "prevented"),
+            "circuit_open_rps": _rate_series(samples, "circuit_open"),
             "provider_calls": [int(sample.provider_calls) for sample in samples],
             "latency_p95_ms": [round(sample.latency_p95_ms, 4) for sample in samples],
             "budget_remaining": [sample.budget_remaining for sample in samples],

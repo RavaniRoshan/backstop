@@ -64,29 +64,24 @@ def test_nice_scale_produces_round_steps():
     assert "step = n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10" in js()
 
 
-@pending("Task 3")
 def test_the_refresh_control_can_be_turned_off():
     assert '<option value="0">off</option>' in page()
 
 
-@pending("Task 3")
 def test_the_window_control_exists():
     assert 'id="window"' in page()
 
 
-@pending("Task 3")
 def test_the_window_control_offers_ranges():
     assert 'id="window"' in page()
-    for value in ("1m", "5m", "15m", "all"):
-        assert 'value="%s"' % value in page()
+    for label in ("1m", "5m", "15m", "all"):
+        assert ">%s</option>" % label in page()
 
 
-@pending("Task 3")
 def test_the_connection_state_has_a_text_label():
     assert 'id="conn-label"' in page()
 
 
-@pending("Task 3")
 def test_the_updated_element_is_not_a_live_region():
     # Continuous aria-live announcements are a WCAG 2.2.2 / screen-reader bug:
     # the text changes every second, so the region must not be live.
@@ -94,72 +89,62 @@ def test_the_updated_element_is_not_a_live_region():
     assert 'aria-live="polite"' in page()
 
 
-@pending("Task 3")
 def test_the_axis_is_wall_clock_not_relative():
-    assert "function absoluteTimes(" in js
-    assert "rel(" not in js
+    assert "function absoluteTimes(" in js()
+    assert "rel(" not in js()
 
 
-@pending("Task 3")
 def test_the_refresh_can_be_paused():
     assert '<option value="0">off</option>' in page()
-    assert "paused" in js
+    assert "paused" in js()
 
 
-@pending("Task 3")
 def test_the_live_region_is_only_written_on_a_transition():
-    assert "function announce(" in js
+    assert "function announce(" in js()
 
 
-@pending("Task 4")
 def test_every_tile_has_a_status_token_slot():
     assert page().count('data-slot="status"') == 7
 
 
-@pending("Task 4")
 def test_the_dead_provider_column_is_gone():
     assert "<th>Provider</th>" not in page()
     assert "row.provider" not in js()
 
 
-@pending("Task 4")
 def test_tiles_carry_a_status_token():
-    assert "STATUS_TOKEN" in js
+    assert "STATUS_TOKEN" in js()
 
 
-@pending("Task 4")
 def test_panels_do_not_stretch_to_the_tallest():
     assert "align-items: start" in css()
 
 
-@pending("Task 4")
 def test_the_sparkline_fills_the_tile():
-    assert ".tile .spark" in css
-    assert "flex: 1" in css
+    assert ".tile .spark" in css()
+    assert "flex: 1" in css()
 
 
-@pending("Task 4")
 def test_the_sessions_table_has_no_dead_provider_column():
     assert "<th>Provider</th>" not in page()
 
 
-@pending("Task 4")
 def test_tables_have_keyboard_row_navigation():
-    assert "function tableKeyNav(" in js
+    assert "function tableKeyNav(" in js()
     for key in ("ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "Home", "End"):
-        assert '"%s"' % key in js
+        assert '"%s"' % key in js()
 
 
 @pending("Task 5")
 def test_tiles_show_a_change_against_the_previous_window():
-    assert "function delta(" in js
-    assert "vs prev" in js
+    assert "function delta(" in js()
+    assert "vs prev" in js()
 
 
 @pending("Task 5")
 def test_enforcement_events_are_annotated_on_the_chart():
-    assert "function eventMarks(" in js
-    assert "spec.marks" in js
+    assert "function eventMarks(" in js()
+    assert "spec.marks" in js()
 
 
 @pending("Task 5")
@@ -171,36 +156,36 @@ def test_warnings_are_a_compact_strip():
 def test_tiles_are_drillable():
     assert 'role="button"' in page()
     assert 'tabindex="0"' in page()
-    assert "function applyFilter(" in js
+    assert "function applyFilter(" in js()
 
 
 @pending("Task 6")
 def test_the_active_filter_is_visible_and_dismissable():
     assert 'id="filter-chip"' in page()
-    assert "clearFilter" in js
+    assert "clearFilter" in js()
 
 
 @pending("Task 7")
 def test_canvases_declare_a_text_alternative():
     assert 'role="img"' in page()
-    assert "aria-label" in js
+    assert "aria-label" in js()
 
 
 @pending("Task 7")
 def test_the_tooltip_can_be_dismissed_with_escape():
-    assert '"Escape"' in js
+    assert '"Escape"' in js()
 
 
 @pending("Task 7")
 def test_charts_have_a_text_alternative():
-    assert "function chartSummary(" in js
-    assert "function renderChartTable(" in js
+    assert "function chartSummary(" in js()
+    assert "function renderChartTable(" in js()
 
 
 @pending("Task 7")
 def test_the_tooltip_is_dismissible_and_hoverable():
-    assert '"Escape"' in js
-    assert "pointer-events: auto" in css
+    assert '"Escape"' in js()
+    assert "pointer-events: auto" in css()
 
 
 @pending("Task 7")
@@ -210,10 +195,10 @@ def test_the_chart_can_be_read_as_a_table():
 
 @pending("Task 8")
 def test_no_data_is_distinct_from_zero():
-    assert "NO DATA" in js
-    assert "nothing blocked yet" in js
+    assert "NO DATA" in js()
+    assert "nothing blocked yet" in js()
 
 
 @pending("Task 8")
 def test_a_sparkline_without_points_draws_a_baseline():
-    assert "no data" in js
+    assert "no data" in js()
