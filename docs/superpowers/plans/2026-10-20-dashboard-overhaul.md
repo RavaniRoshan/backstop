@@ -6,6 +6,13 @@
 (`scripts/dashboard_audit.py`) exits zero at five viewports in two themes, and
 the full test suite passes.
 
+Two defects were found by looking at the screenshots rather than by reading the
+code, and were fixed on top of the plan: a canvas whose auto height derived
+from its intrinsic aspect ratio and fed that back into the backing store, so
+the tile grew without bound; and a tile grid built on `auto-fit` that left
+holes in the second row and truncated a headline value to fit. Both are now
+covered by harness invariants.
+
 **Goal:** Turn the built-in Backstop dashboard into a trustworthy operations surface: round axis ticks, one formatter per quantity, a wall-clock time axis with a window control, a pausable refresh, no wasted space, no colour-only status, keyboard paths to every value, and a screenshot-verified layout at five viewports in two themes.
 
 **Architecture:** All three artefacts (`PAGE_HTML`, `APP_CSS`, `APP_JS`) stay as Python string literals in `src/backstop/dashboard_ui.py` and remain the exact bytes served by `/`, `/assets/app.css` and `/assets/app.js`. The JavaScript owns all formatting and chart logic; Python changes are limited to (a) removing one dead snapshot field and (b) nothing else — every new capability is derived client-side from the snapshot payload that already exists. Verification is two-layered: `scripts/dashboard_audit.py` (a Playwright screenshot + in-page assertion harness, development-only, not a dependency) and `tests/test_dashboard_ui.py` (cheap structural assertions over the shipped strings, runs in CI).
