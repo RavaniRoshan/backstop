@@ -16,24 +16,60 @@ class RequestMetadata:
     estimated_tokens: int
     endpoint: str
     metadata: dict[str, Any] = field(default_factory=dict)
+    #: The estimate split into its parts: prompt tokens and output tokens.
+    #:
+    #: A *dollar* ceiling needs the split, because input and output are
+    #: billed at different rates — often three or four times apart. Pricing
+    #: the blended total would systematically mis-reserve: too little when
+    #: the request is mostly output, too much when it is mostly input.
+    estimated_input_tokens: int = 0
+    estimated_output_tokens: int = 0
 
 
 def request_metadata(request: httpx.Request, config: BackstopConfig) -> RequestMetadata:
     body = _json_body(request)
     endpoint = request.url.path
+    input_tokens, output_tokens = estimate_token_split(body, request.content, config, endpoint)
     return RequestMetadata(
         priority=Priority.from_header(request.headers.get("X-Backstop-Priority")),
-        estimated_tokens=estimate_tokens(body, request.content, config, endpoint),
+        estimated_tokens=input_tokens + output_tokens,
         endpoint=endpoint,
+        estimated_input_tokens=input_tokens,
+        estimated_output_tokens=output_tokens,
     )
 
 
 def estimate_tokens(body: Any, raw: bytes, config: BackstopConfig, endpoint: str = "") -> int:
+    """The estimated token count for a request.
+
+    Kept as the total, so every existing caller is unaffected. The split it
+    is made of is available from :func:`estimate_token_split`.
+    """
+    input_tokens, output_tokens = estimate_token_split(body, raw, config, endpoint)
+    return input_tokens + output_tokens
+
+
+def estimate_token_split(
+    body: Any, raw: bytes, config: BackstopConfig, endpoint: str = ""
+) -> tuple[int, int]:
+    """The estimated ``(input_tokens, output_tokens)`` for a request.
+
+    The total is the same figure :func:`estimate_tokens` has always returned;
+    this is the same estimate, itemised, so a caller that prices in dollars
+    can apply the input and output rates separately instead of guessing at a
+    blend.
+
+    The two parts sum to at least the total's floor. When the body is larger
+    than the character count suggests — a large JSON payload, an image, a
+    tool schema — the difference is charged to the input side, because
+    unknown input is what the excess is.
+    """
     if body is None:
-        return max(1, int(len(raw) / (config.chars_per_token or 4.0)))
+        whole = max(1, int(len(raw) / (config.chars_per_token or 4.0)))
+        return whole, 0
 
     if "/v1/messages" in endpoint and isinstance(body, Mapping):
-        return _estimate_anthropic_tokens(body, raw, config)
+        return _estimate_anthropic_split(body, raw, config)
 
     prompt_chars = _prompt_chars(body)
     output_tokens = _configured_output_tokens(body, config)
@@ -48,10 +84,24 @@ def estimate_tokens(body: Any, raw: bytes, config: BackstopConfig, endpoint: str
     else:
         prompt_tokens = int(prompt_chars / config.chars_per_token)
 
-    return max(1, prompt_tokens + output_tokens, body_floor)
+    total = max(1, prompt_tokens + output_tokens, body_floor)
+    # The two parts sum to exactly ``total`` — the same figure
+    # ``estimate_tokens`` has always returned — so splitting the estimate
+    # cannot change what a token budget admits. The floor is input the
+    # character count could not see, so it belongs on the input side.
+    input_tokens = total - output_tokens
+    return input_tokens, output_tokens
 
 
 def _estimate_anthropic_tokens(body: dict, raw: bytes, config: BackstopConfig) -> int:
+    """The total for an Anthropic ``/v1/messages`` body."""
+    input_tokens, output_tokens = _estimate_anthropic_split(body, raw, config)
+    return input_tokens + output_tokens
+
+
+def _estimate_anthropic_split(
+    body: dict, raw: bytes, config: BackstopConfig
+) -> tuple[int, int]:
     messages = body.get("messages", [])
     prompt_chars = 0
     for msg in messages:
@@ -75,7 +125,11 @@ def _estimate_anthropic_tokens(body: dict, raw: bytes, config: BackstopConfig) -
 
     prompt_tokens = int(prompt_chars / config.chars_per_token)
     body_floor = int(len(raw) / config.chars_per_token)
-    return max(1, prompt_tokens + output_tokens, body_floor)
+    total = max(1, prompt_tokens + output_tokens, body_floor)
+    # The two parts sum to exactly ``total``, so the split cannot change
+    # what a token budget admits.
+    input_tokens = total - output_tokens
+    return input_tokens, output_tokens
 
 
 class TokenUsage(NamedTuple):

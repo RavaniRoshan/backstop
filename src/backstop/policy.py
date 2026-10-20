@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import time
+from decimal import ROUND_HALF_UP, Decimal, localcontext
 from typing import Any
 
 import httpx
@@ -37,12 +38,13 @@ from .config import BackstopConfig, Priority
 from .exceptions import (
     BudgetExceededError,
     GuardrailViolationError,
+    PriceUnavailableError,
     RateLimitError,
 )
 from .extract import RequestMetadata
 from .ledger import get_ledger
 from .metrics import get_metrics
-from .pricing_catalog import downgrade_target
+from .pricing_catalog import LEDGER_CONTEXT, MONEY_PLACES, downgrade_target
 from .retry import is_retryable_status
 
 #: The budget is exhausted and the request was rewritten to a cheaper model.
@@ -146,6 +148,68 @@ class Policy:
             remaining = self.state.budget.remaining or 0
         raise BudgetExceededError(
             f"request estimate {meta.estimated_tokens} tokens exceeds remaining budget {remaining}"
+        )
+
+    # ------------------------------------------------------------------
+    # Dollars
+    # ------------------------------------------------------------------
+
+    def estimate_usd(self, meta: RequestMetadata, model: str) -> Decimal | None:
+        """What this request is expected to cost, or ``None`` if it cannot be priced.
+
+        The estimate is priced from the *split* — input tokens at the input
+        rate, output tokens at the output rate — because the two rates are
+        often three or four times apart, and pricing a blended total would
+        mis-reserve in both directions.
+
+        ``None`` means the catalog has no price for this model, which is a
+        different answer from zero.
+        """
+        prices = self.state.prices
+        if prices is None:
+            return None
+        entry = prices.resolve_model(model)
+        if entry is None:
+            return None
+        with localcontext(LEDGER_CONTEXT):
+            cost = (
+                Decimal(meta.estimated_input_tokens) * entry.input_per_mtok_usd
+                + Decimal(meta.estimated_output_tokens) * entry.output_per_mtok_usd
+            ) / Decimal(1_000_000)
+            return cost.quantize(
+                Decimal(1).scaleb(-MONEY_PLACES), rounding=ROUND_HALF_UP
+            )
+
+    def require_price(self, model: str) -> None:
+        """Refuse a request whose model cannot be priced, under a dollar ceiling.
+
+        A dollar ceiling is only enforceable for a model the catalog prices.
+        A model it does not carry would slip past the ceiling unmeasured,
+        and a ceiling with a hole in it is not a ceiling.
+
+        The default is to refuse. A deployment that would rather let the hole
+        stand says so with ``budget_usd_unpriced_policy="allow"``, and the
+        request is then recorded as unpriced — which is what the ledger
+        already does with every unpriced request: a visible hole rather than
+        a plausible wrong number.
+
+        :raises PriceUnavailableError: when the model cannot be priced and
+            the policy is ``"deny"``.
+        """
+        if self.state.config.budget_usd is None:
+            return
+        if self.state.config.budget_usd_unpriced_policy == "allow":
+            return
+        prices = self.state.prices
+        if prices is not None and prices.resolve_model(model) is not None:
+            return
+        raise PriceUnavailableError(
+            f"model {model!r} has no price in the catalog, so a dollar budget "
+            "cannot be enforced for it. Add a price for it to the catalog file, "
+            "or set budget_usd_unpriced_policy='allow' to let unpriced models "
+            "through and record them as unpriced.",
+            model=model,
+            catalog_path=self.state.config.price_catalog_path,
         )
 
     def try_downgrade(self, request: httpx.Request, body: dict) -> bool:

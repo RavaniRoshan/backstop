@@ -4,6 +4,7 @@ import os
 import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
+from decimal import Decimal
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
@@ -197,6 +198,35 @@ class BackstopConfig:
     ledger_path: str | None = None
     ledger_memory_events: int = 10_000
 
+    # --- Dollar budgets ---
+    #: A spend ceiling in US dollars, on top of the token ceiling.
+    #:
+    #: A token budget says how much *work* a session may do; a dollar budget
+    #: says how much it may *cost*. The two answer different questions — a
+    #: team that prices its requests differently per model cannot express
+    #: its budget in tokens without doing the arithmetic themselves, and
+    #: doing it themselves is how the ceiling stops matching the bill.
+    #:
+    #: The figure is a :class:`~decimal.Decimal`. A float cannot represent
+    #: most decimal fractions of a dollar exactly, and a ceiling that is a
+    #: cent away from the truth is a ceiling that lets the wrong request
+    #: through.
+    #:
+    #: Setting this **requires the price catalog**, so it turns the ledger
+    #: on: a dollar ceiling is only enforceable if the cost of every
+    #: request is measured, and the ledger is what measures it.
+    budget_usd: Decimal | None = None
+    #: What to do when a request's model has no price, and a dollar ceiling
+    #: is in force: ``"deny"`` (the default) or ``"allow"``.
+    #:
+    #: ``"deny"`` refuses the request, because a ceiling with an unpriced
+    #: hole in it is not a ceiling. ``"allow"`` lets it through and records
+    #: it as unpriced, which is what the ledger does with every unpriced
+    #: request — a visible hole rather than a plausible wrong number. The
+    #: choice is the deployment's, and it is a choice with a name, because
+    #: "it silently did not enforce" is not one.
+    budget_usd_unpriced_policy: str = "deny"
+
     # --- Price catalog (Ledger Foundation) ---
     # A JSON file of negotiated rates, layered over the bundled list prices by
     # ``PriceCatalog.from_file``. Checked for existence here, at construction, so
@@ -330,6 +360,21 @@ class BackstopConfig:
                     f"price_catalog_path does not exist or is not a file: "
                     f"{self.price_catalog_path!r}"
                 )
+        if self.budget_usd is not None:
+            if not isinstance(self.budget_usd, Decimal):
+                raise TypeError(
+                    f"budget_usd must be a Decimal, got {type(self.budget_usd).__name__}. "
+                    "A float cannot represent most fractions of a dollar exactly, "
+                    "and a ceiling that is a cent out is a ceiling that lets the "
+                    "wrong request through."
+                )
+            if self.budget_usd < 0:
+                raise ValueError("budget_usd must be >= 0")
+        if self.budget_usd_unpriced_policy not in ("deny", "allow"):
+            raise ValueError(
+                "budget_usd_unpriced_policy must be 'deny' or 'allow', got "
+                f"{self.budget_usd_unpriced_policy!r}"
+            )
         if not isinstance(self.detection_enabled, bool):
             raise TypeError(
                 f"detection_enabled must be a bool, got "

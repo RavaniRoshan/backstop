@@ -592,6 +592,33 @@ class PriceCatalog:
             if include_bundled
             else {}
         )
+        # An index by model name alone, for the caller that does not know
+        # which provider publishes the model it is pricing. The layers stay
+        # keyed by (provider, model) — an entry filed under the wrong
+        # provider is still not found by `resolve` — but a transport
+        # estimating a request's cost before the request is sent only has a
+        # model name, and needs the other half of that: find the provider
+        # that publishes it.
+        self._by_model: dict[str, PriceEntry] = {}
+        for layer in (self._user, self._bundled):
+            for (_provider, model), entry in layer.items():
+                self._by_model.setdefault(model, entry)
+
+    def resolve_model(self, model: str) -> PriceEntry | None:
+        """Return the price for ``model``, whichever provider publishes it.
+
+        The user layer is searched first, for every provider, so a
+        negotiated price always outranks a bundled one. The model-name
+        tiers of :func:`model_candidates` are tried in the same order as
+        everywhere else, so a dated snapshot resolves to its family's price.
+        """
+        if not isinstance(model, str):
+            raise TypeError(f"model must be a str, got {type(model).__name__}")
+        for name in model_candidates(model):
+            entry = self._by_model.get(name)
+            if entry is not None:
+                return entry
+        return None
 
     def resolve(self, provider: str, model: str) -> PriceEntry | None:
         """Return the price for ``provider``'s ``model``, or ``None`` if unknown.

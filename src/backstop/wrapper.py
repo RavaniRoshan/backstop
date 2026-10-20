@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import dataclasses
+from decimal import Decimal
 from typing import Any, TypeVar
 
 from ._httpcompat import HTTPX, compat_for
@@ -50,12 +52,30 @@ class Backstop:
     """
 
     @staticmethod
-    def wrap(client: T, budget: int | None = 50_000, config: BackstopConfig | None = None) -> T:
+    def wrap(
+        client: T,
+        budget: int | None = 50_000,
+        config: BackstopConfig | None = None,
+        budget_usd: Decimal | None = None,
+    ) -> T:
+        """Wrap a client so its requests are bounded.
+
+        ``budget`` is a token ceiling and ``budget_usd`` is a dollar one.
+        They are independent: a request is admitted only if it fits under
+        both. A ``Decimal`` is required for the dollar figure, because a
+        float cannot represent most fractions of a dollar exactly.
+        """
         existing = getattr(client, "_backstop_state", None)
         if existing is not None:
             return client
 
         resolved_config = config or BackstopConfig()
+        if budget_usd is not None and not isinstance(budget_usd, Decimal):
+            raise TypeError(
+                f"budget_usd must be a Decimal, got {type(budget_usd).__name__}"
+            )
+        if budget_usd is not None and resolved_config.budget_usd is None:
+            resolved_config = dataclasses.replace(resolved_config, budget_usd=budget_usd)
         _warn_if_over_concurrency_ceiling(resolved_config)
 
         cls = client.__class__

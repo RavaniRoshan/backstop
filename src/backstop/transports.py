@@ -4,6 +4,7 @@ import asyncio
 import json
 import time
 from collections.abc import Awaitable, Callable
+from decimal import Decimal
 from typing import Any
 
 import httpx
@@ -50,12 +51,18 @@ _PROVIDER_HOSTS = (("openai.com", "openai"), ("anthropic.com", "anthropic"))
 #: and is wrong, and the honest row is an unpriced one an operator can see. A
 #: deployment on such a host can still get a price by filing an entry for
 #: ``"unknown"`` in its own ``price_catalog_path``.
-UNKNOWN_PROVIDER = "unknown"
 
 #: Recorded as the model when neither the request body nor the response named
 #: one. ``SpendEvent`` refuses an empty model, and "unknown" is a fact a
 #: chargeback can be filtered on; a plausible-looking guess is not.
 UNKNOWN_MODEL = "unknown"
+
+
+#: The provider recorded for a request whose host named neither of the two
+#: providers the catalog prices. It is a real answer — the request went
+#: somewhere — and it means the event is *unpriced*, because the catalog is
+#: keyed by (provider, model) and the provider is what it does not know.
+UNKNOWN_PROVIDER = "unknown"
 
 
 def _provider_for_host(host: str) -> str:
@@ -155,15 +162,24 @@ def _reconcile(
     *,
     success: bool,
     downgraded: bool = False,
+    actual_usd: Decimal | None = None,
 ) -> None:
+    """Settle a reservation against what the request actually cost.
+
+    ``actual_usd`` is the exact cost the ledger priced. ``None`` means there
+    is no measurement — the model could not be priced, or the ledger is off —
+    and the estimate stands.
+    """
     if reservation is None:
         if downgraded and tenant_budget is not None and usage is not None and success:
-            tenant_budget.commit(LedgerReservation(getattr(tenant_budget, "tenant_id", ""), 0), usage)
+            tenant_budget.commit(
+                LedgerReservation(getattr(tenant_budget, "tenant_id", ""), 0), usage, actual_usd
+            )
         return
     if isinstance(reservation, LedgerReservation) and tenant_budget is not None:
-        tenant_budget.commit(reservation, usage if success else 0)
+        tenant_budget.commit(reservation, usage if success else 0, actual_usd)
     elif isinstance(reservation, Reservation):
-        global_budget.reconcile(reservation, usage, success=success)
+        global_budget.reconcile(reservation, usage, success=success, actual_usd=actual_usd)
 
 
 async def _areconcile(
@@ -174,6 +190,7 @@ async def _areconcile(
     *,
     success: bool,
     downgraded: bool = False,
+    actual_usd: Decimal | None = None,
 ) -> None:
     """Async twin of :func:`_reconcile`.
 
@@ -184,12 +201,16 @@ async def _areconcile(
     """
     if reservation is None:
         if downgraded and tenant_budget is not None and usage is not None and success:
-            tenant_budget.commit(LedgerReservation(getattr(tenant_budget, "tenant_id", ""), 0), usage)
+            tenant_budget.commit(
+                LedgerReservation(getattr(tenant_budget, "tenant_id", ""), 0), usage, actual_usd
+            )
         return
     if isinstance(reservation, LedgerReservation) and tenant_budget is not None:
-        tenant_budget.commit(reservation, usage if success else 0)
+        tenant_budget.commit(reservation, usage if success else 0, actual_usd)
     elif isinstance(reservation, Reservation):
-        await global_budget.areconcile(reservation, usage, success=success)
+        await global_budget.areconcile(
+            reservation, usage, success=success, actual_usd=actual_usd
+        )
 
 
 def _record_spend_if_enabled(
@@ -203,7 +224,7 @@ def _record_spend_if_enabled(
     success: bool,
     usage: object,
     outcome: str | None = None,
-) -> None:
+) -> "Decimal | None":
     """The one line the ledger costs on the request path.
 
     Both transports call exactly this, and with the ledger and the detector both
@@ -213,8 +234,8 @@ def _record_spend_if_enabled(
     """
     config = state.config
     if not (config.ledger_enabled or config.detection_enabled):
-        return
-    _record_spend(
+        return None
+    return _record_spend(
         state,
         request,
         body=body,
@@ -240,7 +261,7 @@ def _record_spend(
     retries: int,
     outcome: str,
     usage: object,
-) -> None:
+) -> "Decimal | None":
     """Build, price, observe and submit one spend event. Never raises, never blocks.
 
     The whole ledger integration is this function plus the call site's
@@ -346,8 +367,14 @@ def _record_spend(
         state.detector.observe(event)
         if state.config.ledger_enabled:
             state.ledger.submit(event)
+        # The exact cost, for the caller to settle a dollar reservation
+        # against. ``None`` when the model could not be priced — a visible
+        # hole, not a zero.
+        breakdown = getattr(event, "cost", None)
+        return None if breakdown is None else breakdown.total_usd
     except Exception:
         state.ledger_errors += 1
+        return None
 
 
 def _model_for(usage: object, body: object) -> str:
@@ -524,9 +551,10 @@ class BackstopTransport:
             tenant_budget = ledger.get(tenant_id) if ledger else None
         circuit = self.state.circuit_for(tenant_id)
 
+        usd_estimate = self._dollar_estimate(meta, body, tenant_budget)
         downgraded = False
         try:
-            reservation = self._reserve(tenant_budget, meta.estimated_tokens)
+            reservation = self._reserve(tenant_budget, meta.estimated_tokens, usd_estimate)
         except BudgetExceededError:
             action = self._policy.budget_exhausted(
                 meta, tenant_budget, body, request, tenant_id
@@ -534,8 +562,11 @@ class BackstopTransport:
             if action == DOWNGRADE:
                 downgraded = True
                 meta = request_metadata(request, self.state.config)
+                usd_estimate = self._dollar_estimate(meta, body, tenant_budget)
                 try:
-                    reservation = self._reserve(tenant_budget, meta.estimated_tokens)
+                    reservation = self._reserve(
+                        tenant_budget, meta.estimated_tokens, usd_estimate
+                    )
                 except BudgetExceededError:
                     # The cheaper model did not fit either. The request still
                     # proceeds, without a reservation.
@@ -630,11 +661,11 @@ class BackstopTransport:
                 if self.state.quota is not None:
                     self.state.quota.ingest(dict(response.headers))
                     self.state.quota.adjust(self.state.aimd)
-                _reconcile(tenant_budget, self.state.budget, reservation, usage, success=success, downgraded=downgraded)
-                self._policy.record_outcome(response.status_code, success=success, circuit=circuit)
-                # Immediately after the reconcile block, so the ledger and the
-                # budget are reading the same response.
-                _record_spend_if_enabled(
+                # The spend record runs first, so its exact cost is available
+                # to settle the dollar reservation against. Both read the same
+                # response, so the ledger and the budget never disagree about
+                # what a request cost.
+                actual_usd = _record_spend_if_enabled(
                     self.state,
                     request,
                     body=body,
@@ -644,6 +675,16 @@ class BackstopTransport:
                     success=success,
                     usage=usage_split,
                 )
+                _reconcile(
+                    tenant_budget,
+                    self.state.budget,
+                    reservation,
+                    usage,
+                    success=success,
+                    downgraded=downgraded,
+                    actual_usd=actual_usd,
+                )
+                self._policy.record_outcome(response.status_code, success=success, circuit=circuit)
                 self._policy.alert_on_spend(tenant_id, tenant_budget)
                 if body is not None and usage is not None:
                     self._policy.cache_set(body, response.content, usage, dict(response.headers))
@@ -724,16 +765,43 @@ class BackstopTransport:
     def alerts(self, manager: object | None) -> None:
         self._policy.alerts = manager
 
-    def _reserve(self, tenant_budget: object | None, tokens: int) -> object:
+    def _dollar_estimate(
+        self, meta: RequestMetadata, body: object, tenant_budget: object | None
+    ) -> Decimal:
+        """What this request is expected to cost, when a dollar ceiling is in force.
+
+        Zero when there is no dollar ceiling: the token ceiling alone does
+        not need a price, and a process that has not asked for a dollar
+        ceiling should not pay for a price lookup on every request.
+
+        When there *is* a dollar ceiling, the model has to be priceable —
+        a ceiling with an unpriced hole in it is not a ceiling — so
+        :meth:`Policy.require_price` refuses the request if it is not.
+        """
+        if self.state.config.budget_usd is None:
+            if tenant_budget is None or getattr(tenant_budget, "limit_usd", None) is None:
+                return Decimal("0.000000")
+        model = body.get("model") if isinstance(body, dict) else None
+        if not isinstance(model, str) or not model:
+            return Decimal("0.000000")
+        self._policy.require_price(model)
+        return self._policy.estimate_usd(meta, model) or Decimal("0.000000")
+
+    def _reserve(
+        self, tenant_budget: object | None, tokens: int, usd: Decimal = Decimal("0.000000")
+    ) -> object:
         """Hold the request's budget.
 
         The caller does this, not the Policy, because reserving may be
         asynchronous — the async transport has to await a shared Redis budget
         rather than block the event loop on it.
+
+        Both ceilings are checked: the token one and, when there is one, the
+        dollar one.
         """
         if tenant_budget is not None:
-            return tenant_budget.reserve(tokens)
-        return self.state.budget.reserve(tokens)
+            return tenant_budget.reserve(tokens, usd)
+        return self.state.budget.reserve(tokens, usd)
 
     def close(self) -> None:
         self._transport.close()
@@ -773,14 +841,9 @@ class BackstopTransport:
             usage_split = response_usage(response)
             usage = None if usage_split is None else usage_split.total
             success = response.status_code < 400
-            _reconcile(tenant_budget, self.state.budget, reservation, usage, success=success)
-            self._policy.record_outcome(response.status_code, success=success, circuit=circuit)
-            # A fallback that succeeded is a request that cost money, so it is
-            # billed as its own event with outcome "fallback" — the reason
-            # ``SpendEvent`` declares that outcome at all. Recorded here rather
-            # than in the caller's return path because this is the only place the
-            # fallback's own model and usage exist.
-            _record_spend_if_enabled(
+            # The spend record runs first, so its exact cost settles the
+            # dollar reservation.
+            actual_usd = _record_spend_if_enabled(
                 self.state,
                 fb_request,
                 body=_json_body(fb_request),
@@ -791,6 +854,20 @@ class BackstopTransport:
                 usage=usage_split,
                 outcome="fallback",
             )
+            _reconcile(
+                tenant_budget,
+                self.state.budget,
+                reservation,
+                usage,
+                success=success,
+                actual_usd=actual_usd,
+            )
+            self._policy.record_outcome(response.status_code, success=success, circuit=circuit)
+            # A fallback that succeeded is a request that cost money, so it is
+            # billed as its own event with outcome "fallback" — the reason
+            # ``SpendEvent`` declares that outcome at all. Recorded above,
+            # because this is the only place the fallback's own model and
+            # usage exist.
             self._policy.alert_on_spend(tenant_id, tenant_budget)
             tracker.completed_at = time.monotonic()
             self._policy.observe_request(meta.endpoint, meta.priority, tracker.created_at, "fallback")
@@ -927,9 +1004,12 @@ class AsyncBackstopTransport:
             tenant_budget = ledger.get(tenant_id) if ledger else None
         circuit = self.state.circuit_for(tenant_id)
 
+        usd_estimate = self._dollar_estimate(meta, body, tenant_budget)
         downgraded = False
         try:
-            reservation = await self._areserve(tenant_budget, meta.estimated_tokens)
+            reservation = await self._areserve(
+                tenant_budget, meta.estimated_tokens, usd_estimate
+            )
         except BudgetExceededError:
             action = self._policy.budget_exhausted(
                 meta, tenant_budget, body, request, tenant_id
@@ -937,8 +1017,11 @@ class AsyncBackstopTransport:
             if action == DOWNGRADE:
                 downgraded = True
                 meta = request_metadata(request, self.state.config)
+                usd_estimate = self._dollar_estimate(meta, body, tenant_budget)
                 try:
-                    reservation = await self._areserve(tenant_budget, meta.estimated_tokens)
+                    reservation = await self._areserve(
+                        tenant_budget, meta.estimated_tokens, usd_estimate
+                    )
                 except BudgetExceededError:
                     # The cheaper model did not fit either. The request still
                     # proceeds, without a reservation.
@@ -1026,9 +1109,11 @@ class AsyncBackstopTransport:
                 if self.state.quota is not None:
                     self.state.quota.ingest(dict(response.headers))
                     self.state.quota.adjust(self.state.aimd)
-                await _areconcile(tenant_budget, self.state.budget, reservation, usage, success=success, downgraded=downgraded)
-                self._policy.record_outcome(response.status_code, success=success, circuit=circuit)
-                _record_spend_if_enabled(
+                # The spend record runs first, so its exact cost is available
+                # to settle the dollar reservation against. Both read the same
+                # response, so the ledger and the budget never disagree about
+                # what a request cost.
+                actual_usd = _record_spend_if_enabled(
                     self.state,
                     request,
                     body=body,
@@ -1038,6 +1123,16 @@ class AsyncBackstopTransport:
                     success=success,
                     usage=usage_split,
                 )
+                await _areconcile(
+                    tenant_budget,
+                    self.state.budget,
+                    reservation,
+                    usage,
+                    success=success,
+                    downgraded=downgraded,
+                    actual_usd=actual_usd,
+                )
+                self._policy.record_outcome(response.status_code, success=success, circuit=circuit)
                 self._policy.alert_on_spend(tenant_id, tenant_budget)
                 if body is not None and usage is not None:
                     self._policy.cache_set(body, response.content, usage, dict(response.headers))
@@ -1118,7 +1213,31 @@ class AsyncBackstopTransport:
     def alerts(self, manager: object | None) -> None:
         self._policy.alerts = manager
 
-    async def _areserve(self, tenant_budget: object | None, tokens: int) -> object:
+    def _dollar_estimate(
+        self, meta: RequestMetadata, body: object, tenant_budget: object | None
+    ) -> Decimal:
+        """What this request is expected to cost, when a dollar ceiling is in force.
+
+        Zero when there is no dollar ceiling: the token ceiling alone does
+        not need a price, and a process that has not asked for a dollar
+        ceiling should not pay for a price lookup on every request.
+
+        When there *is* a dollar ceiling, the model has to be priceable —
+        a ceiling with an unpriced hole in it is not a ceiling — so
+        :meth:`Policy.require_price` refuses the request if it is not.
+        """
+        if self.state.config.budget_usd is None:
+            if tenant_budget is None or getattr(tenant_budget, "limit_usd", None) is None:
+                return Decimal("0.000000")
+        model = body.get("model") if isinstance(body, dict) else None
+        if not isinstance(model, str) or not model:
+            return Decimal("0.000000")
+        self._policy.require_price(model)
+        return self._policy.estimate_usd(meta, model) or Decimal("0.000000")
+
+    async def _areserve(
+        self, tenant_budget: object | None, tokens: int, usd: Decimal = Decimal("0.000000")
+    ) -> object:
         """Hold the request's budget, awaiting a shared one.
 
         The async twin of :meth:`BackstopTransport._reserve`. A shared Redis
@@ -1126,8 +1245,8 @@ class AsyncBackstopTransport:
         blocks every other task in the loop for the length of the round trip.
         """
         if tenant_budget is not None:
-            return tenant_budget.reserve(tokens)
-        return await self.state.budget.areserve(tokens)
+            return tenant_budget.reserve(tokens, usd)
+        return await self.state.budget.areserve(tokens, usd)
 
     async def aclose(self) -> None:
         await self._transport.aclose()
@@ -1161,10 +1280,9 @@ class AsyncBackstopTransport:
             usage_split = response_usage(response)
             usage = None if usage_split is None else usage_split.total
             success = response.status_code < 400
-            await _areconcile(tenant_budget, self.state.budget, reservation, usage, success=success)
-            self._policy.record_outcome(response.status_code, success=success, circuit=circuit)
-            # Async twin of the sync branch's fallback record.
-            _record_spend_if_enabled(
+            # Async twin of the sync branch: the spend record runs first, so
+            # its exact cost settles the dollar reservation.
+            actual_usd = _record_spend_if_enabled(
                 self.state,
                 fb_request,
                 body=_json_body(fb_request),
@@ -1175,6 +1293,15 @@ class AsyncBackstopTransport:
                 usage=usage_split,
                 outcome="fallback",
             )
+            await _areconcile(
+                tenant_budget,
+                self.state.budget,
+                reservation,
+                usage,
+                success=success,
+                actual_usd=actual_usd,
+            )
+            self._policy.record_outcome(response.status_code, success=success, circuit=circuit)
             self._policy.alert_on_spend(tenant_id, tenant_budget)
             tracker.completed_at = time.monotonic()
             self._policy.observe_request(meta.endpoint, meta.priority, tracker.created_at, "fallback")

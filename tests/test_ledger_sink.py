@@ -991,25 +991,33 @@ def test_counters_stay_internally_consistent_across_a_mixed_sequence() -> None:
 
 
 def test_the_drain_thread_is_a_named_daemon_started_lazily() -> None:
-    """One thread, started on the first accepted submit, and only one."""
-    before = {t.name for t in threading.enumerate()}
-    assert DRAIN_THREAD_NAME not in before
+    """One thread, started on the first accepted submit, and only one.
+
+    The assertions are on the *delta* rather than on an empty process: the
+    drain thread is named, and any other live writer in the session has one
+    too, so "there is exactly one" is only a true statement about this
+    writer. A test that asserted a globally empty slate would depend on the
+    order the test files ran in.
+    """
+    def drains() -> list:
+        return [t for t in threading.enumerate() if t.name == DRAIN_THREAD_NAME]
+
+    before = len(drains())
 
     writer = BoundedWriter(_CountingSink())
-    assert DRAIN_THREAD_NAME not in {t.name for t in threading.enumerate()}
+    assert len(drains()) == before, "the writer started its thread before it was given work"
 
     writer.submit(make_event())
-    assert DRAIN_THREAD_NAME in {t.name for t in threading.enumerate()}
-    assert wait_for(lambda: writer.written == 1)
-    drain = next(t for t in threading.enumerate() if t.name == DRAIN_THREAD_NAME)
+    assert wait_for(lambda: len(drains()) == before + 1)
+    drain = drains()[-1]
     assert drain.daemon is True
 
     for _ in range(50):
         writer.submit(make_event())
     assert wait_for(lambda: writer.written == 51)
-    assert sum(1 for t in threading.enumerate() if t.name == DRAIN_THREAD_NAME) == 1
+    assert len(drains()) == before + 1, "more than one drain thread for one writer"
     writer.close()
-    assert wait_for(lambda: DRAIN_THREAD_NAME not in {t.name for t in threading.enumerate()})
+    assert wait_for(lambda: len(drains()) == before)
 
 
 def test_the_drain_target_is_a_module_level_function() -> None:

@@ -91,3 +91,34 @@ GuardrailViolationError = _provider_subclass(
 
 class UnsupportedClientError(BackstopError):
     """Raised when Backstop.wrap receives an unsupported client type."""
+
+
+class PriceUnavailableError(BackstopError):
+    """Raised when a dollar ceiling cannot be enforced for a model.
+
+    A dollar ceiling is only enforceable for a model the price catalog
+    carries. A model it does not carry cannot be priced, and a request that
+    cannot be priced cannot be measured against a dollar ceiling — so the
+    request is refused rather than allowed through unmeasured.
+
+    The refusal is the point. The ledger's whole design is that an unpriced
+    request is a *visible hole* rather than a plausible wrong number, and a
+    ceiling with a hole in it is not a ceiling. A deployment that would
+    rather let the hole stand can say so with
+    ``budget_usd_unpriced_policy="allow"``; the request is then recorded as
+    unpriced, exactly as the ledger records it.
+
+    The instance carries the model that could not be priced and the catalog
+    that was consulted.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        model: str | None = None,
+        catalog_path: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.model = model
+        self.catalog_path = catalog_path
