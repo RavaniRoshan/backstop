@@ -119,6 +119,10 @@ noticed.
   OTel gauge dict was read and written without a lock.
 - **The request body was JSON-decoded twice per request**, and sniffing its
   first byte copied the whole body — `bytes.strip()` always allocates.
+- **Python 3.10 could not read the ledger's own timestamps.** The RFC 3339
+  suffix `Z` is only accepted by `datetime.fromisoformat` from Python 3.11,
+  and the forecast command reads exactly that. The suffix is normalised
+  first, and the whole suite now passes on 3.10, 3.11, 3.12 and 3.13.
 - **The quota monitor rebuilt a dict of every response header** and did twelve
   lookups on every response, to usually find nothing.
 - **The TypeScript port's admission gate had two bugs of the same shape**:

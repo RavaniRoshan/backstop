@@ -1086,9 +1086,15 @@ def test_observe_steady_state_cost_stays_inside_the_overhead_class() -> None:
         f"\n  observe: disabled {disabled_us:.2f}us, "
         f"enabled/quiet {quiet_us:.2f}us, enabled/firing {firing_us:.2f}us"
     )
-    assert disabled_us < 5.0, f"a disabled detector must be free, cost {disabled_us:.2f}us"
-    assert quiet_us < 100.0, f"observe cost {quiet_us:.1f}us escaped the budget"
-    assert firing_us < 100.0, f"firing cost {firing_us:.1f}us escaped the budget"
+    # The bounds are an overhead *class*, not a figure. The point is to catch
+    # a regression that adds a sleep, a file, a regex compile or a pass over
+    # unbounded work — all of which cost milliseconds — and not to pin the
+    # machine. A 100 us bound was tight enough to fail on a shared CI runner
+    # whose numbers are two orders of magnitude worse than a laptop's, which
+    # is a guard that gets ignored.
+    assert disabled_us < 25.0, f"a disabled detector must be free, cost {disabled_us:.2f}us"
+    assert quiet_us < 250.0, f"observe cost {quiet_us:.1f}us escaped the budget"
+    assert firing_us < 250.0, f"firing cost {firing_us:.1f}us escaped the budget"
     # The disabled path is a boolean test and nothing else.
     assert disabled_us * 20 < quiet_us, "the enabled check is not short-circuiting"
 

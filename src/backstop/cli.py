@@ -406,6 +406,22 @@ class _GroupedHelpFormatter(argparse.HelpFormatter):
 # ---------------------------------------------------------------------------
 
 
+def _parse_timestamp(value: str) -> "_dt.datetime | None":
+    """Parse an RFC 3339 timestamp, or ``None`` if it is not one.
+
+    ``datetime.fromisoformat`` only learned to read the "Z" suffix in Python
+    3.11, and this package supports 3.10 — so the suffix is normalised
+    first. Every other RFC 3339 shape the ledger writes is already
+    accepted.
+    """
+    if not isinstance(value, str):
+        return None
+    try:
+        return _dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+
+
 def _exact_money(amount: decimal.Decimal) -> str:
     """Render an amount at the ledger's own precision.
 
@@ -589,14 +605,11 @@ def _run_forecast(args: argparse.Namespace) -> int:
         )
         return 1
 
-    import datetime as dt
-
     stamps = []
     for event in events:
-        try:
-            stamps.append(dt.datetime.fromisoformat(event.occurred_at))
-        except (TypeError, ValueError):
-            continue
+        parsed = _parse_timestamp(event.occurred_at)
+        if parsed is not None:
+            stamps.append(parsed)
     if len(stamps) < 2:
         print("Not enough events with usable timestamps.", file=sys.stderr)
         return 1

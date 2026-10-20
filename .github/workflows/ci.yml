@@ -54,7 +54,11 @@ jobs:
         # Coverage is reported, not enforced at a number the project has
         # never held: the floor is set in the `coverage` job below, where
         # the whole suite runs once rather than once per matrix cell.
-        run: pytest --cov=src/backstop --cov-report=xml --cov-report=term
+        #
+        # The timing-sensitive tests are excluded here and run in the
+        # `coverage` job without instrumentation: a measurement taken under
+        # coverage is a measurement of the coverage.
+        run: pytest -m "not perf" --cov=src/backstop --cov-report=xml --cov-report=term
       - name: Run the keyless examples
         # The three examples that need no key and no network. They are the
         # first thing a user runs, and they were never run by CI at all.
@@ -129,7 +133,9 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install
-        run: pip install -e ".[anthropic]" mypy types-httpx
+        # httpx ships its own type information; there is no `types-httpx`
+        # package on PyPI, and asking for it fails the install.
+        run: pip install -e ".[anthropic]" mypy
       - name: Typecheck
         # The package is annotated and now ships a `py.typed` marker, so a
         # downstream type checker uses its types. That is only worth having if
