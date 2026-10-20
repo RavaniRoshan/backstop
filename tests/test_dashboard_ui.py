@@ -135,19 +135,16 @@ def test_tables_have_keyboard_row_navigation():
         assert '"%s"' % key in js()
 
 
-@pending("Task 5")
 def test_tiles_show_a_change_against_the_previous_window():
     assert "function delta(" in js()
     assert "vs prev" in js()
 
 
-@pending("Task 5")
 def test_enforcement_events_are_annotated_on_the_chart():
     assert "function eventMarks(" in js()
     assert "spec.marks" in js()
 
 
-@pending("Task 5")
 def test_warnings_are_a_compact_strip():
     assert 'id="attention"' in page()
 

@@ -65,7 +65,7 @@ PAGE_HTML = """<!doctype html>
 </header>
 
 <div class="data-status" id="data-status" role="status" aria-live="polite">Loading telemetry...</div>
-<div class="warnings" id="warnings" hidden></div>
+<div class="attention" id="attention" hidden></div>
 
 <main id="main" aria-busy="true">
   <section class="tiles" aria-label="Key indicators">
@@ -182,6 +182,10 @@ PAGE_HTML = """<!doctype html>
 
   <footer class="foot">
     <p id="methodology"></p>
+    <details>
+      <summary>How these numbers are derived</summary>
+      <p id="methodology-detail"></p>
+    </details>
   </footer>
 </main>
 
@@ -379,15 +383,17 @@ select:focus-visible, .theme-toggle:focus-visible, .skip:focus, a:focus-visible 
   display: flex; justify-content: space-between; gap: 10px;
 }
 
-/* Warnings ---------------------------------------------------------------- */
-.warnings {
-  margin: 12px 16px 0; padding: 9px 12px;
-  border: 1px solid var(--line); border-inline-start: 2px solid var(--warn);
-  border-radius: var(--r); background: var(--panel);
-  color: var(--muted); font-size: 11.5px;
+/* Needs attention ----------------------------------------------------------
+   One configuration note must not cost a full row of vertical space, so the
+   warnings ride in a compact strip of chips next to the other status. */
+.attention {
+  margin: 12px 16px 0; display: flex; flex-wrap: wrap; gap: 6px;
 }
-.warnings ul { margin: 0; padding-inline-start: 16px; }
-.warnings li + li { margin-top: 3px; }
+.attention .chip { padding: 3px 7px; max-width: 100%; }
+.attention .chip.long {
+  white-space: normal; overflow-wrap: anywhere; text-transform: none;
+  letter-spacing: 0; font-size: 10.5px;
+}
 
 /* Layout ------------------------------------------------------------------ */
 main { padding: 12px 16px 24px; }
@@ -485,6 +491,7 @@ main { padding: 12px 16px 24px; }
 }
 .legend .key { display: inline-flex; align-items: center; gap: 6px; }
 .legend .swatch { width: 9px; height: 2px; border-radius: 2px; }
+.legend .swatch.marker { width: 2px; height: 10px; border-radius: 1px; opacity: 0.75; }
 
 /* Outcome mix ------------------------------------------------------------- */
 .bars { display: flex; flex-direction: column; gap: 8px; }
@@ -542,6 +549,13 @@ td.mut { color: var(--muted); }
   color: var(--dim); font-size: 10.5px; max-width: 92ch;
 }
 .foot code { font-family: var(--mono); color: var(--muted); }
+.foot details { margin-top: 6px; }
+.foot summary {
+  cursor: pointer; color: var(--muted); font-size: 10.5px;
+  letter-spacing: 0.04em; text-transform: uppercase;
+}
+.foot summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.foot details p { margin-top: 6px; }
 .table-wrap:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .scroll-hint { color: var(--dim); font-size: 10.5px; }
 .data-status {
@@ -941,6 +955,25 @@ APP_JS = """
       ctx.setLineDash([]);
     });
 
+    // Enforcement events, as vertical markers: a guardrail action lines up
+    // with the traffic it acted on.
+    if (spec.marks && spec.marks.length && spec.times && spec.times.length > 1) {
+      var t0 = spec.times[0];
+      var t1 = spec.times[spec.times.length - 1];
+      spec.marks.forEach(function (mark) {
+        if (t1 === t0) return;
+        var ratio = (mark - t0) / (t1 - t0);
+        if (ratio < 0 || ratio > 1) return;
+        var mx = Math.round(PAD_L + ratio * innerW) + 0.5;
+        ctx.save();
+        ctx.strokeStyle = THEME.warn;
+        ctx.globalAlpha = 0.6;
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(mx, PAD_T); ctx.lineTo(mx, PAD_T + innerH); ctx.stroke();
+        ctx.restore();
+      });
+    }
+
     var hover = canvas.__hover;
     if (!isNil(hover) && hover >= 0 && hover < t.length) {
       ctx.strokeStyle = THEME["line-strong"] || THEME.line;
@@ -995,7 +1028,8 @@ APP_JS = """
       var key = node("span", "key");
       var swatch = node("span", "swatch");
       swatch.style.background = entry.color;
-      if (entry.dashed) swatch.style.opacity = "0.6";
+      if (entry.marker) swatch.className = "swatch marker";
+      else if (entry.dashed) swatch.style.opacity = "0.6";
       key.appendChild(swatch);
       key.appendChild(node("span", null, entry.label));
       el.appendChild(key);
@@ -1210,11 +1244,100 @@ APP_JS = """
     });
   }
 
+  /* --- what changed ------------------------------------------------------ */
+
+  /* The change against the previous window of the same length. Computed from
+     the series the page already holds: no backend change, no extra storage. */
+  function delta(data, half, span) {
+    if (!data || data.length < half * 2 + 1) return { pct: null, text: "" };
+    var recent = 0, previous = 0, recentN = 0, previousN = 0;
+    for (var i = data.length - half; i < data.length; i++) {
+      if (isNil(data[i])) continue;
+      recent += data[i]; recentN++;
+    }
+    for (var j = data.length - half * 2; j < data.length - half; j++) {
+      if (isNil(data[j])) continue;
+      previous += data[j]; previousN++;
+    }
+    if (!recentN || !previousN) return { pct: null, text: "" };
+    var avgRecent = recent / recentN;
+    var avgPrevious = previous / previousN;
+    if (!avgPrevious) return { pct: null, text: "" };
+    var pct = ((avgRecent - avgPrevious) / avgPrevious) * 100;
+    var sign = pct > 0 ? "+" : "";
+    return { pct: pct, text: sign + pct.toFixed(0) + "% vs prev " + (span || "") };
+  }
+
+  function deltaChip(data, times, half) {
+    var span = "";
+    if (times && times.length > half) {
+      span = dur(times[times.length - 1] - times[times.length - 1 - half]);
+    }
+    var d = delta(data, half, span);
+    return d.text ? { text: d.text, tone: null } : null;
+  }
+
+  /* Enforcement events carry an absolute ts, so each one inside the visible
+     window becomes a marker on the chart: a guardrail action lines up with
+     the traffic it acted on. */
+  function eventMarks(times, events) {
+    if (!times.length || !events || !events.length) return [];
+    var first = times[0];
+    var last = times[times.length - 1];
+    var marks = [];
+    events.forEach(function (ev) {
+      var ts = ev && typeof ev.ts === "number" ? ev.ts : null;
+      if (ts === null) return;
+      if (ts < first || ts > last) return;
+      marks.push(ts);
+    });
+    return marks;
+  }
+
+  /* The compact needs-attention strip: everything that is actionable, as
+     text. Colour never carries the state on its own. */
+  function renderAttention(snap) {
+    var host = document.getElementById("attention");
+    if (!host) return;
+    clear(host);
+    var kpi = snap.kpi || {};
+    var chips = [];
+    (snap.warnings || []).forEach(function (text) {
+      chips.push({ text: text, tone: "warn", long: true });
+    });
+    var circuit = kpi.circuit;
+    if (circuit && circuit.state === "open") {
+      chips.push({ text: "circuit open", tone: "bad" });
+    } else if (circuit && circuit.state === "half_open") {
+      chips.push({ text: "circuit half-open", tone: "warn" });
+    }
+    var budget = kpi.budget;
+    if (budget && !isNil(budget.pct_used) && budget.pct_used >= 80) {
+      chips.push({ text: Math.round(budget.pct_used) + "% of budget used", tone: "warn" });
+    }
+    var traffic = kpi.traffic;
+    if (traffic && traffic.errors > 0) {
+      chips.push({ text: count(traffic.errors) + " errors", tone: "bad" });
+    }
+    var prevention = kpi.prevention;
+    if (prevention && prevention.circuit_open > 0) {
+      chips.push({ text: count(prevention.circuit_open) + " circuit blocks", tone: "bad" });
+    }
+    chips.forEach(function (entry) {
+      var chip = node("span", "chip" + (entry.long ? " long" : ""), entry.text);
+      if (entry.tone) chip.dataset.tone = entry.tone;
+      host.appendChild(chip);
+    });
+    host.hidden = chips.length === 0;
+  }
+
   /* --- render ----------------------------------------------------------- */
   function render(snap) {
     var kpi = snap.kpi;
     var windowed = sliceSeries(snap);
     var series = windowed.series;
+    // Half the window: the recent half is compared with the half before it.
+    var half = Math.max(1, Math.floor((series.rps || []).length / 2));
 
     var budget = kpi.budget;
     var budgetHealth = "none";
@@ -1252,6 +1375,7 @@ APP_JS = """
       meta: [
         isNil(spend.usd_lower_bound) ? null : count(spend.tokens) + " tokens",
         isNil(spend.usd_lower_bound) ? "set --cost-model for USD" : "input-rate lower bound",
+        deltaChip(series.burn_tokens_per_min, windowed.times, half),
       ],
       spark: series.burn_tokens_per_min,
       color: THEME.accent,
@@ -1267,6 +1391,7 @@ APP_JS = """
         { text: count(prevention.budget_blocked) + " budget", tone: prevention.budget_blocked > 0 ? "warn" : null },
         { text: count(prevention.circuit_open) + " circuit", tone: prevention.circuit_open > 0 ? "bad" : null },
         count(prevention.rate_limited) + " rate-limit",
+        deltaChip(series.prevented_rps, windowed.times, half),
       ],
       spark: series.prevented,
       color: prevention.total > 0 ? THEME.ok : THEME.neutral,
@@ -1281,6 +1406,7 @@ APP_JS = """
       meta: [
         count(traffic.requests) + " total",
         count(traffic.provider_calls) + " provider calls",
+        deltaChip(series.rps, windowed.times, half),
         traffic.retries > 0
           ? { text: count(traffic.retries) + " retries", tone: "warn" }
           : "no retries",
@@ -1293,7 +1419,12 @@ APP_JS = """
     renderTile("#tile-latency", {
       value: ms(latency.p95_ms),
       health: (series.latency_p95_ms || []).length ? "ok" : "none",
-      meta: ["p50 " + ms(latency.p50_ms), "p99 " + ms(latency.p99_ms), "incl. provider"],
+      meta: [
+        "p50 " + ms(latency.p50_ms),
+        "p99 " + ms(latency.p99_ms),
+        "incl. provider",
+        deltaChip(series.latency_p95_ms, windowed.times, half),
+      ],
       spark: series.latency_p95_ms,
       color: THEME.accent,
     });
@@ -1303,7 +1434,11 @@ APP_JS = """
     renderTile("#tile-concurrency", {
       value: concurrency.active + " / " + concurrency.capacity,
       health: concurrency.capacity ? (saturation >= 0.9 ? "warn" : "ok") : "none",
-      meta: [count(concurrency.queued) + " queued", "AIMD limit"],
+      meta: [
+        count(concurrency.queued) + " queued",
+        "AIMD limit",
+        deltaChip(series.concurrency_active, windowed.times, half),
+      ],
       spark: series.concurrency_active,
       color: THEME.accent,
     });
@@ -1315,6 +1450,7 @@ APP_JS = """
       meta: [
         count(circuit.trips) + " trips",
         { text: count(kpi.isolation.sessions) + " sessions", tone: null },
+        deltaChip(series.circuit_open_rps, windowed.times, half),
       ],
       // The breaker has no rate of its own, so it charts the requests the
       // open circuit turned away: a flat line is the honest picture of a
@@ -1326,9 +1462,11 @@ APP_JS = """
 
     var preventionColor = (series.prevented_rps || []).some(function (v) { return v > 0; })
       ? THEME.bad : THEME.neutral;
+    var marks = eventMarks(windowed.times, snap.events || []);
     chart("chart-traffic", {
       t: series.t,
       times: windowed.times,
+      marks: marks,
       series: [
         { name: "requests/s", color: THEME.accent, data: series.rps, fill: true },
         { name: "prevented/s", color: preventionColor, data: series.prevented_rps },
@@ -1337,6 +1475,7 @@ APP_JS = """
     renderLegend("legend-traffic", [
       { label: "requests / s", color: THEME.accent },
       { label: "prevented / s", color: preventionColor },
+      { label: "enforcement event", color: THEME.warn, marker: true },
     ]);
 
     chart("chart-burn", {
@@ -1365,37 +1504,31 @@ APP_JS = """
       "No request-scoped tenant budgets registered.");
     renderOutcomes(snap.outcomes);
 
-    var warnHost = document.getElementById("warnings");
-    var warnings = snap.warnings || [];
-    clear(warnHost);
-    if (!warnings.length) {
-      warnHost.hidden = true;
-    } else {
-      var list = node("ul");
-      warnings.forEach(function (text) { list.appendChild(node("li", null, text)); });
-      warnHost.appendChild(list);
-      warnHost.hidden = false;
-    }
+    renderAttention(snap);
 
     // Methodology is printed, not implied: every derived number states how it
-    // was derived, so the dashboard can be argued with.
+    // was derived, so the dashboard can be argued with. The first line is
+    // always visible; the rest is one click away rather than a wall of prose.
     var notes = [];
     notes.push("Window " + dur(snap.uptime_s) + ", sampled every " + snap.sample_interval_s +
       "s, rates over a rolling " + dur(snap.window_seconds) + " window.");
-    notes.push("Spend prevented counts requests the guardrails stopped before dispatch " +
+    var details = [];
+    details.push("Spend prevented counts requests the guardrails stopped before dispatch " +
       "(budget, rate limit, open circuit, transport exception); cache hits are counted " +
       "separately as calls avoided.");
-    notes.push("Latency is end-to-end transport duration and includes provider time; " +
+    details.push("Latency is end-to-end transport duration and includes provider time; " +
       "guardrail overhead is measured separately by backstop benchmark.");
-    notes.push(snap.sinks.cost_model
+    details.push(snap.sinks.cost_model
       ? "USD is a lower bound: all tokens costed at the " + snap.sinks.cost_model +
         " input rate, because the counters do not split prompt from completion tokens."
       : "Set --cost-model to convert tokens into a USD lower bound.");
-    notes.push("Session budgets are read from live BackstopState objects; the Prometheus " +
+    details.push("Session budgets are read from live BackstopState objects; the Prometheus " +
       "gauges are unlabelled and therefore last-writer-wins when one process runs " +
       "several sessions.");
     var methodology = document.getElementById("methodology");
     if (methodology) methodology.textContent = notes.join(" ");
+    var detail = document.getElementById("methodology-detail");
+    if (detail) detail.textContent = details.join(" ");
   }
 
   /* --- polling ---------------------------------------------------------- */
