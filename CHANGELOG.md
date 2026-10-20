@@ -235,6 +235,10 @@ Recorded here so they are not lost:
   still not published — the installer now says so instead of pretending.
 - The git history still holds ~185 MB of superseded media. The purge needs a
   force-push, so it is opt-in.
+- The npm package is still published by hand: the release workflow now
+  publishes it from the tag, but the repository has no `NPM_TOKEN` yet, so
+  that step skips with a message rather than failing the release. PyPI and
+  the GitHub Release are unaffected.
 
 ## 0.7.0 — 2026-09-27
 

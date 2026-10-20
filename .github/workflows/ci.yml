@@ -145,9 +145,14 @@ jobs:
         with:
           python-version: "3.12"
       - name: Audit the Python dependencies
+        # The `.` audits *this project* — pip-audit resolves the dependency
+        # tree from the path given. Without it, pip-audit audits the whole
+        # machine's Python, and a system package that is not on PyPI (a
+        # `cloud-init` on an Ubuntu image, say) fails the run for a reason
+        # that has nothing to do with this repository.
         run: |
           pip install pip-audit
-          pip-audit --strict --progress-spinner off
+          pip-audit --strict --progress-spinner off --skip-editable .
       - name: Audit the npm dependencies
         working-directory: ts/backstop
         run: |
@@ -294,6 +299,14 @@ jobs:
     defaults:
       run:
         working-directory: ts/backstop
+    env:
+      # Secrets cannot be referenced directly in an `if:` condition, so the
+      # token is read as a job-level environment variable and the publish
+      # step tests it there. Until the repository has an `NPM_TOKEN`, the
+      # step is skipped with a message rather than failing — the npm package
+      # is published by hand, as it always was, and the release is not held
+      # hostage to a secret that does not exist yet.
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -320,7 +333,15 @@ jobs:
         run: npm run build
       - name: Test
         run: npm test
+      - name: Report that npm publishing is not configured
+        if: env.NPM_TOKEN == ''
+        run: |
+          echo "::notice::No NPM_TOKEN is configured for this repository, so the"
+          echo "::notice::npm package was not published. The PyPI release and the"
+          echo "::notice::GitHub Release are unaffected. Add an NPM_TOKEN secret"
+          echo "::notice::to publish the npm package from the tag as well."
       - name: Publish
+        if: env.NPM_TOKEN != ''
         run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
