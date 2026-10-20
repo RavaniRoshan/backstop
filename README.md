@@ -534,15 +534,18 @@ Python package:
   injecting a transport, so it is a different interception strategy, not the
   design documented above.
 - It covers roughly half the Python `BackstopConfig` surface: budget, circuit,
-  retry, fallback, cache (exact and semantic), audit, agent guard, admission,
-  AIMD, quota auto-tuning, forecast. No Redis shared budget, no OTel, no
-  gateway, no shadow mode, no spend ledger, no Wedge.
+  retry, fallback chains, cache (exact and semantic), audit, agent guard,
+  admission, AIMD, quota auto-tuning, forecast, request deadlines, hooks. No
+  Redis shared budget, no OTel, no gateway, no shadow mode, no spend ledger,
+  no dollar budgets, no Wedge.
 - It **is** in CI: `.github/workflows/ci.yml` runs its typecheck, build and
-  tests on every push, and checks that its lockfile and package metadata
-  agree with the Python distribution's version.
+  tests on every push, checks that its lockfile and package metadata agree
+  with the Python distribution's version, and the release tag publishes it to
+  npm with provenance.
 
-Use the Python package when you need the full feature set or Anthropic. Treat
-the npm package as a smaller subset and verify it against your own SDK version.
+Use the Python package when you need the full feature set, Anthropic, or the
+money features. The npm package is a smaller subset, and its README says
+exactly which parts those are — treat the Python package as the reference.
 
 ---
 

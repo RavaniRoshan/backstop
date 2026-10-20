@@ -1,4 +1,6 @@
+import { AgentGuard } from "./agent.js";
 import { AuditLog } from "./audit.js";
+import { AgentGuardViolationError, LatencyBudgetExceededError } from "./exceptions.js";
 import { AIMDController, PriorityGate } from "./admission.js";
 import { Budget, BudgetExceededError, defaultEstimateTokens, tokensFromUsage } from "./budget.js";
 import { CircuitBreaker, CircuitBreakerOpenError } from "./circuit.js";
@@ -16,7 +18,20 @@ import type {
   Priority,
 } from "./types.js";
 
+/**
+ * The priorities, in the order the gate serves them.
+ *
+ * The npm package's vocabulary is a *refinement* of the Python package's
+ * three levels rather than a different one. Python has `critical`,
+ * `default` and `background`; here `critical` and `high` are the critical
+ * level, `default` is the default level, and `low` and `bulk` are the
+ * background level. A name that works in one package therefore means
+ * something in the other.
+ */
 const ALL_PRIORITIES: Priority[] = ["critical", "high", "default", "low", "bulk"];
+
+/** How many clients this process has wrapped and not released. */
+let liveWraps = 0;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
@@ -53,6 +68,22 @@ export function wrap<T extends OpenAILikeClient>(
   config: BackstopConfig = {},
 ): T {
   if ((client as Record<string, unknown>)._backstop) return client;
+
+  // The soft cap on live wrap() sessions. It was accepted in the config and
+  // never read, so a deployment that set it got no warning and no limit.
+  if (config.maxWrapSessions != null && config.maxWrapSessions > 0) {
+    liveWraps += 1;
+    if (liveWraps > config.maxWrapSessions) {
+      // A warning, not an error: the cap is a soft ceiling, and a process
+      // that trips it still works.
+      console.warn(
+        `Backstop: ${liveWraps} live wrap() sessions exceed maxWrapSessions=` +
+          `${config.maxWrapSessions}. Under the GIL, many concurrent in-process ` +
+          `sessions serialize on it — consider fewer sessions per process, or a ` +
+          `process per agent.`,
+      );
+    }
+  }
 
   const est = config.estimateTokens ?? (defaultEstimateTokens as (r: ChatCompletionRequest) => number);
   const priorityHeader = config.priorityHeader ?? "X-Backstop-Priority";
@@ -93,7 +124,35 @@ export function wrap<T extends OpenAILikeClient>(
     ? new AuditLog(config.auditSink ?? null, config.auditHmacKey)
     : null;
 
+  // --- Agent guardrail ---
+  const agentGuard =
+    config.agentMaxCalls != null
+      ? new AgentGuard({
+          maxCalls: config.agentMaxCalls,
+          windowMs: config.agentWindowMs ?? 60_000,
+          maxTokens: config.agentMaxTokens ?? null,
+        })
+      : null;
+
   const originalCreate = client.chat.completions.create.bind(client.chat.completions);
+
+  async function withDeadline<T>(work: Promise<T>, ms: number | null): Promise<T> {
+    if (ms == null) return work;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        work,
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(
+            () => reject(new LatencyBudgetExceededError(ms)),
+            ms,
+          );
+        }),
+      ]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
+  }
 
   async function runOnce(r: ChatCompletionRequest): Promise<ChatCompletionResponse> {
     return originalCreate(r);
@@ -104,10 +163,36 @@ export function wrap<T extends OpenAILikeClient>(
     const reqPriority: Priority = ALL_PRIORITIES.includes(priority) ? priority : "default";
     const estimated = est(req);
 
+    // The per-request deadline. `requestTimeoutMs` covers an ordinary request
+    // and `streamTimeoutMs` a streaming one; a request that exceeds it fails
+    // with a `LatencyBudgetExceededError` rather than hanging forever. Both
+    // were accepted in the config and never consulted.
+    const deadlineMs =
+      (req.stream ? config.streamTimeoutMs : config.requestTimeoutMs) ?? null;
+
     // --- Budget reservation ---
-    if (!ledger.reserve(estimated) && reqPriority !== "critical" && reqPriority !== "high") {
+    //
+    // A hard ceiling, for every priority. The npm package used to let
+    // `critical` and `high` past an exhausted budget, which is not what the
+    // Python package does: there, a budget is a ceiling, and a priority
+    // decides who waits, not who is exempt. A guardrail whose strength
+    // depends on the caller's mood is not a guardrail.
+    if (!ledger.reserve(estimated)) {
       audit?.record("deny", "budget_exceeded", { tokens: estimated });
       throw new BudgetExceededError(budget, estimated);
+    }
+
+    // --- Agent guardrail ---
+    //
+    // A per-agent fence for runaway loops, reading the agent id off the
+    // request the same way the Python package does. It was accepted in the
+    // config and then never consulted, so `agentMaxCalls` was a knob that
+    // did nothing.
+    const agentId = (req as Record<string, unknown>)["X-Backstop-Agent"] as string | undefined;
+    if (agentGuard && agentId && !agentGuard.allow(agentId, estimated)) {
+      ledger.release(estimated);
+      audit?.record("deny", "agent_guardrail", { agent_id: agentId });
+      throw new AgentGuardViolationError(agentId);
     }
 
     // --- Before hook ---
@@ -166,7 +251,7 @@ export function wrap<T extends OpenAILikeClient>(
         }
 
         try {
-          response = await runOnce(req);
+          response = await withDeadline(runOnce(req), deadlineMs);
           circuit.recordSuccess();
           const actual = tokensFromUsage(response.usage, req, est);
           ledger.commit(estimated, actual);

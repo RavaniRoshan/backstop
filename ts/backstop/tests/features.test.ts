@@ -134,3 +134,152 @@ test("a file-path audit sink appends to the file", async () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// --- The knobs that were accepted and never consulted ---------------------
+//
+// Every one of these was in `BackstopConfig`, documented, and read by
+// nothing. A user who set `agentMaxCalls: 5` got no enforcement and no
+// warning.
+
+test("the budget is a hard ceiling for every priority", async () => {
+  // `critical` and `high` used to be let past an exhausted budget, which is
+  // not what the Python package does: a budget is a ceiling, and a priority
+  // decides who waits, not who is exempt.
+  for (const priority of ["critical", "high", "default", "low", "bulk"] as const) {
+    const { client } = mockClient([{ usage: { total_tokens: 10 } }]);
+    const wrapped = wrap(client, 10);
+    const req = {
+      model: "m",
+      messages: [{ role: "user", content: "x" }],
+      "X-Backstop-Priority": priority,
+    };
+    await wrapped.chat.completions.create(req as never);
+    await assert.rejects(
+      () => wrapped.chat.completions.create(req as never),
+      BudgetExceededError,
+      `priority ${priority} was let past an exhausted budget`,
+    );
+  }
+});
+
+test("the agent guardrail fences a runaway loop", async () => {
+  const { client } = mockClient([{ usage: { total_tokens: 1 } }]);
+  const wrapped = wrap(client, 1000, { agentMaxCalls: 2, agentWindowMs: 60_000 });
+  const req = {
+    model: "m",
+    messages: [{ role: "user", content: "x" }],
+    "X-Backstop-Agent": "loop-1",
+  };
+  await wrapped.chat.completions.create(req as never);
+  await wrapped.chat.completions.create(req as never);
+  await assert.rejects(
+    () => wrapped.chat.completions.create(req as never),
+    (err: Error) => err.name === "AgentGuardViolationError",
+  );
+});
+
+test("a different agent is not fenced by another's guardrail", async () => {
+  const { client } = mockClient([{ usage: { total_tokens: 1 } }]);
+  const wrapped = wrap(client, 1000, { agentMaxCalls: 1, agentWindowMs: 60_000 });
+  const first = {
+    model: "m",
+    messages: [{ role: "user", content: "x" }],
+    "X-Backstop-Agent": "a",
+  };
+  const second = {
+    model: "m",
+    messages: [{ role: "user", content: "x" }],
+    "X-Backstop-Agent": "b",
+  };
+  await wrapped.chat.completions.create(first as never);
+  await assert.rejects(
+    () => wrapped.chat.completions.create(first as never),
+    (err: Error) => err.name === "AgentGuardViolationError",
+  );
+  // The second agent has its own budget.
+  await wrapped.chat.completions.create(second as never);
+});
+
+test("a request that exceeds its deadline fails rather than hanging", async () => {
+  const slow = {
+    _backstop: undefined,
+    chat: {
+      completions: {
+        create: async () => {
+          await new Promise((r) => setTimeout(r, 500));
+          return { usage: { total_tokens: 1 } };
+        },
+      },
+    },
+  };
+  const wrapped = wrap(slow as never, 100, { requestTimeoutMs: 50 });
+  await assert.rejects(
+    () => wrapped.chat.completions.create({ model: "m", messages: [] } as never),
+    (err: Error) => err.name === "LatencyBudgetExceededError",
+  );
+});
+
+// --- The gate -------------------------------------------------------------
+//
+// Two bugs the Python package had until v0.8.0, in a port that had never
+// been exercised under load:
+//
+// - `high` was missing from the queue the gate chooses from, so a
+//   high-priority ticket was enqueued and then never chosen. It could not be
+//   admitted, and it waited for a slot that was never offered to it.
+// - the waiters polled only when a timeout was configured, so with the
+//   default `queueTimeoutMs: null` a request that could not be admitted
+//   immediately was never re-checked. It hung forever, with no error.
+
+test("a high-priority request is admitted", async () => {
+  const { client } = mockClient([{ usage: { total_tokens: 1 } }]);
+  const wrapped = wrap(client, 100);
+  const res = await wrapped.chat.completions.create({
+    model: "m",
+    messages: [{ role: "user", content: "x" }],
+    "X-Backstop-Priority": "high",
+  } as never);
+  assert.equal(res.usage?.total_tokens, 1);
+});
+
+test("a request waiting for a slot is admitted when one frees", async () => {
+  // One slot, two requests. The second waits; the first releases; the
+  // second must be admitted rather than hanging.
+  const { client } = mockClient([{ usage: { total_tokens: 1 } }]);
+  const wrapped = wrap(client, 1000, { initialConcurrency: 1, maxConcurrency: 1 });
+  const req = { model: "m", messages: [{ role: "user", content: "x" }] };
+  const first = wrapped.chat.completions.create(req as never);
+  // The second request is issued while the first is still in flight.
+  const second = wrapped.chat.completions.create(req as never);
+  const [a, b] = await Promise.all([first, second]);
+  assert.equal(a.usage?.total_tokens, 1);
+  assert.equal(b.usage?.total_tokens, 1);
+});
+
+test("a request that cannot be admitted fails rather than hanging", async () => {
+  // The first request holds the single slot long enough for the second to
+  // have to wait, and the second gives up rather than waiting forever.
+  const slow = {
+    _backstop: undefined,
+    chat: {
+      completions: {
+        create: async () => {
+          await new Promise((r) => setTimeout(r, 200));
+          return { usage: { total_tokens: 1 } };
+        },
+      },
+    },
+  };
+  const wrapped = wrap(slow as never, 1000, {
+    initialConcurrency: 1,
+    maxConcurrency: 1,
+    queueTimeoutMs: 50,
+  });
+  const req = { model: "m", messages: [{ role: "user", content: "x" }] };
+  const first = wrapped.chat.completions.create(req as never);
+  await assert.rejects(
+    () => wrapped.chat.completions.create(req as never),
+    /timed out/,
+  );
+  await first;
+});
