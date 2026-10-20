@@ -10,15 +10,12 @@ import httpx
 
 from ._httpcompat import HTTPX, _HttpCompat
 from .budget import Reservation
-from .cache import ResponseCache
-from .circuit import CircuitBreaker, CircuitState
+from .circuit import CircuitBreaker
 from .config import BackstopConfig, Priority
 from .exceptions import (
     BudgetExceededError,
     CircuitBreakerOpenError,
-    GuardrailViolationError,
     LatencyBudgetExceededError,
-    RateLimitError,
 )
 from .extract import RequestMetadata, _json_body, request_metadata, response_usage
 from .hooks import AfterResponseHook, BeforeRequestHook
@@ -33,7 +30,7 @@ from .ledger import (
     get_ledger,
 )
 from .metrics import get_metrics
-from .pricing import get_downgrade_target
+from .policy import DOWNGRADE, Policy, build_policy
 from .pricing_catalog import compute_cost
 from .retry import backoff_delay, is_retryable_status
 from .state import BackstopState
@@ -483,20 +480,9 @@ class BackstopTransport:
         self._transport = transport or self._compat.HTTPTransport()
         self._sleep = sleep or time.sleep
         self._metrics = get_metrics()
-        from .rollout import ShadowCollector
-
-        self._shadow = (
-            ShadowCollector(sink=state.config.audit_sink)
-            if ShadowCollector.enabled(state.config.shadow)
-            else None
-        )
-        self._alerts = _build_alerts(state.config)
-        self._cache = ResponseCache(
-            max_entries=state.config.cache_max_entries,
-            ttl=state.config.cache_ttl,
-            embed=state.config.cache_embedder if state.config.cache_semantic else None,
-            similarity_threshold=state.config.cache_similarity_threshold,
-        ) if state.config.cache_enabled else None
+        # The decisions live in the Policy, so the sync and async transports
+        # cannot drift apart on them. See `backstop.policy`.
+        self._policy: Policy = build_policy(state, compat=self._compat, config=state.config)
 
     def handle_request(self, request: httpx.Request) -> httpx.Response:
         tracker = _LatencyTracker()
@@ -507,13 +493,11 @@ class BackstopTransport:
         body = _json_body(request)
         streaming = is_streaming(body) if body is not None else False
 
-        if self._cache is not None and body is not None and not streaming:
-            cached = self._cache.get(body)
+        if body is not None and not streaming:
+            cached = self._policy.cache_get(body)
             if cached is not None:
                 content, usage, headers, semantic = cached
-                self._metrics.call("cache_hits")
-                if semantic:
-                    self._metrics.call("cache_semantic_hits")
+                self._policy.note_cache_hit(semantic)
                 tracker.completed_at = time.monotonic()
                 response = _build_cached_response(content, usage, headers, compat=self._compat)
                 backstop_meta = tracker.build_meta(
@@ -533,7 +517,7 @@ class BackstopTransport:
                 tid = self.state.config.tenant_for_key(vk)
                 if tid is not None:
                     tenant_id = tid
-        self._resolve_secret(request)
+        self._policy.resolve_secret(request)
         tenant_budget: object | None = None
         if tenant_id is not None:
             ledger = get_ledger()
@@ -542,46 +526,26 @@ class BackstopTransport:
 
         downgraded = False
         try:
-            if tenant_budget is not None:
-                reservation = tenant_budget.reserve(meta.estimated_tokens)
-            else:
-                reservation = self.state.budget.reserve(meta.estimated_tokens)
+            reservation = self._reserve(tenant_budget, meta.estimated_tokens)
         except BudgetExceededError:
-            if (
-                tenant_budget is not None
-                and getattr(tenant_budget, "on_exceed", None) == "downgrade"
-                and body is not None
-            ):
-                if self._try_downgrade(request, body):
-                    downgraded = True
-                    self._audit("downgrade", "budget_exceeded", meta, tenant_id=tenant_id)
-                    meta = request_metadata(request, self.state.config)
-                    try:
-                        if tenant_budget is not None:
-                            reservation = tenant_budget.reserve(meta.estimated_tokens)
-                        else:
-                            reservation = self.state.budget.reserve(meta.estimated_tokens)
-                    except BudgetExceededError:
-                        reservation = None
-                else:
-                    self._metrics.call("budget_exceeded")
-                    if tenant_id:
-                        self._metrics.call("tenant_budget_exceeded", tenant_id)
-                    self._audit("deny", "budget_exceeded", meta, tenant_id=tenant_id)
-                    raise
+            action = self._policy.budget_exhausted(
+                meta, tenant_budget, body, request, tenant_id
+            )
+            if action == DOWNGRADE:
+                downgraded = True
+                meta = request_metadata(request, self.state.config)
+                try:
+                    reservation = self._reserve(tenant_budget, meta.estimated_tokens)
+                except BudgetExceededError:
+                    # The cheaper model did not fit either. The request still
+                    # proceeds, without a reservation.
+                    reservation = None
             else:
-                if self._shadow is not None:
-                    self._shadow.would_block(tenant_id=tenant_id, estimated_tokens=meta.estimated_tokens)
-                    reservation = None  # observe only: let the request through
-                else:
-                    self._metrics.call("budget_exceeded")
-                    if tenant_id:
-                        self._metrics.call("tenant_budget_exceeded", tenant_id)
-                    self._audit("deny", "budget_exceeded", meta, tenant_id=tenant_id)
-                    raise
+                # Shadow mode: observe, never block.
+                reservation = None
 
         try:
-            self._pre_admit_checks(request, meta, tenant_id)
+            self._policy.pre_admit_checks(request, meta, tenant_id)
         except Exception:
             # The reservation was taken before admission ran. A denial here has to
             # hand it back, or every rejected request permanently drains budget.
@@ -603,12 +567,9 @@ class BackstopTransport:
             wait = self._acquire_gate(meta.priority, deadline)
             admitted = True
             tracker.queue_entered_at = time.monotonic()
-            self._observe_queue(wait, meta.priority, tenant_id)
-            if self._shadow is None:
-                circuit.before_request()
-            else:
-                # Shadow mode: observe but never block on an open circuit.
-                self._shadow.would_open_circuit(tenant_id=tenant_id)
+            self._policy.observe_queue(wait, meta.priority, tenant_budget, tenant_id, circuit)
+            # In shadow mode an open circuit is observed, not enforced.
+            self._policy.circuit_admits(circuit, tenant_id)
             tracker.request_sent_at = time.monotonic()
 
             if self.state.config.compress is not None and isinstance(body, dict):
@@ -638,7 +599,7 @@ class BackstopTransport:
                 # the half-open probe, not to measure stream lifetime. Skipping
                 # this left a circuit that had gone half-open stuck in half-open,
                 # so every later request was rejected with CircuitBreakerOpenError.
-                self._record_outcome(response.status_code, success=success, circuit=circuit)
+                self._policy.record_outcome(response.status_code, success=success, circuit=circuit)
                 usage = None
                 # The stream has not been read, so there is no provider usage to
                 # record; the event says so rather than claiming a measurement.
@@ -670,7 +631,7 @@ class BackstopTransport:
                     self.state.quota.ingest(dict(response.headers))
                     self.state.quota.adjust(self.state.aimd)
                 _reconcile(tenant_budget, self.state.budget, reservation, usage, success=success, downgraded=downgraded)
-                self._record_outcome(response.status_code, success=success, circuit=circuit)
+                self._policy.record_outcome(response.status_code, success=success, circuit=circuit)
                 # Immediately after the reconcile block, so the ledger and the
                 # budget are reading the same response.
                 _record_spend_if_enabled(
@@ -683,18 +644,14 @@ class BackstopTransport:
                     success=success,
                     usage=usage_split,
                 )
-                if self._alerts is not None:
-                    _b = tenant_budget if tenant_budget is not None else self.state.budget
-                    _used = getattr(_b, "spent", None) or getattr(_b, "used", 0)
-                    _lim = getattr(_b, "total", None) or getattr(_b, "limit_tokens", None) or getattr(_b, "limit", 0)
-                    _dispatch_alert(self._alerts, tenant_id, _used, _lim)
-                if self._cache is not None and body is not None and usage is not None:
-                    self._cache.set(body, response.content, usage, dict(response.headers))
-                self._maybe_forecast_enforce()
+                self._policy.alert_on_spend(tenant_id, tenant_budget)
+                if body is not None and usage is not None:
+                    self._policy.cache_set(body, response.content, usage, dict(response.headers))
+                self._policy.maybe_forecast_enforce()
 
             tracker.completed_at = time.monotonic()
             outcome = "success" if success else "error"
-            self._observe_request(meta.endpoint, meta.priority, tracker.created_at, outcome)
+            self._policy.observe_request(meta.endpoint, meta.priority, tracker.created_at, outcome)
 
             backstop_meta = tracker.build_meta(
                 estimated_tokens=meta.estimated_tokens,
@@ -726,39 +683,60 @@ class BackstopTransport:
                 tenant_id=tenant_id,
             )
             if fallback is not None:
-                self._audit("fallback", "circuit_open", meta, tenant_id=tenant_id)
+                self._policy.audit("fallback", "circuit_open", meta, tenant_id=tenant_id)
                 return fallback
             tracker.completed_at = time.monotonic()
             _reconcile(tenant_budget, self.state.budget, reservation, 0, success=False)
-            self._observe_request(meta.endpoint, meta.priority, tracker.created_at, "circuit_open")
-            self._audit("deny", "circuit_open", meta, tenant_id=tenant_id)
+            self._policy.observe_request(meta.endpoint, meta.priority, tracker.created_at, "circuit_open")
+            self._policy.audit("deny", "circuit_open", meta, tenant_id=tenant_id)
             raise
         except Exception:
             tracker.completed_at = time.monotonic()
             _reconcile(tenant_budget, self.state.budget, reservation, 0, success=False)
-            self._record_outcome(599, success=False, circuit=circuit)
-            self._observe_request(meta.endpoint, meta.priority, tracker.created_at, "exception")
+            self._policy.record_outcome(599, success=False, circuit=circuit)
+            self._policy.observe_request(meta.endpoint, meta.priority, tracker.created_at, "exception")
             raise
         finally:
             if admitted:
                 self.state.gate.release()
-                self._observe_gauges(circuit, tenant_id)
+                self._policy.observe_gauges(circuit, tenant_budget, tenant_id)
+
+    @property
+    def shadow_collector(self) -> object | None:
+        """The collector the ``would_*`` shadow counters are recorded in.
+
+        ``None`` when shadow mode is off. Exposed so a caller — the ``verify``
+        runner, a dashboard — can read the counters, or supply its own, without
+        reaching into a private attribute.
+        """
+        return self._policy.shadow
+
+    @shadow_collector.setter
+    def shadow_collector(self, collector: object | None) -> None:
+        self._policy.shadow = collector
+
+    @property
+    def alerts(self) -> object | None:
+        """The budget alert manager this transport fires alerts from."""
+        return self._policy.alerts
+
+    @alerts.setter
+    def alerts(self, manager: object | None) -> None:
+        self._policy.alerts = manager
+
+    def _reserve(self, tenant_budget: object | None, tokens: int) -> object:
+        """Hold the request's budget.
+
+        The caller does this, not the Policy, because reserving may be
+        asynchronous — the async transport has to await a shared Redis budget
+        rather than block the event loop on it.
+        """
+        if tenant_budget is not None:
+            return tenant_budget.reserve(tokens)
+        return self.state.budget.reserve(tokens)
 
     def close(self) -> None:
         self._transport.close()
-
-    def _try_downgrade(self, request: httpx.Request, body: dict) -> bool:
-        current_model = body.get("model", "")
-        if not current_model:
-            return False
-        cheaper = get_downgrade_target(current_model)
-        if cheaper is None:
-            return False
-        body["model"] = cheaper
-        new_content = json.dumps(body).encode("utf-8")
-        object.__setattr__(request, "_content", new_content)
-        request.headers["content-length"] = str(len(new_content))
-        return True
 
     def _try_fallback(
         self,
@@ -777,8 +755,7 @@ class BackstopTransport:
         the first successful response. Returns ``None`` when no target succeeds
         so the caller can re-raise the original ``CircuitBreakerOpenError``.
         """
-        config = self.state.config
-        targets = config.fallback_targets(getattr(meta, "priority", None))
+        targets = self._policy.fallback_targets(getattr(meta, "priority", None))
         if not targets:
             return None
         for target in targets:
@@ -797,7 +774,7 @@ class BackstopTransport:
             usage = None if usage_split is None else usage_split.total
             success = response.status_code < 400
             _reconcile(tenant_budget, self.state.budget, reservation, usage, success=success)
-            self._record_outcome(response.status_code, success=success, circuit=circuit)
+            self._policy.record_outcome(response.status_code, success=success, circuit=circuit)
             # A fallback that succeeded is a request that cost money, so it is
             # billed as its own event with outcome "fallback" — the reason
             # ``SpendEvent`` declares that outcome at all. Recorded here rather
@@ -814,13 +791,9 @@ class BackstopTransport:
                 usage=usage_split,
                 outcome="fallback",
             )
-            if self._alerts is not None:
-                _b = tenant_budget if tenant_budget is not None else self.state.budget
-                _used = getattr(_b, "spent", None) or getattr(_b, "used", 0)
-                _lim = getattr(_b, "total", None) or getattr(_b, "limit_tokens", None) or getattr(_b, "limit", 0)
-                _dispatch_alert(self._alerts, tenant_id, _used, _lim)
+            self._policy.alert_on_spend(tenant_id, tenant_budget)
             tracker.completed_at = time.monotonic()
-            self._observe_request(meta.endpoint, meta.priority, tracker.created_at, "fallback")
+            self._policy.observe_request(meta.endpoint, meta.priority, tracker.created_at, "fallback")
             backstop_meta = tracker.build_meta(
                 estimated_tokens=meta.estimated_tokens,
                 actual_tokens=usage,
@@ -831,38 +804,6 @@ class BackstopTransport:
             setattr(response, "_backstop_meta", backstop_meta)
             return response
         return None
-
-    def _audit(self, decision: str, reason: str, meta: object, **fields: object) -> None:
-        audit = self.state.audit
-        if audit is None:
-            return
-        fields.setdefault("endpoint", getattr(meta, "endpoint", None))
-        fields.setdefault("priority", getattr(meta, "priority", None))
-        fields.setdefault("estimated_tokens", getattr(meta, "estimated_tokens", None))
-        audit.record(decision, reason, **fields)
-
-    def _pre_admit_checks(self, request: httpx.Request, meta: object, tenant_id: str | None) -> None:
-        cfg = self.state.config
-        if cfg.shadow_policy is not None and cfg.shadow_policy.should_shadow():
-            cfg.shadow_policy.record(
-                "shadow", "sampled", endpoint=getattr(meta, "endpoint", None),
-                estimated_tokens=getattr(meta, "estimated_tokens", None), tenant_id=tenant_id,
-            )
-        if cfg.rate_limiter is not None and not cfg.rate_limiter.allow(getattr(meta, "estimated_tokens", 0)):
-            if self._shadow is not None:
-                self._shadow.would_throttle(tenant_id=tenant_id)
-            else:
-                self._metrics.call("rate_limited")
-                self._audit("deny", "rate_limited", meta, tenant_id=tenant_id)
-                raise RateLimitError("rate limiter rejected request")
-        agent_id = request.headers.get("X-Backstop-Agent")
-        if cfg.agent_guard is not None and agent_id:
-            if not cfg.agent_guard.allow(agent_id, getattr(meta, "estimated_tokens", 0)):
-                if self._shadow is not None:
-                    self._shadow.would_guardrail(tenant_id=tenant_id, agent_id=agent_id)
-                else:
-                    self._audit("deny", "agent_guardrail", meta, tenant_id=tenant_id, agent_id=agent_id)
-                    raise GuardrailViolationError(f"agent {agent_id!r} exceeded guardrail")
 
     def _acquire_gate(self, priority: Priority, deadline: float | None) -> float:
         effective: float | None = None
@@ -891,7 +832,7 @@ class BackstopTransport:
                 response = self._transport.handle_request(request)
             except (self._compat.TimeoutException, self._compat.TransportError):
                 self._retry_count += 1
-                self._after_attempt(success=False, pressure=True, circuit=circuit)
+                self._policy.after_attempt(success=False, pressure=True, circuit=circuit)
                 if attempt >= self.state.config.retry_max_attempts - 1:
                     raise
                 self._metrics.call("retry_attempts", endpoint)
@@ -906,118 +847,12 @@ class BackstopTransport:
             response.read()
             response.close()
             last_response = response
-            self._after_attempt(success=False, pressure=True, circuit=circuit)
+            self._policy.after_attempt(success=False, pressure=True, circuit=circuit)
             self._metrics.call("retry_attempts", endpoint)
             self._sleep(backoff_delay(attempt, self.state.config))
 
         assert last_response is not None
         return last_response
-
-    def _after_attempt(self, *, success: bool, pressure: bool, circuit: CircuitBreaker | None = None) -> None:
-        tripped = (circuit or self.state.circuit).after_request(success=success)
-        if tripped:
-            self._metrics.call("circuit_trips")
-        if pressure and self.state.aimd.record_pressure():
-            self._metrics.call("aimd_changes", "decrease")
-
-    def _record_outcome(self, status_code: int, *, success: bool, circuit: CircuitBreaker | None = None) -> None:
-        tripped = (circuit or self.state.circuit).after_request(success=success)
-        if tripped:
-            self._metrics.call("circuit_trips")
-        if success:
-            if self.state.aimd.record_success():
-                self._metrics.call("aimd_changes", "increase")
-        elif is_retryable_status(status_code, self.state.config):
-            if self.state.aimd.record_pressure():
-                self._metrics.call("aimd_changes", "decrease")
-
-    def _observe_queue(
-        self, wait: float, priority: Priority, tenant_id: str | None = None
-    ) -> None:
-        self._metrics.call("queue_wait", priority.value, method="observe", amount=wait)
-        self._observe_gauges(tenant_id=tenant_id)
-
-    def _observe_request(
-        self, endpoint: str, priority: Priority, started: float, outcome: str
-    ) -> None:
-        self._metrics.call("requests", endpoint, priority.value, outcome)
-        self._metrics.call(
-            "duration", endpoint, priority.value, method="observe", amount=time.monotonic() - started
-        )
-
-    def _observe_gauges(
-        self, circuit: CircuitBreaker | None = None, tenant_id: str | None = None
-    ) -> None:
-        """Publish the gauges. ``tenant_id`` is the *resolved* tenant.
-
-        The tenant is resolved once, at the top of ``handle_request``, from the
-        ambient context **or** from the virtual-key header, and the request is
-        then budgeted against whichever it resolved to. Re-reading the ContextVar
-        here reported the global ``budget_remaining`` for every request made with
-        a virtual key, so a per-tenant deployment saw a gauge that described a
-        budget none of its requests were spending — a number that looks plausible
-        and is about the wrong thing.
-
-        The caller passes the resolved tenant rather than this re-deriving it,
-        because re-deriving it is the bug. ``None`` means "no tenant resolved",
-        which is the global budget, and is the same answer as before.
-        """
-        if tenant_id is not None:
-            tb = get_ledger().get(tenant_id)
-            remaining = tb.remaining if tb is not None else None
-        else:
-            remaining = self.state.budget.remaining
-        if remaining is not None:
-            self._metrics.call("budget_remaining", method="set", value=remaining)
-        self._metrics.call("queue_depth", method="set", value=self.state.gate.depth)
-        self._metrics.call("concurrency_active", method="set", value=self.state.gate.active)
-        self._metrics.call("concurrency_limit", method="set", value=self.state.aimd.current_limit)
-        active_circuit = circuit or self.state.circuit
-        circuit_value = {
-            CircuitState.CLOSED: 0,
-            CircuitState.HALF_OPEN: 1,
-            CircuitState.OPEN: 2,
-        }[active_circuit.state]
-        self._metrics.call("circuit_state", method="set", value=circuit_value)
-
-    def _maybe_forecast_enforce(self) -> None:
-        """Proactively tighten AIMD when burn rate projects exhaustion.
-
-        Called after every successful response. When ``forecast_horizon_seconds``
-        is configured and the current burn rate would exhaust the budget within
-        that horizon, clamp the AIMD concurrency limit to slow down before the
-        cap is hit.
-        """
-        horizon = self.state.config.forecast_horizon_seconds
-        if not horizon or self.state.budget.total is None:
-            return
-        remaining = self.state.budget.remaining
-        if remaining is None or remaining <= 0:
-            return
-        spent = self.state.budget.spent
-        if spent <= 0:
-            return
-        from .forecast import BurnSample, will_exhaust
-
-        sample = BurnSample(used_tokens=spent, window_seconds=max(1.0, min(spent / max(1, 1), 30.0)))
-        if will_exhaust(sample, self.state.budget.total, horizon):
-            self.state.aimd.record_pressure()
-            self._metrics.call("aimd_changes", "decrease")
-
-    def _resolve_secret(self, request: httpx.Request) -> None:
-        """Resolve a virtual key to a provider secret at call time."""
-        cfg = self.state.config
-        if cfg.secret_provider is None or cfg.virtual_keys is None:
-            return
-        vk = request.headers.get(cfg.virtual_key_header)
-        if vk is None or vk not in cfg.virtual_keys:
-            return
-        from .secrets import resolve_secret
-
-        secret = resolve_secret(cfg.secret_provider, vk)
-        if secret:
-            request.headers["authorization"] = f"Bearer {secret}"
-
 
 class AsyncBackstopTransport:
     """Async twin of :class:`BackstopTransport`; duck-typed for the same reasons.
@@ -1048,18 +883,9 @@ class AsyncBackstopTransport:
         self._transport = transport or self._compat.AsyncHTTPTransport()
         self._sleep = sleep or asyncio.sleep
         self._metrics = get_metrics()
-        from .rollout import ShadowCollector
-
-        self._shadow = (
-            ShadowCollector(sink=state.config.audit_sink)
-            if ShadowCollector.enabled(state.config.shadow)
-            else None
-        )
-        self._alerts = _build_alerts(state.config)
-        self._cache = ResponseCache(
-            max_entries=state.config.cache_max_entries,
-            ttl=state.config.cache_ttl,
-        ) if state.config.cache_enabled else None
+        # The decisions live in the Policy, so the sync and async transports
+        # cannot drift apart on them. See `backstop.policy`.
+        self._policy: Policy = build_policy(state, compat=self._compat, config=state.config)
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         tracker = _LatencyTracker()
@@ -1070,13 +896,11 @@ class AsyncBackstopTransport:
         body = _json_body(request)
         streaming = is_streaming(body) if body is not None else False
 
-        if self._cache is not None and body is not None and not streaming:
-            cached = self._cache.get(body)
+        if body is not None and not streaming:
+            cached = self._policy.cache_get(body)
             if cached is not None:
                 content, usage, headers, semantic = cached
-                self._metrics.call("cache_hits")
-                if semantic:
-                    self._metrics.call("cache_semantic_hits")
+                self._policy.note_cache_hit(semantic)
                 tracker.completed_at = time.monotonic()
                 response = _build_cached_response(content, usage, headers, compat=self._compat)
                 backstop_meta = tracker.build_meta(
@@ -1096,7 +920,7 @@ class AsyncBackstopTransport:
                 tid = self.state.config.tenant_for_key(vk)
                 if tid is not None:
                     tenant_id = tid
-        self._resolve_secret(request)
+        self._policy.resolve_secret(request)
         tenant_budget: object | None = None
         if tenant_id is not None:
             ledger = get_ledger()
@@ -1105,47 +929,26 @@ class AsyncBackstopTransport:
 
         downgraded = False
         try:
-            if tenant_budget is not None:
-                reservation = tenant_budget.reserve(meta.estimated_tokens)
-            else:
-                reservation = await self.state.budget.areserve(meta.estimated_tokens)
+            reservation = await self._areserve(tenant_budget, meta.estimated_tokens)
         except BudgetExceededError:
-            if (
-                tenant_budget is not None
-                and getattr(tenant_budget, "on_exceed", None) == "downgrade"
-                and body is not None
-            ):
-                if self._try_downgrade(request, body):
-                    downgraded = True
-                    meta = request_metadata(request, self.state.config)
-                    try:
-                        if tenant_budget is not None:
-                            reservation = tenant_budget.reserve(meta.estimated_tokens)
-                        else:
-                            reservation = await self.state.budget.areserve(meta.estimated_tokens)
-                    except BudgetExceededError:
-                        reservation = None
-                else:
-                    if self._shadow is not None:
-                        self._shadow.would_block(tenant_id=tenant_id, estimated_tokens=meta.estimated_tokens)
-                        reservation = None
-                    else:
-                        self._metrics.call("budget_exceeded")
-                        if tenant_id:
-                            self._metrics.call("tenant_budget_exceeded", tenant_id)
-                        raise
-            else:
-                if self._shadow is not None:
-                    self._shadow.would_block(tenant_id=tenant_id, estimated_tokens=meta.estimated_tokens)
+            action = self._policy.budget_exhausted(
+                meta, tenant_budget, body, request, tenant_id
+            )
+            if action == DOWNGRADE:
+                downgraded = True
+                meta = request_metadata(request, self.state.config)
+                try:
+                    reservation = await self._areserve(tenant_budget, meta.estimated_tokens)
+                except BudgetExceededError:
+                    # The cheaper model did not fit either. The request still
+                    # proceeds, without a reservation.
                     reservation = None
-                else:
-                    self._metrics.call("budget_exceeded")
-                    if tenant_id:
-                        self._metrics.call("tenant_budget_exceeded", tenant_id)
-                    raise
+            else:
+                # Shadow mode: observe, never block.
+                reservation = None
 
         try:
-            self._pre_admit_checks(request, meta, tenant_id)
+            self._policy.pre_admit_checks(request, meta, tenant_id)
         except Exception:
             # Async twin of the sync branch: a pre-admission denial has to hand
             # the reservation back, or every rejected request permanently drains
@@ -1168,12 +971,9 @@ class AsyncBackstopTransport:
             wait = await self._aacquire_gate(meta.priority, deadline)
             admitted = True
             tracker.queue_entered_at = time.monotonic()
-            self._observe_queue(wait, meta.priority, tenant_id)
-            if self._shadow is None:
-                circuit.before_request()
-            else:
-                # Shadow mode: observe but never block on an open circuit.
-                self._shadow.would_open_circuit(tenant_id=tenant_id)
+            self._policy.observe_queue(wait, meta.priority, tenant_budget, tenant_id, circuit)
+            # In shadow mode an open circuit is observed, not enforced.
+            self._policy.circuit_admits(circuit, tenant_id)
             tracker.request_sent_at = time.monotonic()
 
             if self.state.config.compress is not None and isinstance(body, dict):
@@ -1201,7 +1001,7 @@ class AsyncBackstopTransport:
                 )
                 # Async twin of the sync branch: record at dispatch so the
                 # half-open probe is released by a stream that set up cleanly.
-                self._record_outcome(response.status_code, success=success, circuit=circuit)
+                self._policy.record_outcome(response.status_code, success=success, circuit=circuit)
                 usage = None
                 # Async twin of the sync branch: recorded at dispatch beside the
                 # circuit outcome, with no provider usage available because the
@@ -1227,7 +1027,7 @@ class AsyncBackstopTransport:
                     self.state.quota.ingest(dict(response.headers))
                     self.state.quota.adjust(self.state.aimd)
                 await _areconcile(tenant_budget, self.state.budget, reservation, usage, success=success, downgraded=downgraded)
-                self._record_outcome(response.status_code, success=success, circuit=circuit)
+                self._policy.record_outcome(response.status_code, success=success, circuit=circuit)
                 _record_spend_if_enabled(
                     self.state,
                     request,
@@ -1238,18 +1038,14 @@ class AsyncBackstopTransport:
                     success=success,
                     usage=usage_split,
                 )
-                if self._alerts is not None:
-                    _b = tenant_budget if tenant_budget is not None else self.state.budget
-                    _used = getattr(_b, "spent", None) or getattr(_b, "used", 0)
-                    _lim = getattr(_b, "total", None) or getattr(_b, "limit_tokens", None) or getattr(_b, "limit", 0)
-                    _dispatch_alert(self._alerts, tenant_id, _used, _lim)
-                if self._cache is not None and body is not None and usage is not None:
-                    self._cache.set(body, response.content, usage, dict(response.headers))
-                self._maybe_forecast_enforce()
+                self._policy.alert_on_spend(tenant_id, tenant_budget)
+                if body is not None and usage is not None:
+                    self._policy.cache_set(body, response.content, usage, dict(response.headers))
+                self._policy.maybe_forecast_enforce()
 
             tracker.completed_at = time.monotonic()
             outcome = "success" if success else "error"
-            self._observe_request(meta.endpoint, meta.priority, tracker.created_at, outcome)
+            self._policy.observe_request(meta.endpoint, meta.priority, tracker.created_at, outcome)
 
             backstop_meta = tracker.build_meta(
                 estimated_tokens=meta.estimated_tokens,
@@ -1281,21 +1077,57 @@ class AsyncBackstopTransport:
                 tenant_id=tenant_id,
             )
             if fallback is not None:
+                self._policy.audit("fallback", "circuit_open", meta, tenant_id=tenant_id)
                 return fallback
             tracker.completed_at = time.monotonic()
             await _areconcile(tenant_budget, self.state.budget, reservation, 0, success=False)
-            self._observe_request(meta.endpoint, meta.priority, tracker.created_at, "circuit_open")
+            self._policy.observe_request(
+                meta.endpoint, meta.priority, tracker.created_at, "circuit_open"
+            )
+            self._policy.audit("deny", "circuit_open", meta, tenant_id=tenant_id)
             raise
         except Exception:
             tracker.completed_at = time.monotonic()
             await _areconcile(tenant_budget, self.state.budget, reservation, 0, success=False)
-            self._record_outcome(599, success=False, circuit=circuit)
-            self._observe_request(meta.endpoint, meta.priority, tracker.created_at, "exception")
+            self._policy.record_outcome(599, success=False, circuit=circuit)
+            self._policy.observe_request(meta.endpoint, meta.priority, tracker.created_at, "exception")
             raise
         finally:
             if admitted:
                 await self.state.gate.arelease()
-                self._observe_gauges(circuit, tenant_id)
+                self._policy.observe_gauges(circuit, tenant_budget, tenant_id)
+
+    @property
+    def shadow_collector(self) -> object | None:
+        """The collector the ``would_*`` shadow counters are recorded in.
+
+        The async twin of :attr:`BackstopTransport.shadow_collector`.
+        """
+        return self._policy.shadow
+
+    @shadow_collector.setter
+    def shadow_collector(self, collector: object | None) -> None:
+        self._policy.shadow = collector
+
+    @property
+    def alerts(self) -> object | None:
+        """The budget alert manager this transport fires alerts from."""
+        return self._policy.alerts
+
+    @alerts.setter
+    def alerts(self, manager: object | None) -> None:
+        self._policy.alerts = manager
+
+    async def _areserve(self, tenant_budget: object | None, tokens: int) -> object:
+        """Hold the request's budget, awaiting a shared one.
+
+        The async twin of :meth:`BackstopTransport._reserve`. A shared Redis
+        budget has to be awaited: reserving it synchronously on the event loop
+        blocks every other task in the loop for the length of the round trip.
+        """
+        if tenant_budget is not None:
+            return tenant_budget.reserve(tokens)
+        return await self.state.budget.areserve(tokens)
 
     async def aclose(self) -> None:
         await self._transport.aclose()
@@ -1311,8 +1143,7 @@ class AsyncBackstopTransport:
         circuit: CircuitBreaker | None = None,
         tenant_id: str | None = None,
     ) -> httpx.Response | None:
-        config = self.state.config
-        targets = config.fallback_targets(getattr(meta, "priority", None))
+        targets = self._policy.fallback_targets(getattr(meta, "priority", None))
         if not targets:
             return None
         for target in targets:
@@ -1331,7 +1162,7 @@ class AsyncBackstopTransport:
             usage = None if usage_split is None else usage_split.total
             success = response.status_code < 400
             await _areconcile(tenant_budget, self.state.budget, reservation, usage, success=success)
-            self._record_outcome(response.status_code, success=success, circuit=circuit)
+            self._policy.record_outcome(response.status_code, success=success, circuit=circuit)
             # Async twin of the sync branch's fallback record.
             _record_spend_if_enabled(
                 self.state,
@@ -1344,13 +1175,9 @@ class AsyncBackstopTransport:
                 usage=usage_split,
                 outcome="fallback",
             )
-            if self._alerts is not None:
-                _b = tenant_budget if tenant_budget is not None else self.state.budget
-                _used = getattr(_b, "spent", None) or getattr(_b, "used", 0)
-                _lim = getattr(_b, "total", None) or getattr(_b, "limit_tokens", None) or getattr(_b, "limit", 0)
-                _dispatch_alert(self._alerts, tenant_id, _used, _lim)
+            self._policy.alert_on_spend(tenant_id, tenant_budget)
             tracker.completed_at = time.monotonic()
-            self._observe_request(meta.endpoint, meta.priority, tracker.created_at, "fallback")
+            self._policy.observe_request(meta.endpoint, meta.priority, tracker.created_at, "fallback")
             backstop_meta = tracker.build_meta(
                 estimated_tokens=meta.estimated_tokens,
                 actual_tokens=usage,
@@ -1361,51 +1188,6 @@ class AsyncBackstopTransport:
             setattr(response, "_backstop_meta", backstop_meta)
             return response
         return None
-
-    def _try_downgrade(self, request: httpx.Request, body: dict) -> bool:
-        current_model = body.get("model", "")
-        if not current_model:
-            return False
-        cheaper = get_downgrade_target(current_model)
-        if cheaper is None:
-            return False
-        body["model"] = cheaper
-        new_content = json.dumps(body).encode("utf-8")
-        object.__setattr__(request, "_content", new_content)
-        request.headers["content-length"] = str(len(new_content))
-        return True
-
-    def _audit(self, decision: str, reason: str, meta: object, **fields: object) -> None:
-        audit = self.state.audit
-        if audit is None:
-            return
-        fields.setdefault("endpoint", getattr(meta, "endpoint", None))
-        fields.setdefault("priority", getattr(meta, "priority", None))
-        fields.setdefault("estimated_tokens", getattr(meta, "estimated_tokens", None))
-        audit.record(decision, reason, **fields)
-
-    def _pre_admit_checks(self, request: httpx.Request, meta: object, tenant_id: str | None) -> None:
-        cfg = self.state.config
-        if cfg.shadow_policy is not None and cfg.shadow_policy.should_shadow():
-            cfg.shadow_policy.record(
-                "shadow", "sampled", endpoint=getattr(meta, "endpoint", None),
-                estimated_tokens=getattr(meta, "estimated_tokens", None), tenant_id=tenant_id,
-            )
-        if cfg.rate_limiter is not None and not cfg.rate_limiter.allow(getattr(meta, "estimated_tokens", 0)):
-            if self._shadow is not None:
-                self._shadow.would_throttle(tenant_id=tenant_id)
-            else:
-                self._metrics.call("rate_limited")
-                self._audit("deny", "rate_limited", meta, tenant_id=tenant_id)
-                raise RateLimitError("rate limiter rejected request")
-        agent_id = request.headers.get("X-Backstop-Agent")
-        if cfg.agent_guard is not None and agent_id:
-            if not cfg.agent_guard.allow(agent_id, getattr(meta, "estimated_tokens", 0)):
-                if self._shadow is not None:
-                    self._shadow.would_guardrail(tenant_id=tenant_id, agent_id=agent_id)
-                else:
-                    self._audit("deny", "agent_guardrail", meta, tenant_id=tenant_id, agent_id=agent_id)
-                    raise GuardrailViolationError(f"agent {agent_id!r} exceeded guardrail")
 
     async def _aacquire_gate(self, priority: Priority, deadline: float | None) -> float:
         effective: float | None = None
@@ -1434,7 +1216,7 @@ class AsyncBackstopTransport:
                 response = await self._transport.handle_async_request(request)
             except (self._compat.TimeoutException, self._compat.TransportError):
                 self._retry_count += 1
-                self._after_attempt(success=False, pressure=True, circuit=circuit)
+                self._policy.after_attempt(success=False, pressure=True, circuit=circuit)
                 if attempt >= self.state.config.retry_max_attempts - 1:
                     raise
                 self._metrics.call("retry_attempts", endpoint)
@@ -1449,113 +1231,9 @@ class AsyncBackstopTransport:
             await response.aread()
             await response.aclose()
             last_response = response
-            self._after_attempt(success=False, pressure=True, circuit=circuit)
+            self._policy.after_attempt(success=False, pressure=True, circuit=circuit)
             self._metrics.call("retry_attempts", endpoint)
             await self._sleep(backoff_delay(attempt, self.state.config))
 
         assert last_response is not None
         return last_response
-
-    def _after_attempt(self, *, success: bool, pressure: bool, circuit: CircuitBreaker | None = None) -> None:
-        tripped = (circuit or self.state.circuit).after_request(success=success)
-        if tripped:
-            self._metrics.call("circuit_trips")
-        if pressure and self.state.aimd.record_pressure():
-            self._metrics.call("aimd_changes", "decrease")
-
-    def _record_outcome(self, status_code: int, *, success: bool, circuit: CircuitBreaker | None = None) -> None:
-        tripped = (circuit or self.state.circuit).after_request(success=success)
-        if tripped:
-            self._metrics.call("circuit_trips")
-        if success:
-            if self.state.aimd.record_success():
-                self._metrics.call("aimd_changes", "increase")
-        elif is_retryable_status(status_code, self.state.config):
-            if self.state.aimd.record_pressure():
-                self._metrics.call("aimd_changes", "decrease")
-
-    def _observe_queue(
-        self, wait: float, priority: Priority, tenant_id: str | None = None
-    ) -> None:
-        self._metrics.call("queue_wait", priority.value, method="observe", amount=wait)
-        self._observe_gauges(tenant_id=tenant_id)
-
-    def _observe_request(
-        self, endpoint: str, priority: Priority, started: float, outcome: str
-    ) -> None:
-        self._metrics.call("requests", endpoint, priority.value, outcome)
-        self._metrics.call(
-            "duration", endpoint, priority.value, method="observe", amount=time.monotonic() - started
-        )
-
-    def _observe_gauges(
-        self, circuit: CircuitBreaker | None = None, tenant_id: str | None = None
-    ) -> None:
-        """Publish the gauges. ``tenant_id`` is the *resolved* tenant.
-
-        The tenant is resolved once, at the top of ``handle_request``, from the
-        ambient context **or** from the virtual-key header, and the request is
-        then budgeted against whichever it resolved to. Re-reading the ContextVar
-        here reported the global ``budget_remaining`` for every request made with
-        a virtual key, so a per-tenant deployment saw a gauge that described a
-        budget none of its requests were spending — a number that looks plausible
-        and is about the wrong thing.
-
-        The caller passes the resolved tenant rather than this re-deriving it,
-        because re-deriving it is the bug. ``None`` means "no tenant resolved",
-        which is the global budget, and is the same answer as before.
-        """
-        if tenant_id is not None:
-            tb = get_ledger().get(tenant_id)
-            remaining = tb.remaining if tb is not None else None
-        else:
-            remaining = self.state.budget.remaining
-        if remaining is not None:
-            self._metrics.call("budget_remaining", method="set", value=remaining)
-        self._metrics.call("queue_depth", method="set", value=self.state.gate.depth)
-        self._metrics.call("concurrency_active", method="set", value=self.state.gate.active)
-        self._metrics.call("concurrency_limit", method="set", value=self.state.aimd.current_limit)
-        active_circuit = circuit or self.state.circuit
-        circuit_value = {
-            CircuitState.CLOSED: 0,
-            CircuitState.HALF_OPEN: 1,
-            CircuitState.OPEN: 2,
-        }[active_circuit.state]
-        self._metrics.call("circuit_state", method="set", value=circuit_value)
-    def _resolve_secret(self, request: httpx.Request) -> None:
-        """Resolve a virtual key to a provider secret at call time."""
-        cfg = self.state.config
-        if cfg.secret_provider is None or cfg.virtual_keys is None:
-            return
-        vk = request.headers.get(cfg.virtual_key_header)
-        if vk is None or vk not in cfg.virtual_keys:
-            return
-        from .secrets import resolve_secret
-
-        secret = resolve_secret(cfg.secret_provider, vk)
-        if secret:
-            request.headers["authorization"] = f"Bearer {secret}"
-
-    def _maybe_forecast_enforce(self) -> None:
-        """Proactively tighten AIMD when burn rate projects exhaustion.
-
-        Called after every successful response. When ``forecast_horizon_seconds``
-        is configured and the current burn rate would exhaust the budget within
-        that horizon, clamp the AIMD concurrency limit to slow down before the
-        cap is hit.
-        """
-        horizon = self.state.config.forecast_horizon_seconds
-        if not horizon or self.state.budget.total is None:
-            return
-        remaining = self.state.budget.remaining
-        if remaining is None or remaining <= 0:
-            return
-        spent = self.state.budget.spent
-        if spent <= 0:
-            return
-        from .forecast import BurnSample, will_exhaust
-
-        sample = BurnSample(used_tokens=spent, window_seconds=max(1.0, min(spent / max(1, 1), 30.0)))
-        if will_exhaust(sample, self.state.budget.total, horizon):
-            self.state.aimd.record_pressure()
-            self._metrics.call("aimd_changes", "decrease")

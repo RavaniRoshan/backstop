@@ -420,6 +420,92 @@ def _build_bundled() -> Mapping[str, PriceEntry]:
 BUNDLED_PRICES: Mapping[str, PriceEntry] = _build_bundled()
 
 
+#: What each model downgrades to when a budget is exhausted and the tenant is
+#: configured to downgrade rather than deny.
+#:
+#: It lives here, beside the prices, for one reason: a downgrade that is not
+#: cheaper is not a downgrade. The map used to be a second table in
+#: :mod:`backstop.pricing`, holding 18 models with float rates, while the
+#: catalog held 45 with exact decimal ones. The transport read the downgrade
+#: map and the ledger read the catalog, so **31 of the 45 models Backstop
+#: priced had no downgrade target at all** — every current-generation model
+#: silently failed to downgrade, and the request that was supposed to be
+#: rescued was denied instead.
+#:
+#: Every pair below is checked by
+#: ``tests/test_pricing_catalog.py``: the target must be in the catalog, on
+#: the same provider, and strictly cheaper. A map entry that stops being true
+#: fails the build rather than quietly rescuing a request with a more
+#: expensive model.
+#:
+#: A model with no entry is the cheapest in its line, and has nowhere to go.
+DOWNGRADE_TARGETS: Mapping[str, str] = MappingProxyType(
+    {
+        # --- OpenAI ---
+        "gpt-6-astra": "gpt-6-sol",
+        "gpt-6-sol": "gpt-6-luna",
+        "gpt-5.6-sol": "gpt-5.6-terra",
+        "gpt-5.6-terra": "gpt-5.6-luna",
+        "gpt-5.5": "gpt-5.2",
+        "gpt-5.4": "gpt-5.2",
+        "gpt-5.4-mini": "gpt-5-mini",
+        "gpt-5.4-nano": "gpt-5-nano",
+        "gpt-5.2": "gpt-5",
+        "gpt-5.1": "gpt-4.1",
+        "gpt-5": "gpt-4.1",
+        "gpt-5-mini": "gpt-4.1-mini",
+        "gpt-4-turbo": "gpt-4o",
+        "gpt-4": "gpt-4-turbo",
+        "gpt-4.1": "gpt-4.1-mini",
+        "gpt-4.1-mini": "gpt-4.1-nano",
+        "gpt-4o": "gpt-4o-mini",
+        "o1-pro": "o1",
+        "o1": "o3",
+        "o3-pro": "o3",
+        "o3": "o3-mini",
+        "o3-mini": "gpt-4.1-mini",
+        "o4-mini": "gpt-4.1-mini",
+        # --- Anthropic ---
+        "claude-fable-5-1": "claude-opus-5",
+        "claude-opus-5-5": "claude-sonnet-5",
+        "claude-opus-5": "claude-sonnet-5",
+        "claude-opus-4-8": "claude-sonnet-4-20250514",
+        "claude-opus-4-20250514": "claude-sonnet-4-20250514",
+        "claude-sonnet-5": "claude-haiku-4-5",
+        "claude-sonnet-4-6": "claude-haiku-4-5",
+        "claude-sonnet-4-5": "claude-haiku-4-5",
+        "claude-sonnet-4-20250514": "claude-haiku-4-20250514",
+        "claude-haiku-4-5": "claude-haiku-4-20250514",
+        "claude-haiku-4-20250514": "claude-3-haiku-20240307",
+        "claude-3-5-sonnet-20241022": "claude-3-5-haiku-20241022",
+        "claude-3-5-haiku-20241022": "claude-3-haiku-20240307",
+        "claude-3-sonnet-20240229": "claude-3-haiku-20240307",
+        "claude-3-opus-20240229": "claude-3-5-sonnet-20241022",
+    }
+)
+
+
+def downgrade_target(model: str) -> str | None:
+    """The cheaper model to fall back to when ``model``'s budget is exhausted.
+
+    Resolution follows the same name tiers as a price lookup, so a dated
+    snapshot or an alias resolves to its family's entry: ``gpt-4o-2024-08-06``
+    offers ``gpt-4o``, and therefore ``gpt-4o-mini``.
+
+    ``None`` means there is nowhere cheaper to go — the model is the cheapest
+    in its line, or the catalog has never heard of it. It is not an error and
+    not a guess: the caller denies the request, which is the honest outcome
+    for a model Backstop cannot price a cheaper alternative for.
+    """
+    if not isinstance(model, str) or not model:
+        return None
+    for candidate in model_candidates(model):
+        target = DOWNGRADE_TARGETS.get(candidate)
+        if target is not None:
+            return target
+    return None
+
+
 @lru_cache(maxsize=2048)
 def model_candidates(model: str) -> tuple[str, ...]:
     """Return the names a lookup for ``model`` should try, most specific first.

@@ -1,4 +1,5 @@
 import threading
+from decimal import Decimal
 
 import httpx
 import pytest
@@ -198,10 +199,13 @@ def test_downgrade_target_lookup():
 
 
 def test_estimate_cost():
+    """The estimate is a Decimal, like every other amount in the package."""
     cost = estimate_cost(1000, 500, "gpt-4o")
-    assert cost == 0.0075  # (1000/1000)*0.0025 + (500/1000)*0.01
+    # (1000/1e6)*2.50 + (500/1e6)*10.00, from the one catalog.
+    assert cost == Decimal("0.007500")
+    assert isinstance(cost, Decimal)
     cost = estimate_cost(0, 0, "unknown")
-    assert cost == 0.0
+    assert cost == Decimal("0.000000")
 
 
 def test_register_pricing():
@@ -213,7 +217,7 @@ def test_register_pricing():
     })
     assert get_downgrade_target("custom-model") is None
     cost = estimate_cost(1000, 500, "custom-model")
-    assert cost == 0.002
+    assert cost == Decimal("0.002000")
 
 
 def _json_body_compat(request: httpx.Request) -> dict | None:
