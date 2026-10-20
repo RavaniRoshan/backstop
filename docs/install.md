@@ -4,9 +4,9 @@ Backstop's Python distribution is `backstop-ai`. The import remains
 `backstop`, and the console commands remain `backstop` and `wedge`.
 Python 3.10 or newer is required.
 
-> **0.6.0 is published.** The registry commands below are the supported
-> install path: `backstop-ai` 0.6.0 is on PyPI, `backstop-ai` 0.6.0 is on npm,
-> and the `v0.6.0` GitHub Release carries the wheel and sdist. The default
+> **0.8.0 is published.** The registry commands below are the supported
+> install path: `backstop-ai` 0.8.0 is on PyPI, `backstop-ai` 0.8.0 is on npm,
+> and the `v0.8.0` GitHub Release carries the wheel and sdist. The default
 > branch is unreleased work past that tag. The PyPI name `backstop` belongs to
 > an unrelated project.
 >
@@ -44,10 +44,10 @@ curl -fsSL https://raw.githubusercontent.com/RavaniRoshan/backstop/main/install.
 sh install.sh
 ```
 
-It runs `python3 -m pip install --user --upgrade "backstop-ai[anthropic]==0.6.0"`.
+It runs `python3 -m pip install --user --upgrade "backstop-ai[anthropic]==0.8.0"`.
 If the PyPI install fails, it falls back to the GitHub repository's current
 source, which is not a pinned release. Set `BACKSTOP_NO_GITFALLBACK=1` to
-fail instead. The 0.6.0 release verification installed from PyPI directly with
+fail instead. The 0.8.0 release verification installed from PyPI directly with
 pip, not through this script.
 
 > The script supports macOS and Linux; on Windows use Python's official
@@ -130,9 +130,9 @@ package-source policy.
 ### Pinned installs
 
 ```bash
-pip install "backstop-ai[anthropic]==0.6.0"
+pip install "backstop-ai[anthropic]==0.8.0"
 # or, for the isolated CLI
-pipx install "backstop-ai==0.6.0"
+pipx install "backstop-ai==0.8.0"
 ```
 
 Pinning Backstop alone does not pin dependencies. For applications, commit a
@@ -144,12 +144,12 @@ lockfile so environments resolve identical versions (e.g. `pip-compile` from
 1. Build the wheel from this source checkout on a connected machine with
    the `build` package installed:
    ```bash
-   python -m build --wheel   # expected: dist/backstop_ai-0.6.0-py3-none-any.whl
+   python -m build --wheel   # expected: dist/backstop_ai-0.8.0-py3-none-any.whl
    ```
-2. Transfer `backstop_ai-0.6.0-py3-none-any.whl` plus its dependency wheels to
+2. Transfer `backstop_ai-0.8.0-py3-none-any.whl` plus its dependency wheels to
    a `wheelhouse` directory on the target and install without index access:
    ```bash
-   pip install --no-index --find-links ./wheelhouse "backstop-ai==0.6.0"
+   pip install --no-index --find-links ./wheelhouse "backstop-ai==0.8.0"
    ```
 
 ### Server surface (metrics / Wedge harness)

@@ -319,6 +319,412 @@ def _run_doctor() -> int:
     return 0
 
 
+#: The command groups, in the order ``backstop --help`` shows them. Each
+#: heading is a question the operator is asking: *can I prove it works?*,
+#: *what did it cost?*, *how do I run it?*, *does it reach the provider?*
+#:
+#: argparse has no native support for grouping subcommands, so the help
+#: formatter below does it. The grouping is presentation only: every
+#: command keeps the name it has always had, and the groups are not
+#: namespaces.
+COMMAND_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("Prove it", ("verify", "demo", "doctor", "benchmark", "harness")),
+    ("Money", ("ledger", "reconcile", "budget", "detect", "forecast", "audit")),
+    ("Run it", ("serve", "metrics", "dashboard")),
+    ("Live check", ("real-openai", "real-anthropic")),
+)
+
+
+class _GroupedHelpFormatter(argparse.HelpFormatter):
+    """A help formatter that puts the subcommands under headings.
+
+    The default puts every subcommand in one flat list, in the order they
+    were added, which is neither alphabetical nor grouped by what the
+    operator is trying to do. Twelve commands in one list is a list nobody
+    scans.
+    """
+
+    def _format_action(self, action: argparse.Action) -> str:
+        # A subparsers action renders its choices as sub-actions. The default
+        # renders them as one flat list, in the order they were added; this
+        # renders them under the headings above.
+        get_subactions = getattr(action, "_get_subactions", None)
+        if get_subactions is None:
+            return super()._format_action(action)
+
+        by_name: dict[str, str] = {}
+        for subaction in get_subactions():
+            name = str(getattr(subaction, "metavar", ""))
+            by_name[name] = self._heading_for(name)
+
+        parts: list[str] = []
+        # The groups in the order they are declared, so the help reads in the
+        # order an operator works in rather than the order the commands
+        # happen to be registered.
+        for heading, commands in COMMAND_GROUPS:
+            group = [
+                subaction
+                for subaction in get_subactions()
+                if str(getattr(subaction, "metavar", "")) in commands
+            ]
+            if not group:
+                continue
+            parts.append(f"{' ' * self._current_indent}{heading}:\n")
+            self._indent()
+            try:
+                for subaction in group:
+                    parts.append(self._format_action(subaction))
+            finally:
+                self._dedent()
+        # Anything the groups do not name still has to be listed, or the help
+        # would hide a command that works.
+        others = [
+            subaction
+            for subaction in get_subactions()
+            if by_name.get(str(getattr(subaction, "metavar", ""))) == "Other commands"
+        ]
+        if others:
+            parts.append(f"{' ' * self._current_indent}Other commands:\n")
+            self._indent()
+            try:
+                for subaction in others:
+                    parts.append(self._format_action(subaction))
+            finally:
+                self._dedent()
+        return self._join_parts(parts)
+
+    @staticmethod
+    def _heading_for(command: str) -> str:
+        for heading, commands in COMMAND_GROUPS:
+            if command in commands:
+                return heading
+        return "Other commands"
+
+
+# ---------------------------------------------------------------------------
+# budget, detect, forecast, audit
+# ---------------------------------------------------------------------------
+
+
+def _exact_money(amount: decimal.Decimal) -> str:
+    """Render an amount at the ledger's own precision.
+
+    The ledger's :func:`~backstop.ledger.export.money` rounds to cents,
+    which is right for a charge-back CSV and wrong for a budget report: a
+    spend of $0.003 rendered as "$0.00" says nothing happened, and a ceiling
+    of $0.0020 rendered the same way looks like the same number as a spend
+    of $0.0030. These reports are about headroom, and headroom can be
+    fractions of a cent.
+    """
+    if isinstance(amount, bool) or not isinstance(amount, decimal.Decimal):
+        raise TypeError(f"amount must be a Decimal, got {type(amount).__name__}")
+    return f"{amount:.6f}"
+
+
+def _read_ledger_events(path: str) -> tuple[list, object] | None:
+    """Read a ledger file, or report why it could not be read.
+
+    Returns ``(events, read)``, or ``None`` after reporting the failure. A
+    corrupt line is a failure and never a skipped line: a report over a
+    ledger with a hole in the middle is not a report.
+    """
+    from .ledger import export as ledger_export
+
+    try:
+        read = ledger_export.read_ledger(path)
+    except ledger_export.LedgerCorruptionError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return None
+    except OSError as exc:
+        print(f"error: cannot read ledger {path!r}: {exc}", file=sys.stderr)
+        return None
+    return list(read.events), read
+
+
+def _run_budget(args: argparse.Namespace) -> int:
+    """``backstop budget`` — where the spend stands against a ceiling.
+
+    The question this answers is the one a token budget cannot: *how much of
+    the money have we spent, and how much is left?* It reads the ledger the
+    deployment already writes, so it works from a file rather than from a
+    running process, and it needs no key and no network.
+    """
+    from .ledger import export as ledger_export
+
+    loaded = _read_ledger_events(args.ledger)
+    if loaded is None:
+        return 1
+    events, read = loaded
+    try:
+        rows = ledger_export.build_chargeback(
+            events, tuple(args.group_by), ledger_export.Period.all()
+        )
+        totals = ledger_export.chargeback_totals(rows, tuple(args.group_by))
+    except decimal.DecimalException as exc:
+        return _decimal_failure(args, exc)
+
+    ceiling = args.usd
+    spent = totals.unrounded_total_usd
+    if ceiling is not None:
+        remaining = max(decimal.Decimal("0"), ceiling - spent)
+        exceeded = spent > ceiling
+    else:
+        remaining = None
+        exceeded = False
+
+    if args.json:
+        payload = json.loads(ledger_export.render_chargeback_json(list(rows), totals))
+        payload["file"] = read.to_dict()
+        payload["ceiling_usd"] = None if ceiling is None else str(ceiling)
+        payload["remaining_usd"] = None if remaining is None else str(remaining)
+        payload["exceeded"] = exceeded
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
+
+    print("# Backstop Budget\n")
+    print(f"- Ledger: {args.ledger}")
+    print(f"- Events: {len(events)}")
+    print(f"- Spend: {_exact_money(spent)} {totals.currency}")
+    if ceiling is not None:
+        print(f"- Ceiling: {_exact_money(ceiling)} {totals.currency}")
+        print(
+            f"- Remaining: {_exact_money(remaining)} {totals.currency}"
+            + ("  ** OVER CEILING **" if exceeded else "")
+        )
+    else:
+        print("- Ceiling: (none given — pass --usd to see the headroom)")
+    print(f"- Unpriced requests: {totals.unpriced_requests}")
+    print()
+    print("| Group | Requests | Total USD |")
+    print("|---|---:|---:|")
+    for row in list(rows)[: max(args.limit, 0) or None]:
+        label = ", ".join(str(v) for v in row.keys) if row.keys else "(unattributed)"
+        print(f"| {label} | {row.request_count} | {_exact_money(row.total_usd)} |")
+    return 0
+
+
+def _run_detect(args: argparse.Namespace) -> int:
+    """``backstop detect`` — the runaway-spend signals, over a ledger file.
+
+    The four detectors the transport runs live — velocity, drift, retry
+    amplification and context growth — are run here over the same events, so
+    a deployment can see what it *would* have been told before it is told.
+    """
+    from .detection import DetectionConfig, RunawayDetector
+
+    loaded = _read_ledger_events(args.ledger)
+    if loaded is None:
+        return 1
+    events, _read = loaded
+    config = DetectionConfig(
+        enabled=True,
+        shadow=True,
+        window_size=args.window,
+        min_samples=args.min_samples,
+    )
+    detector = RunawayDetector(config)
+    signals: list = []
+    for event in events:
+        signals.extend(detector.observe(event))
+
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "events": len(events),
+                    "signals": [
+                        {
+                            "kind": s.kind,
+                            "severity": s.severity,
+                            "observed": str(s.observed),
+                            "threshold": str(s.threshold),
+                            "detail": s.detail,
+                        }
+                        for s in signals
+                    ],
+                    "counts": detector.counts(),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 0
+
+    print("# Backstop Runaway-Spend Detection\n")
+    print(f"- Ledger: {args.ledger}")
+    print(f"- Events: {len(events)}")
+    print(f"- Signals: {len(signals)}")
+    print()
+    if not signals:
+        print("No signals. Either the spend is normal, or there is not enough of it yet.")
+        return 0
+    print("| Kind | Severity | Observed | Threshold | Detail |")
+    print("|---|---|---:|---:|---|")
+    for signal in signals:
+        print(
+            f"| {signal.kind} | {signal.severity} | {signal.observed} | "
+            f"{signal.threshold} | {signal.detail} |"
+        )
+    return 0
+
+
+def _run_forecast(args: argparse.Namespace) -> int:
+    """``backstop forecast`` — when the budget runs out, at the measured rate.
+
+    The burn rate is measured from the ledger's own timestamps: the first and
+    last event, and what was spent between them. What it projects is
+    exhaustion, not spend — a rate of spending says nothing about what the
+    next month will cost.
+    """
+    from .ledger import export as ledger_export
+
+    loaded = _read_ledger_events(args.ledger)
+    if loaded is None:
+        return 1
+    events, _read = loaded
+    if len(events) < 2:
+        print(
+            "Not enough events to measure a burn rate (need at least two).",
+            file=sys.stderr,
+        )
+        return 1
+
+    import datetime as dt
+
+    stamps = []
+    for event in events:
+        try:
+            stamps.append(dt.datetime.fromisoformat(event.occurred_at))
+        except (TypeError, ValueError):
+            continue
+    if len(stamps) < 2:
+        print("Not enough events with usable timestamps.", file=sys.stderr)
+        return 1
+    stamps.sort()
+    window = max((stamps[-1] - stamps[0]).total_seconds(), 1e-9)
+
+    try:
+        rows = ledger_export.build_chargeback(
+            events, tuple(args.group_by), ledger_export.Period.all()
+        )
+        totals = ledger_export.chargeback_totals(rows, tuple(args.group_by))
+    except decimal.DecimalException as exc:
+        return _decimal_failure(args, exc)
+
+    spent = totals.unrounded_total_usd
+    # The division is in Decimal, like every other amount; the rate is a
+    # rate rather than an amount, and is a float for the projection.
+    rate_per_min = float(
+        (spent / decimal.Decimal(str(window))) * decimal.Decimal(60)
+    )
+    ceiling = args.usd
+    if ceiling is None:
+        seconds_remaining = None
+        will_exhaust = None
+    else:
+        remaining = max(decimal.Decimal("0"), ceiling - spent)
+        if rate_per_min > 0:
+            seconds_remaining = float(
+                remaining / decimal.Decimal(str(rate_per_min / 60.0))
+            )
+            will_exhaust = seconds_remaining <= args.horizon
+        else:
+            seconds_remaining = float("inf")
+            will_exhaust = False
+
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "events": len(events),
+                    "window_seconds": window,
+                    "spent_usd": str(spent),
+                    "rate_usd_per_minute": str(rate_per_min),
+                    "ceiling_usd": None if ceiling is None else str(ceiling),
+                    "projected_remaining_seconds": seconds_remaining,
+                    "will_exhaust_within_horizon": will_exhaust,
+                    "horizon_seconds": args.horizon,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 0
+
+    print("# Backstop Forecast\n")
+    print(f"- Ledger: {args.ledger}")
+    print(f"- Events: {len(events)} over {window:.3f}s")
+    print(f"- Spend: {_exact_money(spent)} {totals.currency}")
+    print(f"- Burn rate: {rate_per_min:.6f} {totals.currency}/min")
+    if ceiling is None:
+        print("- Ceiling: (none given — pass --usd to project exhaustion)")
+    else:
+        print(f"- Ceiling: {_exact_money(ceiling)} {totals.currency}")
+        if seconds_remaining == float("inf"):
+            print("- Projected exhaustion: never, at this rate")
+        else:
+            minutes = seconds_remaining / 60.0
+            print(f"- Projected exhaustion: in {minutes:.1f} min")
+            if will_exhaust:
+                print(
+                    f"  ** within the {args.horizon:.0f}s horizon — "
+                    "tighten the budget or the concurrency limit **"
+                )
+    return 0
+
+
+def _run_audit(args: argparse.Namespace) -> int:
+    """``backstop audit`` — verify the tamper-evident audit chain.
+
+    The chain is an HMAC over each record plus the previous record's chain
+    value, so a modified record breaks it. Verifying is the whole point of
+    writing it down, and it is a command because "is the audit log still
+    intact" is a question somebody has to be able to answer.
+    """
+    from .audit import AuditLog
+
+    path = args.path
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            lines = handle.readlines()
+    except OSError as exc:
+        print(f"error: cannot read audit log {path!r}: {exc}", file=sys.stderr)
+        return 1
+
+    key = args.hmac_key.encode("utf-8") if args.hmac_key else b""
+    log = AuditLog.__new__(AuditLog)
+    log._key = key
+    log._prev = b""
+    log._lock = __import__("threading").Lock()
+    log._file = None
+    log._callable = None
+    intact = log.verify(lines)
+
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "path": path,
+                    "records": len([line for line in lines if line.strip()]),
+                    "intact": intact,
+                    "hmac_key_supplied": bool(args.hmac_key),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+    else:
+        print("# Backstop Audit\n")
+        print(f"- Log: {path}")
+        print(f"- Records: {len([line for line in lines if line.strip()])}")
+        print(f"- Chain intact: {'yes' if intact else 'NO'}")
+        if not intact and not args.hmac_key:
+            print(
+                "  (no --hmac-key given, so the chain was checked without its key)"
+            )
+    return 0 if intact else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the ``backstop`` argument parser.
 
@@ -337,6 +743,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="backstop",
         description="In-process token budget, circuit breaking and concurrency control.",
+        epilog=(
+            "Start here: `backstop verify` proves the install in thirty seconds, "
+            "with no key and no network. `backstop --help` groups the commands "
+            "by what you are trying to do."
+        ),
+        formatter_class=_GroupedHelpFormatter,
     )
     parser.add_argument(
         "--version",
@@ -518,6 +930,77 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ledger_export.add_argument("--json", action="store_true", help="emit JSON instead of Markdown")
 
+    budget = subparsers.add_parser(
+        "budget",
+        help="show spend against a ceiling (token or dollar), from a ledger file",
+    )
+    budget.add_argument(
+        "--ledger", required=True, help="path to a JSONL ledger file"
+    )
+    budget.add_argument(
+        "--usd",
+        type=decimal.Decimal,
+        default=None,
+        help="the ceiling in dollars; without it the report shows the spend alone",
+    )
+    budget.add_argument(
+        "--group-by",
+        type=_group_by_arg,
+        default=("team", "feature"),
+        help="comma-separated dimensions to group by (default: team,feature)",
+    )
+    budget.add_argument("--limit", type=int, default=0, help="rows to show; 0 for all")
+    budget.add_argument("--json", action="store_true", help="emit JSON instead of Markdown")
+
+    detect = subparsers.add_parser(
+        "detect",
+        help="run the runaway-spend detectors over a ledger file",
+    )
+    detect.add_argument("--ledger", required=True, help="path to a JSONL ledger file")
+    detect.add_argument(
+        "--window", type=int, default=64, help="events per attribution key to consider"
+    )
+    detect.add_argument(
+        "--min-samples", type=int, default=8, help="samples a key needs before it can signal"
+    )
+    detect.add_argument("--json", action="store_true", help="emit JSON instead of Markdown")
+
+    forecast = subparsers.add_parser(
+        "forecast",
+        help="project budget exhaustion from the burn rate a ledger measured",
+    )
+    forecast.add_argument("--ledger", required=True, help="path to a JSONL ledger file")
+    forecast.add_argument(
+        "--usd", type=decimal.Decimal, default=None, help="the ceiling in dollars"
+    )
+    forecast.add_argument(
+        "--horizon",
+        type=float,
+        default=3600.0,
+        help="seconds ahead to flag exhaustion against (default: 3600)",
+    )
+    forecast.add_argument(
+        "--group-by",
+        type=_group_by_arg,
+        default=("team", "feature"),
+        help="comma-separated dimensions to group by (default: team,feature)",
+    )
+    forecast.add_argument("--json", action="store_true", help="emit JSON instead of Markdown")
+
+    audit = subparsers.add_parser(
+        "audit",
+        help="verify the tamper-evident audit chain",
+    )
+    audit.add_argument("--path", required=True, help="path to a JSONL audit log")
+    audit.add_argument(
+        "--hmac-key",
+        default=None,
+        help="the audit_hmac_key the chain was written with; without it the "
+        "chain is checked without its key, which verifies the structure and "
+        "not the signature",
+    )
+    audit.add_argument("--json", action="store_true", help="emit JSON instead of Markdown")
+
     reconcile = subparsers.add_parser(
         "reconcile", help="reconcile the priced ledger against a provider statement file"
     )
@@ -554,6 +1037,18 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    if args.command == "budget":
+        return _run_budget(args)
+
+    if args.command == "detect":
+        return _run_detect(args)
+
+    if args.command == "forecast":
+        return _run_forecast(args)
+
+    if args.command == "audit":
+        return _run_audit(args)
 
     if args.command == "reconcile" and args.ledger and not args.invoice:
         # A usage error, and exit 2, rather than a run that reconciles the ledger

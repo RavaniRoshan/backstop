@@ -130,3 +130,44 @@ def test_the_cli_reports_its_version() -> None:
     with pytest.raises(SystemExit) as excinfo:
         main(["--version"])
     assert excinfo.value.code == 0
+
+
+def test_every_doc_page_is_linked_from_the_readme() -> None:
+    """A doc nobody can find is a doc nobody reads.
+
+    The ``usecases/`` tree, the dashboard page and the Prometheus alert rules
+    were all shipped without an inbound link — 1,248 lines of walkthroughs and
+    two operational pages that no reader could reach. The README's
+    documentation index is now the index, and this keeps it honest.
+    """
+    readme = (REPO / "README.md").read_text(encoding="utf-8")
+    missing = [
+        path.name
+        for path in sorted((REPO / "docs").glob("*.md"))
+        if f"docs/{path.name}" not in readme
+    ]
+    assert not missing, (
+        f"documentation pages with no link from the README: {missing}. A page "
+        "nobody can find is a page nobody reads."
+    )
+
+
+def test_no_document_points_at_a_file_that_does_not_exist() -> None:
+    """A link to a file that is not there is worse than no link.
+
+    It looks like documentation and sends the reader nowhere.
+    """
+    import re
+
+    broken: list[str] = []
+    pattern = re.compile(r"\[[^\]]+\]\((?!https?://|#)([^)]+)\)")
+    for source in sorted((REPO / "docs").glob("*.md")) + [REPO / "README.md"]:
+        text = source.read_text(encoding="utf-8")
+        for target in pattern.findall(text):
+            target = target.split("#", 1)[0]
+            if not target:
+                continue
+            resolved = (source.parent / target).resolve()
+            if not resolved.exists():
+                broken.append(f"{source.relative_to(REPO)} -> {target}")
+    assert not broken, "links to files that do not exist:\n" + "\n".join(broken)

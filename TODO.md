@@ -1,6 +1,7 @@
 # Ledger Foundation — task checklist
 
-Mirrors `docs/planning/_build-plan.md`. Update the checkbox when a task is reviewed clean.
+The checklist for the 0.7.0 ledger build. It is complete; the release notes
+in `CHANGELOG.md` are the record of what was built.
 
 ## Tasks
 
@@ -18,3 +19,10 @@ Mirrors `docs/planning/_build-plan.md`. Update the checkbox when a task is revie
 ## Completion
 
 - [x] ALL_TASKS_COMPLETE
+
+---
+
+The 0.7.0 ledger build is complete and released. The plan file this
+checklist mirrored was removed from the repository in the 0.8.0 cleanup —
+internal planning documents are not shipped, and the release notes in
+`CHANGELOG.md` are the record of what was built.

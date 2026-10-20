@@ -13,12 +13,18 @@
 - Committed benchmark snapshot: /docs/benchmark-results-2026-07-20.md
 - Concurrency and scale limits: /docs/concurrency.md
 - Spend ledger, chargeback export and runaway-spend detection: /docs/ledger.md
+- Dollar budgets: /docs/usd-budgets.md
+- Runaway-spend detection: /docs/detection.md
+- Budget alerts and webhooks: /docs/alerts.md
+- Framework adapters: /docs/frameworks.md
+- Built-in dashboard: /docs/dashboard.md
 - Threat model: /docs/threat-model.md
+- Use cases and walkthroughs: /usecases/
 
-## Install (0.6.0 published)
+## Install (0.8.0 published)
 
-The distribution is `backstop-ai`; the import is `backstop`. 0.6.0 is on PyPI
-and on the `v0.6.0` GitHub Release. Note that `backstop-ai` on **npm** is a
+The distribution is `backstop-ai`; the import is `backstop`. 0.8.0 is on PyPI
+and on the `v0.8.0` GitHub Release. Note that `backstop-ai` on **npm** is a
 separate, partial TypeScript port — not this package.
 
 ```bash
@@ -53,6 +59,19 @@ except BudgetExceededError:
     print("Budget exhausted")
 ```
 
+A ceiling in dollars, on top of the token one:
+
+```python
+from decimal import Decimal
+from backstop import Backstop
+
+client = Backstop.wrap(OpenAI(), budget=50_000, budget_usd=Decimal("5.00"))
+```
+
+A dollar ceiling is a *second* ceiling, not a replacement: a request is
+admitted only if it fits under both. It requires the price catalog, so it
+turns the spend ledger on. See /docs/usd-budgets.md.
+
 ## Keyless proof (no API key needed)
 
 ```bash
@@ -68,6 +87,9 @@ cancelled. `starvation_after_seconds` (default 1.0) releases the oldest ticket
 in any queue once it has waited that long, so a low-priority ticket cannot wait
 forever. `queue_timeout` bounds the wait with an error instead.
 
+A queue timeout raises `AdmissionTimeoutError`, which is both a
+`BackstopError` and a builtin `TimeoutError`, so either handler catches it.
+
 ## Retries
 
 Wrapping sets the wrapped client to `max_retries=0`. Backstop performs the
@@ -81,26 +103,49 @@ not expect the SDK's retry layer to still be active.
 
 Those are the *tested* ranges. CI runs one job on ubuntu-latest across
 Python 3.10/3.11/3.12 × openai 2.37.0/3.14.0 × anthropic 0.99.0/1.6.0, plus a
-single `openai`-latest cross-check. It does not install the `redis`, `otel`,
-`fastapi` or `tokenizers` extras, does not run the TypeScript package, and has
-no lint, typecheck, or coverage step. Below the floors the SDK catches
-`BudgetExceededError` and re-raises it as `APIConnectionError`, hiding the
-guardrail.
+single `openai`-latest cross-check. It lints with `ruff`, and it runs the
+TypeScript package's typecheck, build and tests. It does not install the
+`redis`, `otel`, `fastapi` or `tokenizers` extras, and it has no coverage
+gate. Below the floors the SDK catches `BudgetExceededError` and re-raises it
+as `APIConnectionError`, hiding the guardrail.
 
 `backstop doctor` is a wrap-and-import smoke test only — it does not send a
-request through the wrapped transport, and it exits 1 whenever `httpx2` is
-absent, which is not a declared dependency. Trust `backstop verify`, not
+request through the wrapped transport. Trust `backstop verify`, not
 `doctor`.
 
 ## CLIs
+
+Every command, and what it is for. All of them except `real-openai` and
+`real-anthropic` run with no API key and no network.
+
+**Prove it**
 
 - `backstop verify` — proves enforcement offline with 8 checks; `--live` adds a `GET /models` auth probe
 - `backstop demo` — side-by-side runaway loop (unprotected vs wrapped)
 - `backstop doctor` — SDK versions and wrap path; see the caveats above
 - `backstop benchmark` — overhead measurement; latencies are wall-clock, and the `error-storm` / `budget-hit` scenario counts depend on retry backoff and circuit cooldown, so only `burst` and `steady-state` reproduce exactly
+- `backstop harness` — a local mock-provider load scenario
+
+**Money**
+
+- `backstop ledger demo|show|export` — the priced spend ledger: a synthetic run, a readable report, and a finance-grade CSV
+- `backstop budget --ledger PATH --usd CEILING` — where the spend stands against a ceiling, and the headroom left
+- `backstop detect --ledger PATH` — the four runaway-spend detectors over a ledger file
+- `backstop forecast --ledger PATH --usd CEILING` — when the budget runs out, at the burn rate the ledger measured
+- `backstop reconcile --ledger PATH --invoice PATH` — the ledger against a provider statement
+- `backstop audit --path PATH` — verify the tamper-evident audit chain
+
+**Run it**
+
 - `backstop serve` — optional OpenAI-compatible gateway (needs the `fastapi` extra)
 - `backstop metrics` — Prometheus endpoint
+- `backstop dashboard` — the built-in dashboard for this process
+
+**Live check**
+
 - `backstop real-openai` / `real-anthropic` — live smoke tests (require API key)
+
+Every report-taking command takes `--json` as well as the default Markdown.
 
 ## Benchmarks
 
@@ -121,3 +166,6 @@ If you are an agent installing Backstop into a codebase:
 3. Integration: `client = Backstop.wrap(client, budget=50_000)` — one line.
 4. Verify: `backstop verify` proves enforcement without any API key.
 5. Catch `backstop.exceptions.BudgetExceededError` to handle budget exhaustion.
+6. If the budget is a *money* budget, pass `budget_usd=Decimal("...")` as well —
+   and read /docs/usd-budgets.md, because a dollar ceiling turns the ledger on
+   and refuses models it cannot price.

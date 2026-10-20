@@ -847,3 +847,177 @@ def test_cli_reconcile_ledger_without_an_invoice_is_a_usage_error(capsys, reconc
         main(["reconcile", "--ledger", str(reconcile_ledger)])
     assert caught.value.code == 2
     assert "--ledger also needs --invoice" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# The commands added in 0.8.0
+# ---------------------------------------------------------------------------
+
+
+def test_cli_version_prints_the_version_and_exits_zero(capsys):
+    """``backstop --version`` used to exit 2 with a usage error."""
+    import backstop
+
+    with pytest.raises(SystemExit) as excinfo:
+        main(["--version"])
+    assert excinfo.value.code == 0
+    assert backstop.__version__ in capsys.readouterr().out
+
+
+def test_cli_help_groups_the_commands(capsys):
+    """The help is grouped by what the operator is doing, not by insertion order."""
+    with pytest.raises(SystemExit):
+        main(["--help"])
+    out = capsys.readouterr().out
+    for heading in ("Prove it:", "Money:", "Run it:", "Live check:"):
+        assert heading in out, f"the help does not have a {heading!r} group"
+    # The groups are in the order an operator works in, not the order the
+    # commands happen to be registered in.
+    assert out.index("Prove it:") < out.index("Money:") < out.index("Run it:")
+
+
+@pytest.fixture
+def spend_ledger(tmp_path):
+    """A JSONL ledger with five priced requests, written by the real ledger."""
+    import httpx
+
+    from backstop import BackstopConfig
+    from backstop.state import BackstopState
+    from backstop.transports import BackstopTransport
+
+    path = tmp_path / "ledger.jsonl"
+    config = BackstopConfig(
+        ledger_enabled=True,
+        ledger_path=str(path),
+        default_max_output_tokens=8,
+    )
+    state = BackstopState.create(None, config)
+    response = {
+        "id": "chatcmpl-cli-1",
+        "object": "chat.completion",
+        "model": "gpt-4o-2024-08-06",
+        "usage": {"prompt_tokens": 120, "completion_tokens": 30, "total_tokens": 150},
+    }
+
+    def handler(request):
+        return httpx.Response(200, json=response)
+
+    client = httpx.Client(
+        transport=BackstopTransport(state, httpx.MockTransport(handler)),
+        base_url="https://api.openai.com",
+    )
+    body = {"model": "gpt-4o", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 8}
+    for _ in range(5):
+        client.post("/v1/chat/completions", json=body)
+    client.close()
+    state.close()
+    return path
+
+
+def test_cli_budget_reports_the_spend_and_the_headroom(spend_ledger, capsys):
+    code = main(["budget", "--ledger", str(spend_ledger), "--usd", "0.010000"])
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "# Backstop Budget" in out
+    # 5 requests at $0.0006 each.
+    assert "0.003000" in out
+    assert "0.007000" in out  # the remaining headroom
+
+
+def test_cli_budget_flags_a_breached_ceiling(spend_ledger, capsys):
+    code = main(["budget", "--ledger", str(spend_ledger), "--usd", "0.001000"])
+    assert code == 0
+    assert "OVER CEILING" in capsys.readouterr().out
+
+
+def test_cli_budget_json_carries_the_ceiling_and_the_remaining(spend_ledger, capsys):
+    code = main(["budget", "--ledger", str(spend_ledger), "--usd", "0.010000", "--json"])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ceiling_usd"] == "0.010000"
+    assert payload["exceeded"] is False
+    assert payload["remaining_usd"] == "0.007000"
+
+
+def test_cli_budget_fails_on_a_missing_ledger(capsys, tmp_path):
+    code = main(["budget", "--ledger", str(tmp_path / "nope.jsonl")])
+    assert code == 1
+    assert "cannot read ledger" in capsys.readouterr().err
+
+
+def test_cli_detect_runs_the_detectors_over_a_ledger(spend_ledger, capsys):
+    code = main(["detect", "--ledger", str(spend_ledger)])
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "# Backstop Runaway-Spend Detection" in out
+    assert "- Events: 5" in out
+
+
+def test_cli_detect_json_carries_the_counts(spend_ledger, capsys):
+    code = main(["detect", "--ledger", str(spend_ledger), "--json"])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["events"] == 5
+    assert "signals" in payload
+    assert "counts" in payload
+
+
+def test_cli_forecast_projects_exhaustion_from_the_measured_rate(spend_ledger, capsys):
+    code = main(
+        ["forecast", "--ledger", str(spend_ledger), "--usd", "0.010000", "--horizon", "3600"]
+    )
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "# Backstop Forecast" in out
+    assert "- Burn rate:" in out
+    assert "- Projected exhaustion:" in out
+
+
+def test_cli_forecast_json_carries_the_rate_and_the_projection(spend_ledger, capsys):
+    code = main(
+        ["forecast", "--ledger", str(spend_ledger), "--usd", "0.010000", "--json"]
+    )
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["events"] == 5
+    assert "rate_usd_per_minute" in payload
+    assert "projected_remaining_seconds" in payload
+
+
+def test_cli_audit_verifies_an_intact_chain(tmp_path, capsys):
+    """The chain is an HMAC over each record plus the previous record's value."""
+    from backstop.audit import AuditLog
+
+    path = tmp_path / "audit.jsonl"
+    log = AuditLog(str(path), "the-key")
+    log.record("deny", "budget_exceeded", endpoint="/v1/chat")
+    log.close()
+
+    code = main(["audit", "--path", str(path), "--hmac-key", "the-key"])
+    assert code == 0
+    assert "Chain intact: yes" in capsys.readouterr().out
+
+
+def test_cli_audit_detects_a_tampered_record(tmp_path, capsys):
+    from backstop.audit import AuditLog
+
+    path = tmp_path / "audit.jsonl"
+    log = AuditLog(str(path), "the-key")
+    log.record("deny", "budget_exceeded", endpoint="/v1/chat")
+    log.close()
+
+    # Edit the record on disk, keeping the chain value.
+    lines = path.read_text(encoding="utf-8").splitlines()
+    record = json.loads(lines[0])
+    record["endpoint"] = "/v1/secret"
+    path.write_text(json.dumps(record, sort_keys=True, default=str) + "\n", encoding="utf-8")
+
+    code = main(["audit", "--path", str(path), "--hmac-key", "the-key"])
+    assert code == 1
+    assert "Chain intact: NO" in capsys.readouterr().out
+
+
+def test_cli_audit_fails_on_a_missing_log(capsys, tmp_path):
+    code = main(["audit", "--path", str(tmp_path / "nope.jsonl")])
+    assert code == 1
+    assert "cannot read audit log" in capsys.readouterr().err
