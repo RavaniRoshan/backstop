@@ -10,13 +10,22 @@ class OtelMetrics:
     Lazily imports ``opentelemetry`` so installs without it are unaffected.
     When the SDK/exporter is unavailable this becomes a safe no-op. Gauges are
     exposed as observable gauges backed by the last value observed in-process.
+
+    There is no exemplar bookkeeping here. An OTel exemplar is a trace link on
+    a metric point, and the SDK attaches one from the active span when a point
+    is recorded inside a span — so a hand-kept mapping from metric name to
+    trace id was a second, parallel mechanism that nothing ever wrote to.
     """
 
     def __init__(self, meter_name: str = "backstop") -> None:
         self.enabled = False
         self._gauges: dict[str, float] = {}
-        self._exemplars: dict[str, str] = {}
-        self._exemplar_lock = threading.Lock()
+        # The gauge dict is written from arbitrary request threads — one per
+        # in-flight request — and read by the observable-gauge callback. A bare
+        # dict write is atomic under CPython, but the callback iterating it
+        # while another thread writes is not, so the lock is here for the
+        # iteration, not for the write.
+        self._gauge_lock = threading.Lock()
         try:
             from opentelemetry import metrics as otel_metrics
         except Exception:
@@ -62,6 +71,10 @@ class OtelMetrics:
             "backstop_cache_hits_total",
             description="Cache hit count.",
         )
+        self.cache_semantic_hits = meter.create_counter(
+            "backstop_cache_semantic_hits_total",
+            description="Semantic (near-duplicate) cache hit count.",
+        )
         self.fallback_attempts = meter.create_counter(
             "backstop_fallback_attempts_total",
             description="Fallback attempts.",
@@ -105,10 +118,12 @@ class OtelMetrics:
                 pass
 
     def _gauge_callback(self, name: str):
-        captured = self._gauges
-
         def cb(options: Any):
-            value = captured.get(name, 0.0)
+            # The read is under the lock because the write happens on
+            # arbitrary request threads; the callback may fire between two
+            # of them.
+            with self._gauge_lock:
+                value = self._gauges.get(name, 0.0)
             from opentelemetry.metrics import Observation
 
             return [Observation(value)]
@@ -116,7 +131,8 @@ class OtelMetrics:
         return cb
 
     def _set_gauge(self, name: str, value: float) -> None:
-        self._gauges[name] = float(value)
+        with self._gauge_lock:
+            self._gauges[name] = float(value)
 
     def _inc_counter(self, counter: Any, amount: float, attrs: dict) -> None:
         try:
@@ -129,14 +145,6 @@ class OtelMetrics:
             hist.record(amount, attrs)
         except Exception:
             pass
-
-    def record_exemplar(self, metric_name: str, trace_id: str) -> None:
-        with self._exemplar_lock:
-            self._exemplars[metric_name] = trace_id
-
-    def exemplar_for(self, metric_name: str) -> str | None:
-        with self._exemplar_lock:
-            return self._exemplars.get(metric_name)
 
     def call(self, name: str, *args: Any, method: str = "inc", **kwargs: Any) -> None:
         if not self.enabled:
@@ -174,6 +182,8 @@ class OtelMetrics:
                 self._inc_counter(self.aimd_changes, 1, attrs)
             elif name == "cache_hits":
                 self._inc_counter(self.cache_hits, 1, attrs)
+            elif name == "cache_semantic_hits":
+                self._inc_counter(self.cache_semantic_hits, 1, attrs)
             elif name == "fallback_attempts":
                 self._inc_counter(self.fallback_attempts, 1, attrs)
             elif name == "rate_limited":

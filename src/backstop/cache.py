@@ -133,7 +133,13 @@ class ResponseCache:
                     stored_headers[k] = v
         with self._lock:
             while len(self._cache) >= self._max:
-                self._cache.popitem(last=False)
+                # The embedding has to go with the entry it belongs to. The
+                # eviction used to pop from `_cache` alone, so `_embeddings`
+                # grew without bound while `_cache` stayed at its limit — a
+                # process with the semantic cache on leaked one vector per
+                # distinct request, forever.
+                evicted_key, _ = self._cache.popitem(last=False)
+                self._embeddings.pop(evicted_key, None)
             self._cache[key] = (time.monotonic(), content, usage, stored_headers)
             if self._embed is not None:
                 try:

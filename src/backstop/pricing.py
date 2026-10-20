@@ -1,279 +1,174 @@
+"""A price lookup for the places that want a number, not a charge.
+
+This module used to carry its own price table: 18 models, float rates, per
+1,000 tokens, with a network refresh and a cache file. The ledger's
+:mod:`backstop.pricing_catalog` carried another: 45 models, exact
+:class:`~decimal.Decimal` rates, per million tokens, never touching the
+network. The transport read the downgrade map from here and the ledger read
+the prices from there, so the two disagreed — 31 of the 45 models Backstop
+priced had no downgrade target at all, and the downgrade feature silently did
+nothing for every current-generation model.
+
+So there is now **one** table. This module is a thin adapter over
+:mod:`backstop.pricing_catalog` for the callers that want "what does this
+model cost" rather than the ledger's "price this specific event":
+
+* :func:`backstop.cost.estimate` — the public estimator;
+* the built-in dashboard's cost panel;
+* the ``backstop demo`` comparison.
+
+What it does **not** do any more:
+
+* it does not keep a second price table;
+* it does not refresh itself from the network or from
+  ``~/.cache/backstop/pricing.json``. A price a deployment negotiated is
+  supplied through ``config.price_catalog_path`` — a file, read explicitly —
+  and :meth:`PriceCatalog.from_file` is where that happens. The refresh path
+  wrote a cache file that nothing could ever write, and read it on every
+  ``import backstop``;
+* its money is :class:`~decimal.Decimal`, like every other amount in this
+  package. A float estimate of a cost is a rounding error waiting to be
+  quoted to somebody as a fact.
+
+The price *data* — which models exist, what they cost, and what each one
+downgrades to — is in :mod:`backstop.pricing_catalog`.
+"""
 from __future__ import annotations
 
-import json
-import os
 import threading
+from datetime import date
+from decimal import ROUND_HALF_UP, Decimal, localcontext
 from typing import Any
 
+from .pricing_catalog import (
+    BUNDLED_PRICES,
+    LEDGER_CONTEXT,
+    MONEY_PLACES,
+    PriceEntry,
+    downgrade_target,
+    model_candidates,
+)
+
+#: A registered price, in the shape a caller supplies it. The rates are per
+#: 1,000 tokens because that is the shape the public API has always taken.
 ModelPricing = dict[str, Any]
-
-# Default offline table. This is the always-available fallback: it ships with the
-# package and works with no network. `refresh_pricing()` can extend/replace it from a
-# local JSON file or a reachable URL; results are cached to the XDG cache dir so a
-# single successful fetch improves every later run on the same machine.
-DEFAULT_TABLE: dict[str, ModelPricing] = {
-    # --- Anthropic Claude (current, 2026) ---
-    "claude-opus-4-20250514": {
-        "family": "anthropic",
-        "input_cost_per_1k": 0.015,
-        "output_cost_per_1k": 0.075,
-        "downgrade_to": "claude-sonnet-4-20250514",
-    },
-    "claude-sonnet-4-20250514": {
-        "family": "anthropic",
-        "input_cost_per_1k": 0.003,
-        "output_cost_per_1k": 0.015,
-        "downgrade_to": "claude-haiku-4-20250514",
-    },
-    "claude-haiku-4-20250514": {
-        "family": "anthropic",
-        "input_cost_per_1k": 0.0008,
-        "output_cost_per_1k": 0.004,
-        "downgrade_to": None,
-    },
-    # Older Claude generations kept for back-compat references.
-    "claude-3-5-sonnet-20241022": {
-        "family": "anthropic",
-        "input_cost_per_1k": 0.003,
-        "output_cost_per_1k": 0.015,
-        "downgrade_to": "claude-3-5-haiku-20241022",
-    },
-    "claude-3-5-haiku-20241022": {
-        "family": "anthropic",
-        "input_cost_per_1k": 0.0008,
-        "output_cost_per_1k": 0.004,
-        "downgrade_to": None,
-    },
-    "claude-3-opus-20240229": {
-        "family": "anthropic",
-        "input_cost_per_1k": 0.015,
-        "output_cost_per_1k": 0.075,
-        "downgrade_to": "claude-3-5-sonnet-20241022",
-    },
-    "claude-3-sonnet-20240229": {
-        "family": "anthropic",
-        "input_cost_per_1k": 0.003,
-        "output_cost_per_1k": 0.015,
-        "downgrade_to": "claude-3-haiku-20240307",
-    },
-    "claude-3-haiku-20240307": {
-        "family": "anthropic",
-        "input_cost_per_1k": 0.00025,
-        "output_cost_per_1k": 0.00125,
-        "downgrade_to": None,
-    },
-    # --- OpenAI (current, 2026) ---
-    "gpt-4.1": {
-        "family": "openai",
-        "input_cost_per_1k": 0.002,
-        "output_cost_per_1k": 0.008,
-        "downgrade_to": "gpt-4.1-mini",
-    },
-    "gpt-4.1-mini": {
-        "family": "openai",
-        "input_cost_per_1k": 0.0004,
-        "output_cost_per_1k": 0.0016,
-        "downgrade_to": "gpt-4.1-nano",
-    },
-    "gpt-4.1-nano": {
-        "family": "openai",
-        "input_cost_per_1k": 0.0001,
-        "output_cost_per_1k": 0.0004,
-        "downgrade_to": None,
-    },
-    "gpt-4o": {
-        "family": "openai",
-        "input_cost_per_1k": 0.0025,
-        "output_cost_per_1k": 0.01,
-        "downgrade_to": "gpt-4o-mini",
-    },
-    "gpt-4o-mini": {
-        "family": "openai",
-        "input_cost_per_1k": 0.00015,
-        "output_cost_per_1k": 0.0006,
-        "downgrade_to": None,
-    },
-    "gpt-4-turbo": {
-        "family": "openai",
-        "input_cost_per_1k": 0.01,
-        "output_cost_per_1k": 0.03,
-        "downgrade_to": "gpt-4o-mini",
-    },
-    "gpt-4": {
-        "family": "openai",
-        "input_cost_per_1k": 0.03,
-        "output_cost_per_1k": 0.06,
-        "downgrade_to": "gpt-4o-mini",
-    },
-    "gpt-3.5-turbo": {
-        "family": "openai",
-        "input_cost_per_1k": 0.0005,
-        "output_cost_per_1k": 0.0015,
-        "downgrade_to": None,
-    },
-    "o1": {
-        "family": "openai",
-        "input_cost_per_1k": 0.015,
-        "output_cost_per_1k": 0.06,
-        "downgrade_to": "gpt-4o",
-    },
-    "o3-mini": {
-        "family": "openai",
-        "input_cost_per_1k": 0.0011,
-        "output_cost_per_1k": 0.0044,
-        "downgrade_to": "gpt-4o-mini",
-    },
-}
-
-
-def _cache_path() -> str:
-    base = os.environ.get("XDG_CACHE_HOME") or os.path.join(
-        os.path.expanduser("~"), ".cache"
-    )
-    return os.path.join(base, "backstop", "pricing.json")
-
-
-def load_cached_table() -> dict[str, ModelPricing]:
-    path = _cache_path()
-    try:
-        with open(path, "r", encoding="utf-8") as fh:
-            data = json.load(fh)
-        if isinstance(data, dict):
-            return data
-    except (OSError, ValueError):
-        pass
-    return {}
-
-
-def save_cached_table(table: dict[str, ModelPricing]) -> None:
-    path = _cache_path()
-    try:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as fh:
-            json.dump(table, fh, sort_keys=True, indent=2)
-    except OSError:
-        pass
 
 
 class Pricing:
-    """Resolves model pricing with an offline default table and optional refresh.
+    """Resolves a model to its price, from the one catalog.
 
-    Resolution order for a given model string:
-      1. Exact match in the merged table (offline defaults + any refresh/register).
-      2. Prefix match (e.g. ``"gpt-4o"`` matches ``"gpt-4o-2024-..."``).
-      3. Family default (cheapest known model for the inferred family).
+    The catalog is immutable and shared, so this object holds no mutable
+    price state of its own beyond the user-registered overlay.
     """
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._table: dict[str, ModelPricing] = dict(DEFAULT_TABLE)
-        self._table.update(load_cached_table())
+        self._overrides: dict[str, PriceEntry] = {}
 
     def register(self, model: str, pricing: ModelPricing) -> None:
+        """Register a price for ``model``, overriding the bundled one.
+
+        ``pricing`` is a mapping with ``input_cost_per_1k`` and
+        ``output_cost_per_1k`` in dollars, and optionally ``downgrade_to``.
+        The rates are converted into the catalog's exact-decimal per-million
+        representation, so a registered price is a first-class catalog entry
+        rather than a parallel float table.
+        """
+        if not isinstance(model, str) or not model.strip():
+            raise ValueError(f"model must be a non-empty str, got {model!r}")
+        if not isinstance(pricing, dict):
+            raise TypeError(f"pricing must be a dict, got {type(pricing).__name__}")
+        in_rate = pricing.get("input_cost_per_1k")
+        out_rate = pricing.get("output_cost_per_1k")
+        if in_rate is None or out_rate is None:
+            raise ValueError(
+                "pricing needs both 'input_cost_per_1k' and 'output_cost_per_1k'"
+            )
+        provider = str(pricing.get("family") or _infer_provider(model))
+        entry = PriceEntry(
+            model=model,
+            provider=provider,
+            input_per_mtok_usd=_per_1k_to_per_mtok(in_rate),
+            output_per_mtok_usd=_per_1k_to_per_mtok(out_rate),
+            cache_read_per_mtok_usd=None,
+            cache_write_per_mtok_usd=None,
+            effective_from=date.today().isoformat(),
+            source="user",
+            confidence="negotiated",
+        )
         with self._lock:
-            self._table[model] = pricing
+            self._overrides[model] = entry
 
     def as_dict(self) -> dict[str, ModelPricing]:
+        """Every price this object knows about, in the per-1K float-ish shape."""
         with self._lock:
-            return dict(self._table)
+            overrides = dict(self._overrides)
+        out: dict[str, ModelPricing] = {}
+        for model, entry in list(BUNDLED_PRICES.items()) + list(overrides.items()):
+            out[model] = {
+                "family": entry.provider,
+                "input_cost_per_1k": float(entry.input_per_mtok_usd) / 1000,
+                "output_cost_per_1k": float(entry.output_per_mtok_usd) / 1000,
+                "downgrade_to": downgrade_target(model),
+            }
+        return out
 
-    def get(self, model: str) -> ModelPricing | None:
+    def get(self, model: str) -> PriceEntry | None:
+        """The price entry for ``model``, or ``None`` if the catalog has none.
+
+        The name tiers are the catalog's: the exact string, then the string
+        with a trailing snapshot marker stripped, then the alias map. A model
+        the catalog has never heard of resolves to ``None`` rather than to
+        the cheapest model in its family — a price that is quietly wrong is
+        worse than one that is absent.
+        """
         with self._lock:
-            table = dict(self._table)
-        if model in table:
-            return table[model]
-        # Prefix match: pick the longest key that is a prefix of the requested id
-        # (so ``gpt-4o`` resolves to ``gpt-4o`` before ``gpt-4o-mini``).
-        candidate = None
-        for key, value in table.items():
-            if model.startswith(key) or key.startswith(model):
-                if candidate is None or len(key) > len(candidate[0]):
-                    candidate = (key, value)
-        if candidate is not None:
-            return candidate[1]
-        # Family default: cheapest model for the inferred provider family.
-        family = self._infer_family(model)
-        if family is None:
-            return None
-        cheapest = None
-        for value in table.values():
-            if value.get("family") != family:
-                continue
-            cost = value.get("input_cost_per_1k", 0.0) + value.get("output_cost_per_1k", 0.0)
-            if cheapest is None or cost < cheapest[0]:
-                cheapest = (cost, value)
-        return cheapest[1] if cheapest is not None else None
-
-    @staticmethod
-    def _infer_family(model: str) -> str | None:
-        lowered = model.lower()
-        if "claude" in lowered or "anthropic" in lowered:
-            return "anthropic"
-        if "gpt" in lowered or "o1" in lowered or "o3" in lowered or "o4" in lowered:
-            return "openai"
+            overrides = dict(self._overrides)
+        for candidate in model_candidates(model):
+            if candidate in overrides:
+                return overrides[candidate]
+            entry = BUNDLED_PRICES.get(candidate)
+            if entry is not None:
+                return entry
         return None
 
     def estimate_cost(
         self, prompt_tokens: int, completion_tokens: int, model: str
-    ) -> float:
-        info = self.get(model)
-        if info is None:
-            return 0.0
-        in_rate = info.get("input_cost_per_1k") or 0.0
-        out_rate = info.get("output_cost_per_1k") or 0.0
-        return round((prompt_tokens / 1000) * in_rate + (completion_tokens / 1000) * out_rate, 6)
+    ) -> Decimal:
+        """What ``model`` costs for the given token counts.
+
+        ``Decimal``, quantised to the catalog's money precision, computed
+        under the catalog's own decimal context so the ambient one is never
+        read. A model with no price returns ``Decimal("0")`` — the same
+        "no price known" answer the ledger records, expressed as zero
+        because this is an estimator and not a charge.
+        """
+        entry = self.get(model)
+        if entry is None:
+            return Decimal("0.00")
+        with localcontext(LEDGER_CONTEXT):
+            cost = (
+                Decimal(prompt_tokens) * entry.input_per_mtok_usd
+                + Decimal(completion_tokens) * entry.output_per_mtok_usd
+            ) / Decimal(1_000_000)
+            return cost.quantize(Decimal(1).scaleb(-MONEY_PLACES), rounding=ROUND_HALF_UP)
 
     def get_downgrade_target(self, model: str) -> str | None:
-        info = self.get(model)
-        if info is None:
-            return None
-        return info.get("downgrade_to")
+        return downgrade_target(model)
 
-    def refresh(self, source: str | None = None) -> int:
-        """Merge pricing from an optional source into the active table.
 
-        ``source`` may be a path/URL to a JSON document mapping model name to a
-        pricing object. When ``None``, a previously cached refresh file is loaded
-        if present. Network/parse failures are ignored: the offline table always
-        remains usable. Returns the number of models merged.
-        """
-        data = self._fetch_source(source)
-        if not data:
-            return 0
-        count = 0
-        with self._lock:
-            for model, info in data.items():
-                if isinstance(info, dict) and "input_cost_per_1k" in info:
-                    self._table[model] = info
-                    count += 1
-        if source is None or source.startswith(("http://", "https://")):
-            save_cached_table(self._table)
-        else:
-            try:
-                save_cached_table(self._table)
-            except OSError:
-                pass
-        return count
+def _per_1k_to_per_mtok(rate: Any) -> Decimal:
+    """Convert a per-thousand-token rate to a per-million-token rate."""
+    return (Decimal(rate) * Decimal(1000)).quantize(
+        Decimal(1).scaleb(-MONEY_PLACES), rounding=ROUND_HALF_UP
+    )
 
-    def _fetch_source(self, source: str | None) -> dict[str, ModelPricing]:
-        if source is None:
-            return load_cached_table()
-        if source.startswith(("http://", "https://")):
-            try:
-                import urllib.request
 
-                with urllib.request.urlopen(source, timeout=5) as resp:  # noqa: S310
-                    raw = resp.read().decode("utf-8")
-                parsed = json.loads(raw)
-                return parsed if isinstance(parsed, dict) else {}
-            except Exception:
-                return {}
-        try:
-            with open(source, "r", encoding="utf-8") as fh:
-                parsed = json.load(fh)
-            return parsed if isinstance(parsed, dict) else {}
-        except (OSError, ValueError):
-            return {}
+def _infer_provider(model: str) -> str:
+    lowered = model.lower()
+    if "claude" in lowered or "anthropic" in lowered:
+        return "anthropic"
+    return "openai"
 
 
 _PRICING = Pricing()
@@ -284,16 +179,12 @@ def get_pricing() -> Pricing:
 
 
 def get_downgrade_target(model: str) -> str | None:
-    return _PRICING.get_downgrade_target(model)
+    return downgrade_target(model)
 
 
-def estimate_cost(prompt_tokens: int, completion_tokens: int, model: str) -> float:
+def estimate_cost(prompt_tokens: int, completion_tokens: int, model: str) -> Decimal:
     return _PRICING.estimate_cost(prompt_tokens, completion_tokens, model)
 
 
 def register_pricing(model: str, pricing: ModelPricing) -> None:
     _PRICING.register(model, pricing)
-
-
-def refresh_pricing(source: str | None = None) -> int:
-    return _PRICING.refresh(source)

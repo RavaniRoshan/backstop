@@ -198,7 +198,7 @@ def test_fallback_success_fires_tenant_budget_alert() -> None:
     captured: list = []
 
     transport = BackstopTransport(state, _alert_handler())
-    transport._alerts = BudgetAlertManager(endpoints=[], sink=_sink(captured))
+    transport.alerts = BudgetAlertManager(endpoints=[], sink=_sink(captured))
     try:
         with with_budget("tenant-a"):
             resp = _drain_circuit(transport, _request("primary"))
@@ -220,7 +220,7 @@ def test_fallback_success_fires_tenant_budget_alert_async() -> None:
     captured: list = []
 
     transport = AsyncBackstopTransport(state, _alert_handler())
-    transport._alerts = BudgetAlertManager(endpoints=[], sink=_sink(captured))
+    transport.alerts = BudgetAlertManager(endpoints=[], sink=_sink(captured))
 
     async def scenario() -> httpx.Response:
         circuit = transport.state.circuit
@@ -252,7 +252,7 @@ def test_fallback_success_fires_global_budget_alert() -> None:
     captured: list = []
 
     transport = BackstopTransport(state, _alert_handler())
-    transport._alerts = BudgetAlertManager(endpoints=[], sink=_sink(captured))
+    transport.alerts = BudgetAlertManager(endpoints=[], sink=_sink(captured))
 
     resp = _drain_circuit(transport, _request("primary"))
     assert json.loads(resp.content)["ok"] is True
@@ -277,7 +277,7 @@ def test_fallback_alert_uses_virtual_key_tenant() -> None:
     captured: list = []
 
     transport = BackstopTransport(state, _alert_handler())
-    transport._alerts = BudgetAlertManager(endpoints=[], sink=_sink(captured))
+    transport.alerts = BudgetAlertManager(endpoints=[], sink=_sink(captured))
     try:
         with with_budget("ctx-tenant"):
             req_headers = {"X-Backstop-Key": "sk-vk-1"}

@@ -125,13 +125,133 @@ def test_every_bundled_row_names_its_provider_and_carries_decimals():
         assert entry.output_per_mtok_usd > 0
 
 
-def test_the_bundled_table_covers_the_models_this_repo_already_references():
-    # Every key in the pre-existing backstop.pricing.DEFAULT_TABLE, which is the
-    # set of models the repo already names.
-    from backstop.pricing import DEFAULT_TABLE
+def test_the_bundled_table_covers_every_model_the_repo_names():
+    # Every model named anywhere in the repository's own source and docs must
+    # be *resolvable* by the catalog. A name the catalog cannot resolve is a
+    # visible hole in the ledger — not a wrong number, but a hole — and a hole
+    # in the set of models this project talks about is one this project can
+    # close.
+    #
+    # "Resolvable" rather than "a key": a dated snapshot (``gpt-4o-2024-08-06``)
+    # and a family alias (``claude-3-5-sonnet``) resolve through the catalog's
+    # name tiers, and that is the intended behaviour rather than a gap.
+    import pathlib
+    import re
 
-    missing = sorted(set(DEFAULT_TABLE) - set(BUNDLED_PRICES))
-    assert missing == []
+    from backstop.pricing_catalog import model_candidates
+
+    root = pathlib.Path(__file__).resolve().parents[1]
+    sources = [
+        root / "src" / "backstop" / "pricing_catalog.py",
+        root / "src" / "backstop" / "pricing.py",
+        root / "README.md",
+        root / "docs" / "ledger.md",
+    ]
+    named: set[str] = set()
+    pattern = re.compile(r"\b(?:gpt|claude|o1|o3|o4)[a-z0-9.\-]*\b")
+    for source in sources:
+        if not source.exists():
+            continue
+        named.update(pattern.findall(source.read_text(encoding="utf-8")))
+    named = {name for name in named if "-" in name}
+
+    unresolvable = sorted(
+        name
+        for name in named
+        if not any(candidate in BUNDLED_PRICES for candidate in model_candidates(name))
+        # A *family* reference — "the gpt-6 and gpt-5.6 families" — is prose,
+        # not a model id, and is allowed to name a line the catalog prices
+        # several members of.
+        and not any(key.startswith(name) for key in BUNDLED_PRICES)
+    )
+    assert unresolvable == [], (
+        f"models named in the repo but not resolvable by the catalog: {unresolvable}"
+    )
+
+
+def _product_line(model: str) -> str:
+    """The product line a model belongs to: its first two dash-separated groups.
+
+    ``gpt-6-luna`` and ``gpt-5-nano`` are different lines; ``gpt-4o`` and
+    ``gpt-4o-mini`` are the same one. A model is only expected to downgrade
+    within its own line — falling back from a GPT-6 to a GPT-3.5 would be a
+    different product, not a cheaper one.
+    """
+    return "-".join(model.split("-")[:2])
+
+
+def test_every_downgrade_target_is_really_cheaper():
+    """A downgrade that is not cheaper is not a downgrade.
+
+    The downgrade map used to live in a second table, with 18 models and
+    float rates, while the catalog held 45 models with exact decimal ones.
+    The transport read one and the ledger read the other, so 31 of the 45
+    models Backstop priced had no downgrade target at all and the feature
+    silently did nothing for every current-generation model.
+
+    Now the map sits beside the prices, and this asserts the property that
+    makes it worth having: every target is in the catalog, on the same
+    provider, and strictly cheaper than the model it stands in for.
+    """
+    from backstop.pricing_catalog import DOWNGRADE_TARGETS
+
+    def blended(entry) -> Decimal:
+        return entry.input_per_mtok_usd + entry.output_per_mtok_usd
+
+    for model, target in DOWNGRADE_TARGETS.items():
+        assert model in BUNDLED_PRICES, f"{model} is downgradable but is not in the catalog"
+        assert target in BUNDLED_PRICES, f"{model} downgrades to {target}, which is not in the catalog"
+        source_entry = BUNDLED_PRICES[model]
+        target_entry = BUNDLED_PRICES[target]
+        assert source_entry.provider == target_entry.provider, (
+            f"{model} ({source_entry.provider}) downgrades to {target} "
+            f"({target_entry.provider}) — a different provider is a different "
+            "product, not a cheaper one"
+        )
+        assert blended(target_entry) < blended(source_entry), (
+            f"{model} ({blended(source_entry)}) downgrades to {target} "
+            f"({blended(target_entry)}), which is not cheaper"
+        )
+
+
+def test_the_downgrade_map_covers_every_model_with_a_cheaper_sibling():
+    """A model with a cheaper sibling in its own line and no entry is a gap.
+
+    The models deliberately left out are the cheapest in their line — there
+    is nowhere cheaper in that line to go. Every other model must have an
+    entry, or the downgrade feature silently does nothing for it.
+    """
+    from backstop.pricing_catalog import DOWNGRADE_TARGETS
+
+    def blended(entry) -> Decimal:
+        return entry.input_per_mtok_usd + entry.output_per_mtok_usd
+
+    for model, entry in BUNDLED_PRICES.items():
+        line = _product_line(model)
+        has_cheaper_sibling = any(
+            other_model != model
+            and _product_line(other_model) == line
+            and other.provider == entry.provider
+            and blended(other) < blended(entry)
+            for other_model, other in BUNDLED_PRICES.items()
+        )
+        if has_cheaper_sibling:
+            assert model in DOWNGRADE_TARGETS, (
+                f"{model} has a cheaper sibling in the catalog but no downgrade entry, "
+                "so the downgrade feature would silently do nothing for it"
+            )
+
+
+def test_downgrade_target_resolves_through_the_name_tiers():
+    """A dated snapshot or an alias resolves to its family's downgrade."""
+    from backstop.pricing_catalog import downgrade_target
+
+    assert downgrade_target("gpt-4o") == "gpt-4o-mini"
+    assert downgrade_target("gpt-4o-2024-08-06") == "gpt-4o-mini"
+    assert downgrade_target("gpt-4o-mini") is None
+    assert downgrade_target("unknown-model") is None
+    assert downgrade_target("") is None
+    assert downgrade_target(None) is None
 
 
 def test_a_zero_price_is_never_recorded_where_the_publisher_has_none():

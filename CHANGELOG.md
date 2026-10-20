@@ -11,6 +11,235 @@ All notable changes to Backstop should be documented in this file.
 
 ## [Unreleased]
 
+## 0.8.0 — "One Policy, Two Drivers"
+
+The release theme is **every claim the product makes becomes true**. The same
+enforcement logic was written twice — once in the sync transport, once in the
+async one — and it drifted: the async path emitted 2 of the 7 audit decisions
+the sync path did, its semantic cache was never constructed, and its shadow
+mode consulted a different branch. A user on `AsyncOpenAI` was running a
+different guardrail from a user on `OpenAI`, and nothing in the test suite
+noticed.
+
+### Added
+
+- **A budget denominated in dollars.** `Backstop.wrap(client, budget=50_000,
+  budget_usd=Decimal("5.00"))` is a second ceiling, not a replacement: a
+  request is admitted only if it fits under both. The money is `Decimal` end to
+  end and a float is refused, because a float cannot represent most fractions
+  of a dollar exactly and a ceiling a cent out is a ceiling that lets the
+  wrong request through. The shared Redis backend stores it in integer
+  micro-dollars, because Lua's `tonumber` is a double. A model the catalog
+  cannot price is **refused** under a dollar ceiling — a ceiling with a hole
+  in it is not a ceiling — and `budget_usd_unpriced_policy="allow"` says so
+  explicitly and records the request as unpriced. See `docs/usd-budgets.md`.
+- **A sync/async parity test** (`tests/test_parity.py`) that drives both
+  transports through the same scripted scenarios and asserts the same audit
+  decisions, the same metric names *and* labels, and the same outcome. It
+  would have caught every divergence listed below, and it makes future drift
+  impossible rather than merely unlikely.
+- **A mixed-mode admission test** (`tests/test_admission_mixed.py`) that
+  reproduces the deadlock the two-condition gate allowed, in both directions.
+- **A documentation-truthfulness test** (`tests/test_docs_consistency.py`):
+  the version every version-claiming document names, that `llms.txt` lists
+  every command the parser actually has, that no doc page is orphaned, and
+  that no document links to a file that does not exist.
+- **Four new commands.** `backstop budget` — where the spend stands against a
+  ceiling, and the headroom left. `backstop detect` — the four runaway-spend
+  detectors over a ledger file. `backstop forecast` — when the budget runs
+  out, at the burn rate the ledger measured. `backstop audit` — verify the
+  tamper-evident audit chain. All four are offline and need no key, and all
+  take `--json`.
+- **`backstop --version`**, which used to exit 2 with a usage error.
+- **A grouped `--help`.** Twelve commands sat in one flat list, in the order
+  they happened to be registered, with no indication of which needed a key.
+  They are now grouped by what the operator is doing: *Prove it*, *Money*,
+  *Run it*, *Live check*.
+- **`AdmissionTimeoutError`**, which inherits from both `BackstopError` and
+  the builtin `TimeoutError`. A queue timeout used to be raised as the bare
+  builtin, so `except BackstopError` — the class every other enforcement
+  failure belongs to — silently missed it.
+- **A price table with 45 models and a downgrade map beside it.** The map
+  used to live in a second table with 18 models and float rates, while the
+  catalog held 45 with exact decimal ones, so **31 of the 45 models Backstop
+  priced had no downgrade target at all** and the downgrade feature silently
+  did nothing for every current-generation model.
+- **New documentation pages**: `docs/usd-budgets.md`, `docs/detection.md`,
+  `docs/alerts.md`, `docs/frameworks.md`.
+- **A dependency audit in CI**, for both Python and npm, and a **coverage
+  floor**.
+
+### Fixed
+
+- **A sync release never woke an async waiter.** `PriorityGate` guarded one
+  set of counters and one set of queues with two independent conditions, one
+  for each path. A request could wait forever for a slot that was already
+  free — no error, no timeout, in an otherwise healthy process. The gate now
+  has one lock discipline, and both paths are notified.
+- **The async transport emitted 2 of 7 audit decisions.** Budget denial,
+  downgrade, fallback and circuit-open produced no audit row at all on
+  `AsyncOpenAI` / `AsyncAnthropic`.
+- **The shadow-mode audit trail was always empty.** The shadow collector
+  called `.record()` on `config.audit_sink`, which is documented as a file
+  path or a callable; a `str` has no `.record`, and the `AttributeError` was
+  swallowed. The shadow decisions now go into the audit log.
+- **Sync shadow mode denied what it promised to let through**, on the tenant
+  downgrade path.
+- **The semantic cache was silently disabled for every async client**, while
+  `cache_semantic_hits` kept counting — a metric that could never fire.
+- **`fallback_chain_for_priority` validated only the last priority's chain.**
+  Whether a malformed chain was caught depended on the order the dict keys
+  happened to be written in.
+- **`backstop serve` built a new transport — and a new connection pool — per
+  request.** No connection reuse, a fresh TLS handshake every time, an always
+  empty cache, shadow counters that reset on every request, and an alert dedup
+  that never deduplicated.
+- **`AuditLog.verify()` raised** `KeyError`/`ValueError` on a tampered line
+  instead of returning `False`. It also took its lock twice per record, so the
+  file's order and the chain's order could disagree and an untampered log
+  could fail its own verification. And its file handle was never closed.
+- **`TenantBudget.commit` treated a zero token count as "no measurement"**
+  and charged the estimate instead, so a tenant budget drifted upward for
+  every request that really used nothing.
+- **The import-time read of `~/.cache/backstop/pricing.json`**, a file that
+  could never be written because the only writer was dead code.
+- **`backstop.cost` was a fake module** shadowing the real
+  `backstop/cost.py`; `backstop.cost.CostEstimate` did not exist.
+- **`from backstop.ledger import *` raised `AttributeError`** — `__all__`
+  named a symbol the module never imported.
+- **`max_wrap_sessions` counted lifetime wraps, not live ones**, and was never
+  decremented, so a process that wrapped and closed a client in a loop kept
+  warning about a ceiling it was nowhere near.
+- **`Metrics` could not be constructed twice** — every instrument was
+  registered on the global default registry, so a second instance raised
+  `DuplicateTimeseries`. The registry is now injectable.
+- **The semantic cache's embedding dict was never bounded**, so a process
+  with the semantic cache on leaked one vector per distinct request.
+- **`cache_semantic_hits` was missing from the OpenTelemetry mirror**, and the
+  OTel gauge dict was read and written without a lock.
+- **The request body was JSON-decoded twice per request**, and sniffing its
+  first byte copied the whole body — `bytes.strip()` always allocates.
+- **The quota monitor rebuilt a dict of every response header** and did twelve
+  lookups on every response, to usually find nothing.
+- **The TypeScript port's admission gate had two bugs of the same shape**:
+  `high` was missing from the queue the gate chooses from, so a
+  high-priority request waited for a slot that was never offered to it; and
+  the waiters polled only when a timeout was configured, so with the default
+  `queueTimeoutMs: null` a request that could not be admitted immediately
+  hung forever. The waiters are now woken when a slot frees, and the timeout
+  is a timer of its own.
+- **Six TypeScript config options were accepted and read by nothing** —
+  `agentMaxCalls`, `agentWindowMs`, `agentMaxTokens`, `maxWrapSessions`,
+  `requestTimeoutMs` and `streamTimeoutMs`. The agent guardrail is now
+  consulted, the deadline is enforced, and the wrap-session ceiling warns.
+- **The TypeScript budget was not a hard ceiling** — `critical` and `high`
+  were let past an exhausted budget, which is not what the Python package
+  does. A guardrail whose strength depends on the caller's mood is not a
+  guardrail.
+
+### Changed
+
+- **The version has one home.** `src/backstop/__init__.py` holds it, and
+  `pyproject.toml` reads it at build time through hatchling's dynamic version.
+  The npm package, the npm lockfile, `install.sh` and the `wedge` package are
+  copies, and a test now checks that they agree.
+- **The decisions live in `backstop.policy`**, written once, and the two
+  transports keep only their own sequences — the parts that must await.
+  `transports.py` went from 1,561 lines to 1,239, with 484 lines of shared
+  policy beside it.
+- **`log_json` and `log_sink` are removed.** They were documented, validated
+  and never implemented. A configuration knob that does nothing is worse than
+  no knob.
+- **`RateLimitError` and `GuardrailViolationError` are exported** from
+  `backstop`. Both are raised by the transport, and a user had to know to
+  import them from a submodule to catch them.
+- **The estimate is itemised** into its input and output parts, and the two
+  sum to exactly the figure `estimate_tokens` has always returned — so
+  splitting it cannot change what a token budget admits.
+- **The `BudgetBackend` protocol is unchanged.** The dollar dimension is an
+  addition — `reserve_with_usd`, `commit_with_usd` — so a backend written
+  before dollar ceilings existed keeps working.
+- **The OpenTelemetry mirror no longer keeps its own exemplar map.** An OTel
+  exemplar is a trace link the SDK attaches from the active span; the
+  hand-kept mapping was a second mechanism that nothing ever wrote to.
+- **Every published version string moved to 0.8.0**, and the CI comment that
+  claimed cosign, SLSA provenance and SBOM generation is now three real
+  steps rather than three words.
+- **The npm package is published by the release tag**, with provenance. It
+  was published by hand, and it drifted: the lockfile shipped as
+  `@ravanish/backstop@0.5.0` while `package.json` said `backstop-ai@0.6.0`,
+  through a 0.6.0 release.
+- **`py.typed` ships**, so a downstream type checker uses the package's
+  annotations. The package is fully annotated and none of it was reaching
+  anyone's editor.
+- **The licence uses PEP 639's form**, so the licence *text* ships rather
+  than a declaration that it exists.
+- **The classifiers say Beta**, and list 3.13, which CI now tests.
+
+### Removed
+
+- `log_json` and `log_sink` — documented, validated, and never implemented.
+- `src/backstop/wrapper.py.backup` and `wrapper.py.backup2` — 498 lines of
+  stale source that were tracked, and that hatchling included in the wheel
+  everybody installs. CI now asserts the wheel contains no `.backup`.
+- The internal agent scratch, the one-shot patch script and the completed
+  ledger checklist, which are no longer tracked.
+
+### Documentation
+
+- The README claimed the TypeScript package "is not in CI" — it is — and that
+  it has no semantic cache — it has one. Both were the wrong way round: the
+  document understated the package.
+- The README's "no forecasting" contradicted the shipped forecast command.
+- `llms.txt` — the file an agent installer reads first — is regenerated from
+  the real parser and now lists every command. It had eight of twelve,
+  omitting the entire money surface.
+- The dashboard page, the Prometheus alert rules and the whole `usecases/`
+  tree were shipped and reachable from nothing. The README has a
+  documentation index now, and a test keeps it honest.
+- The npm README called the package a "scaffold" while its metadata
+  advertised a full feature set, and listed eight of the options that existed.
+
+### Performance
+
+- The request body is parsed **once** per request, and sniffing its first
+  byte no longer copies the whole body.
+- The quota monitor checks for a quota header before rebuilding a dict of
+  every response header.
+- **The committed overhead snapshot is now honest.** It measures **two payload
+  sizes** — 94 bytes and 4 KB, because the overhead is body-proportional — and
+  it records the host, the OS, the interpreter and the package versions, which
+  the previous snapshot did not. The figure is *larger* than the old 0.07 ms,
+  and the difference is stated rather than smoothed over: a number nobody can
+  reproduce is not a better number for being smaller.
+
+  | Payload | Overhead p50 | Overhead p99 |
+  |---|---|---|
+  | 94 B | 0.0972 ms | 0.1318 ms |
+  | 4096 B | 0.1012 ms | 0.1105 ms |
+
+### Deferred to 0.8.1
+
+Recorded here so they are not lost:
+
+- `AuditLog` on the ledger's `BoundedWriter` — it still does blocking file
+  I/O on the request path.
+- Streaming ledger reconciliation — a streaming row is still permanently
+  `estimated=True`, so streaming spend is systematically under-reported.
+- `BackstopState` thread-safety — `_circuits` is still a check-then-act race,
+  and `ledger_errors` still under-counts.
+- `RedisBudgetBackend.remaining` atomicity, and the `evalsha` `NoScriptError`
+  fallback after a Redis restart.
+- The framework adapters are still unwired and undocumented.
+- `install.sh` still falls back to the GitHub source, and the checksum file is
+  still not published — the installer now says so instead of pretending.
+- The git history still holds ~185 MB of superseded media. The purge needs a
+  force-push, so it is opt-in.
+- The npm package is still published by hand: the release workflow now
+  publishes it from the tag, but the repository has no `NPM_TOKEN` yet, so
+  that step skips with a message rather than failing the release. PyPI and
+  the GitHub Release are unaffected.
+
 ## 0.7.0 — 2026-09-27
 
 The **spend ledger** build: Backstop can now record what a request actually cost,

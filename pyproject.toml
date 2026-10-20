@@ -1,27 +1,43 @@
 [build-system]
-requires = ["hatchling>=1.24"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
 name = "backstop-ai"
-version = "0.7.0"
+dynamic = ["version"]
 description = "In-process OpenAI SDK backpressure, budgets, retries, circuit breaking, and metrics."
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
+# PEP 639's form. The old `license = { text = "MIT" }` is a *declaration* that
+# carries no file; this one names the licence text and ships it.
+license = "MIT"
+license-files = ["LICENSE.txt"]
 authors = [{ name = "Backstop Contributors" }]
 classifiers = [
-  "Development Status :: 3 - Alpha",
+  # 4 is "Beta": the API is stable, the feature set is not finished, and the
+  # README says so. "Alpha" was a claim the project stopped making when it
+  # shipped a changelog, a threat model and a release process.
+  "Development Status :: 4 - Beta",
   "Intended Audience :: Developers",
+  "Intended Audience :: Information Technology",
   "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "Topic :: Software Development :: Libraries",
+  "Topic :: Software Development :: Quality Assurance",
+  "Topic :: System :: Monitoring",
+  # The package is annotated and ships a py.typed marker, so a downstream
+  # type checker uses its types.
+  "Typing :: Typed",
 ]
 keywords = ["llm", "openai", "anthropic", "budgets", "guardrails", "backpressure", "retries", "circuit-breaker"]
 dependencies = [
-  "httpx>=0.27",
+  # A ceiling, like the SDKs either side of it: httpx 1.x would be a
+  # different library under the same import name, and the transport layer
+  # here is written against a specific httpx surface.
+  "httpx>=0.27,<1",
   "openai>=2.37,<4",
   "pyyaml>=6.0",
 ]
@@ -55,6 +71,13 @@ Documentation = "https://github.com/RavaniRoshan/backstop/blob/main/docs/install
 backstop = "backstop.cli:main"
 wedge = "wedge.cli:main"
 
+[tool.hatch.version]
+# The version lives in exactly one place — ``src/backstop/__init__.py`` — and
+# the build reads it from there. A static ``version = "..."`` here would be a
+# second place, and two places is how a wheel ends up reporting a different
+# number from the package it was built from.
+path = "src/backstop/__init__.py"
+
 [tool.hatch.build.targets.sdist]
 # An sdist is a source distribution, not a media CDN. The first cut of this list
 # shipped a 2.5MB superseded GIF and 8.5MB of demo video inside the Python
@@ -87,6 +110,9 @@ exclude = [
 ]
 
 [tool.hatch.build.targets.wheel]
+# `py.typed` makes the package's annotations visible to a downstream type
+# checker. The package is fully annotated; without the marker, none of it
+# reaches a user's editor.
 packages = ["src/backstop", "src/wedge"]
 
 [tool.pytest.ini_options]
@@ -96,6 +122,7 @@ pythonpath = ["src"]
 markers = [
   "real_openai: opt-in tests that call the real OpenAI API",
   "real_anthropic: opt-in tests that call the real Anthropic API",
+  "perf: tests that measure wall-clock time; run without coverage instrumentation, which changes the cost they are measuring",
 ]
 
 [tool.ruff]

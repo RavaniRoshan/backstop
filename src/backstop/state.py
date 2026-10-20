@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import atexit
+import dataclasses
 import weakref
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from decimal import Decimal
 
 from .admission import PriorityGate
 from .aimd import AIMDController
@@ -141,6 +143,11 @@ class BackstopState:
         hook, self._atexit_hook = self._atexit_hook, None
         if hook is not None:
             atexit.unregister(hook)
+        # The audit log owns a file handle when it was given a path, and
+        # nothing else ever closed it: a deployment that turned the audit log
+        # on held an open descriptor for the life of the process.
+        if self.audit is not None:
+            self.audit.close()
         return self.ledger.close()
 
     @classmethod
@@ -149,18 +156,30 @@ class BackstopState:
         budget: int | None,
         config: BackstopConfig | None = None,
         backend: BudgetBackend | None = None,
+        budget_usd: Decimal | None = None,
     ) -> "BackstopState":
         resolved = config or BackstopConfig()
+        if resolved.budget_usd is not None and not resolved.ledger_enabled:
+            # A dollar ceiling needs every request's cost measured, and the
+            # ledger is what measures it. So a dollar ceiling turns the
+            # ledger on whether it was asked for or not — which is also why
+            # the cost of a dollar ceiling is the cost of the ledger.
+            resolved = dataclasses.replace(resolved, ledger_enabled=True)
         if resolved.otel_enabled:
             enable_otel(resolved.otel_meter_name)
         else:
             disable_otel()
         aimd = AIMDController(resolved)
+        # A dollar ceiling may be given here or on the config; the config
+        # wins when both are present, because it is the more specific
+        # statement of the same thing.
+        total_usd = resolved.budget_usd if resolved.budget_usd is not None else budget_usd
         backend = backend or build_backend(
             budget,
             shared=resolved.shared_budget,
             redis_url=resolved.redis_url,
             redis_key=resolved.redis_key,
+            total_usd=total_usd,
         )
         budget_obj = Budget(budget, backend=backend)
         audit = AuditLog(resolved.audit_sink, resolved.audit_hmac_key) if resolved.audit_enabled else None
@@ -237,9 +256,12 @@ def _build_ledger(resolved: BackstopConfig) -> tuple[BoundedWriter, PriceCatalog
     separately here: a detection-only deployment gets a catalog and a
     :class:`NullSink`, not a ten-thousand-slot ring that can never be filled.
     """
-    if not (resolved.ledger_enabled or resolved.detection_enabled):
+    if not (resolved.ledger_enabled or resolved.detection_enabled or resolved.budget_usd):
         return BoundedWriter(NullSink()), None
     if not resolved.ledger_enabled:
+        # A dollar ceiling needs a catalog to price against, and a sink to
+        # record what it spends — so a dollar ceiling turns the ledger on
+        # whether it was asked for or not.
         return BoundedWriter(NullSink()), _build_catalog(resolved)
     sink = (
         JsonlSink(resolved.ledger_path)

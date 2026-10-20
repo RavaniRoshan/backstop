@@ -36,6 +36,22 @@ class BackstopError(Exception):
     """Base class for Backstop failures."""
 
 
+class AdmissionTimeoutError(BackstopError, TimeoutError):
+    """Raised when a request waits longer than ``queue_timeout`` for a slot.
+
+    It inherits from **both** :class:`BackstopError` and the builtin
+    :class:`TimeoutError` on purpose. A queue timeout used to be raised as the
+    bare builtin, so ``except TimeoutError`` caught it and ``except
+    BackstopError`` — the class every other enforcement failure belongs to —
+    did not. A user who wrote the one handler that covers all of Backstop's
+    failures silently missed the one that fires under load.
+
+    Inheriting from both means neither handler breaks: existing code that
+    catches ``TimeoutError`` keeps working, and code that catches
+    ``BackstopError`` starts working.
+    """
+
+
 _PROVIDER_BASES = _provider_bases()
 
 
@@ -75,3 +91,34 @@ GuardrailViolationError = _provider_subclass(
 
 class UnsupportedClientError(BackstopError):
     """Raised when Backstop.wrap receives an unsupported client type."""
+
+
+class PriceUnavailableError(BackstopError):
+    """Raised when a dollar ceiling cannot be enforced for a model.
+
+    A dollar ceiling is only enforceable for a model the price catalog
+    carries. A model it does not carry cannot be priced, and a request that
+    cannot be priced cannot be measured against a dollar ceiling — so the
+    request is refused rather than allowed through unmeasured.
+
+    The refusal is the point. The ledger's whole design is that an unpriced
+    request is a *visible hole* rather than a plausible wrong number, and a
+    ceiling with a hole in it is not a ceiling. A deployment that would
+    rather let the hole stand can say so with
+    ``budget_usd_unpriced_policy="allow"``; the request is then recorded as
+    unpriced, exactly as the ledger records it.
+
+    The instance carries the model that could not be priced and the catalog
+    that was consulted.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        model: str | None = None,
+        catalog_path: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.model = model
+        self.catalog_path = catalog_path

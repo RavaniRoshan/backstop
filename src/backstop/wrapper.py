@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import dataclasses
+from decimal import Decimal
 from typing import Any, TypeVar
 
 from ._httpcompat import HTTPX, compat_for
@@ -50,12 +52,30 @@ class Backstop:
     """
 
     @staticmethod
-    def wrap(client: T, budget: int | None = 50_000, config: BackstopConfig | None = None) -> T:
+    def wrap(
+        client: T,
+        budget: int | None = 50_000,
+        config: BackstopConfig | None = None,
+        budget_usd: Decimal | None = None,
+    ) -> T:
+        """Wrap a client so its requests are bounded.
+
+        ``budget`` is a token ceiling and ``budget_usd`` is a dollar one.
+        They are independent: a request is admitted only if it fits under
+        both. A ``Decimal`` is required for the dollar figure, because a
+        float cannot represent most fractions of a dollar exactly.
+        """
         existing = getattr(client, "_backstop_state", None)
         if existing is not None:
             return client
 
         resolved_config = config or BackstopConfig()
+        if budget_usd is not None and not isinstance(budget_usd, Decimal):
+            raise TypeError(
+                f"budget_usd must be a Decimal, got {type(budget_usd).__name__}"
+            )
+        if budget_usd is not None and resolved_config.budget_usd is None:
+            resolved_config = dataclasses.replace(resolved_config, budget_usd=budget_usd)
         _warn_if_over_concurrency_ceiling(resolved_config)
 
         cls = client.__class__
@@ -67,8 +87,7 @@ class Backstop:
             )
         _warn_if_unsupported_sdk_version(provider)
 
-        state = BackstopState.create(budget, config)
-        state.provider = provider
+        state = BackstopState.create(budget, resolved_config)
         if provider == "anthropic":
             if cls.__name__ == "AsyncAnthropic":
                 wrapped_http_client = _build_async_anthropic_http_client(client, state)
@@ -111,7 +130,10 @@ class Backstop:
         state = getattr(client, "_backstop_state", None)
         if state is None:
             return CloseReport.nothing_submitted()
-        return state.close()
+        try:
+            return state.close()
+        finally:
+            _release_wrap_session()
 
     @staticmethod
     def dashboard_app(**kwargs: Any) -> Any:
@@ -217,6 +239,19 @@ def _warn_if_over_concurrency_ceiling(config: BackstopConfig) -> None:
             "sessions per process or a process per agent.",
             stacklevel=2,
         )
+
+
+def _release_wrap_session() -> None:
+    """Give back the slot a wrap session took.
+
+    The counter was only ever incremented, so it counted *every* wrap the
+    process had ever made rather than the ones running now. A deployment that
+    wrapped and closed a client in a loop kept warning about a ceiling it was
+    nowhere near, and the warning — which names "active wrap() sessions" —
+    was describing something that was not happening.
+    """
+    global _active_wraps
+    _active_wraps = max(0, _active_wraps - 1)
 
 
 def _clone_openai_client(client: Any, http_client: Any) -> Any:

@@ -736,7 +736,12 @@ def _cost_lower_bound(tokens: float, model: str | None) -> float | None:
     cannot split prompt from completion tokens. Costing everything at the input
     rate understates spend, which is the safe direction for a budget tool.
     Returns ``None`` when no model is configured or the model is unpriced
-    (``estimate_cost`` returns 0.0 only for unknown models).
+    (``estimate_cost`` returns zero only for unknown models).
+
+    The estimate itself is a ``Decimal``; the conversion to a float is at the
+    display boundary, because this value is rendered on a dashboard and
+    serialised into JSON, and is a lower bound for a chart rather than a
+    charge.
     """
     if not model or not tokens or tokens <= 0:
         return None
@@ -746,7 +751,7 @@ def _cost_lower_bound(tokens: float, model: str | None) -> float | None:
         cost = estimate_cost(int(tokens), 0, model)
     except Exception:
         return None
-    return cost if cost > 0 else None
+    return float(cost) if cost > 0 else None
 
 
 def tenant_view(limit: int = 50) -> list[dict[str, Any]]:

@@ -22,6 +22,14 @@ from typing import Any
 
 _OTEL: Any | None = None
 
+try:  # pragma: no cover - the import shape is what matters, not the branch
+    from prometheus_client.registry import DuplicateTimeseries as _DUPLICATE_TIMESERIES
+except Exception:  # pragma: no cover
+
+    class _DUPLICATE_TIMESERIES(Exception):  # type: ignore[no-redef]
+        """Placeholder for a Prometheus client that does not export the error."""
+
+
 # Optional dependency-free consumer (the built-in dashboard). ``None`` unless a
 # dashboard is running, so an ordinary install pays a single comparison per
 # instrumented event — see ``backstop.telemetry``.
@@ -52,87 +60,118 @@ def disable_otel() -> None:
 
 
 class Metrics:
-    def __init__(self) -> None:
+    def __init__(self, registry: Any | None = None) -> None:
         try:
             from prometheus_client import Counter, Gauge, Histogram
-        except Exception:
+        except ImportError:
             self.enabled = False
             return
 
         self.enabled = True
+        try:
+            self._create(Counter, Gauge, Histogram, registry)
+        except _DUPLICATE_TIMESERIES:
+            if registry is not None:
+                raise
+            # The default registry already carries these collectors, so this
+            # is the second (or later) Metrics in the process. It takes a
+            # private registry of its own rather than colliding.
+            from prometheus_client import CollectorRegistry
+
+            self._create(Counter, Gauge, Histogram, CollectorRegistry())
+
+    def _create(self, Counter: Any, Gauge: Any, Histogram: Any, registry: Any) -> None:
+        kwargs = {"registry": registry} if registry is not None else {}
         self.requests = Counter(
             "backstop_requests_total",
             "Backstop HTTP requests.",
             ["endpoint", "priority", "outcome"],
+            **kwargs,
         )
         self.duration = Histogram(
             "backstop_request_duration_seconds",
             "Backstop request duration.",
             ["endpoint", "priority"],
+            **kwargs,
         )
         self.budget_exceeded = Counter(
             "backstop_budget_exceeded_total",
             "Requests blocked by token budget.",
+            **kwargs,
         )
         self.budget_remaining = Gauge(
             "backstop_budget_remaining_tokens",
             "Remaining token budget.",
+            **kwargs,
         )
         self.queue_depth = Gauge(
             "backstop_queue_depth",
             "Queued requests.",
+            **kwargs,
         )
         self.queue_wait = Histogram(
             "backstop_queue_wait_seconds",
             "Time spent waiting for admission.",
             ["priority"],
+            **kwargs,
         )
         self.concurrency_active = Gauge(
             "backstop_concurrency_active",
             "Active admitted requests.",
+            **kwargs,
         )
         self.concurrency_limit = Gauge(
             "backstop_concurrency_limit",
             "Current AIMD concurrency limit.",
+            **kwargs,
         )
         self.circuit_state = Gauge(
             "backstop_circuit_state",
             "Circuit state: closed=0, half_open=1, open=2.",
+            **kwargs,
         )
         self.circuit_trips = Counter(
             "backstop_circuit_trips_total",
             "Circuit breaker open transitions.",
+            **kwargs,
         )
         self.retry_attempts = Counter(
             "backstop_retry_attempts_total",
             "Retry attempts.",
             ["endpoint"],
+            **kwargs,
         )
         self.aimd_changes = Counter(
             "backstop_aimd_changes_total",
             "AIMD limit changes.",
             ["direction"],
+            **kwargs,
         )
         self.cache_hits = Counter(
             "backstop_cache_hits_total",
             "Cache hit count.",
+            **kwargs,
         )
         self.cache_semantic_hits = Counter(
             "backstop_cache_semantic_hits_total",
             "Semantic (near-duplicate) cache hit count.",
+            **kwargs,
         )
         self.fallback_attempts = Counter(
             "backstop_fallback_attempts_total",
             "Fallback attempts.",
+            **kwargs,
         )
         self.rate_limited = Counter(
             "backstop_rate_limited_total",
             "Requests rejected by pluggable rate limiter.",
+            **kwargs,
         )
         self.tenant_budget_exceeded = Counter(
             "backstop_tenant_budget_exceeded_total",
             "Requests blocked by per-tenant budget.",
             ["tenant_id"],
+            **kwargs,
         )
         # --- Runaway-spend detection ---
         # ``kind`` and ``severity`` are the two closed sets
@@ -144,6 +183,7 @@ class Metrics:
             "backstop_detection_signals_total",
             "Runaway-spend signals raised, by detector and severity.",
             ["kind", "severity"],
+            **kwargs,
         )
         # The magnitude that crossed the threshold, so a threshold can be tuned
         # against the distribution of what actually crossed it rather than
@@ -152,11 +192,13 @@ class Metrics:
             "backstop_detection_signal_observed",
             "The observed value that raised a runaway-spend signal.",
             ["kind"],
+            **kwargs,
         )
         self.detection_evictions = Counter(
             "backstop_detection_evictions_total",
             "Attribution keys dropped from the runaway-spend detector to stay "
             "within its key bound. Each one is a key whose baseline was reset.",
+            **kwargs,
         )
 
     def call(self, name: str, *args: Any, method: str = "inc", **kwargs: Any) -> None:

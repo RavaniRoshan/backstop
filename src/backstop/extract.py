@@ -16,24 +16,78 @@ class RequestMetadata:
     estimated_tokens: int
     endpoint: str
     metadata: dict[str, Any] = field(default_factory=dict)
+    #: The estimate split into its parts: prompt tokens and output tokens.
+    #:
+    #: A *dollar* ceiling needs the split, because input and output are
+    #: billed at different rates — often three or four times apart. Pricing
+    #: the blended total would systematically mis-reserve: too little when
+    #: the request is mostly output, too much when it is mostly input.
+    estimated_input_tokens: int = 0
+    estimated_output_tokens: int = 0
 
 
-def request_metadata(request: httpx.Request, config: BackstopConfig) -> RequestMetadata:
-    body = _json_body(request)
+#: "the body was not handed over", as distinct from "the body is None",
+#: which is what a non-JSON request decodes to. The two are different, and
+#: conflating them means decoding the body twice.
+_UNSET: Any = object()
+
+
+def request_metadata(
+    request: httpx.Request,
+    config: BackstopConfig,
+    body: Any = _UNSET,
+) -> RequestMetadata:
+    """The request's metadata, and its body decoded at most once.
+
+    ``body`` may be passed in when the caller has already decoded it. The
+    transport decodes the body once and needs it twice — once for the
+    metadata, once for the request itself — and decoding it twice meant two
+    full JSON parses per request, which cost real time on a large body.
+    """
+    if body is _UNSET:
+        body = _json_body(request)
     endpoint = request.url.path
+    input_tokens, output_tokens = estimate_token_split(body, request.content, config, endpoint)
     return RequestMetadata(
         priority=Priority.from_header(request.headers.get("X-Backstop-Priority")),
-        estimated_tokens=estimate_tokens(body, request.content, config, endpoint),
+        estimated_tokens=input_tokens + output_tokens,
         endpoint=endpoint,
+        estimated_input_tokens=input_tokens,
+        estimated_output_tokens=output_tokens,
     )
 
 
 def estimate_tokens(body: Any, raw: bytes, config: BackstopConfig, endpoint: str = "") -> int:
+    """The estimated token count for a request.
+
+    Kept as the total, so every existing caller is unaffected. The split it
+    is made of is available from :func:`estimate_token_split`.
+    """
+    input_tokens, output_tokens = estimate_token_split(body, raw, config, endpoint)
+    return input_tokens + output_tokens
+
+
+def estimate_token_split(
+    body: Any, raw: bytes, config: BackstopConfig, endpoint: str = ""
+) -> tuple[int, int]:
+    """The estimated ``(input_tokens, output_tokens)`` for a request.
+
+    The total is the same figure :func:`estimate_tokens` has always returned;
+    this is the same estimate, itemised, so a caller that prices in dollars
+    can apply the input and output rates separately instead of guessing at a
+    blend.
+
+    The two parts sum to at least the total's floor. When the body is larger
+    than the character count suggests — a large JSON payload, an image, a
+    tool schema — the difference is charged to the input side, because
+    unknown input is what the excess is.
+    """
     if body is None:
-        return max(1, int(len(raw) / (config.chars_per_token or 4.0)))
+        whole = max(1, int(len(raw) / (config.chars_per_token or 4.0)))
+        return whole, 0
 
     if "/v1/messages" in endpoint and isinstance(body, Mapping):
-        return _estimate_anthropic_tokens(body, raw, config)
+        return _estimate_anthropic_split(body, raw, config)
 
     prompt_chars = _prompt_chars(body)
     output_tokens = _configured_output_tokens(body, config)
@@ -48,10 +102,24 @@ def estimate_tokens(body: Any, raw: bytes, config: BackstopConfig, endpoint: str
     else:
         prompt_tokens = int(prompt_chars / config.chars_per_token)
 
-    return max(1, prompt_tokens + output_tokens, body_floor)
+    total = max(1, prompt_tokens + output_tokens, body_floor)
+    # The two parts sum to exactly ``total`` — the same figure
+    # ``estimate_tokens`` has always returned — so splitting the estimate
+    # cannot change what a token budget admits. The floor is input the
+    # character count could not see, so it belongs on the input side.
+    input_tokens = total - output_tokens
+    return input_tokens, output_tokens
 
 
 def _estimate_anthropic_tokens(body: dict, raw: bytes, config: BackstopConfig) -> int:
+    """The total for an Anthropic ``/v1/messages`` body."""
+    input_tokens, output_tokens = _estimate_anthropic_split(body, raw, config)
+    return input_tokens + output_tokens
+
+
+def _estimate_anthropic_split(
+    body: dict, raw: bytes, config: BackstopConfig
+) -> tuple[int, int]:
     messages = body.get("messages", [])
     prompt_chars = 0
     for msg in messages:
@@ -75,7 +143,11 @@ def _estimate_anthropic_tokens(body: dict, raw: bytes, config: BackstopConfig) -
 
     prompt_tokens = int(prompt_chars / config.chars_per_token)
     body_floor = int(len(raw) / config.chars_per_token)
-    return max(1, prompt_tokens + output_tokens, body_floor)
+    total = max(1, prompt_tokens + output_tokens, body_floor)
+    # The two parts sum to exactly ``total``, so the split cannot change
+    # what a token budget admits.
+    input_tokens = total - output_tokens
+    return input_tokens, output_tokens
 
 
 class TokenUsage(NamedTuple):
@@ -383,13 +455,29 @@ def _token_usage(usage: Mapping[str, Any], model: Any) -> TokenUsage | None:
 
 
 def _json_body(request: httpx.Request) -> Any:
-    if not request.content:
+    """The request's decoded JSON body, or ``None`` if it is not JSON.
+
+    The content-type check comes first, and the body is only sniffed when
+    the header does not say. The sniff used to be
+    ``request.content.strip().startswith(...)``, and ``bytes.strip()``
+    **always allocates a copy of the whole body** — so every request paid for
+    a full copy of itself, of any size, to look at one byte. The scan below
+    reads the first non-whitespace byte in place.
+    """
+    content = request.content
+    if not content:
         return None
     content_type = request.headers.get("content-type", "")
-    if "json" not in content_type and not request.content.strip().startswith((b"{", b"[")):
-        return None
+    if "json" not in content_type:
+        index = 0
+        length = len(content)
+        while index < length and content[index] in b" \t\r\n":
+            index += 1
+        # 0x7b is "{" and 0x5b is "[".
+        if index >= length or content[index] not in (0x7B, 0x5B):
+            return None
     try:
-        return json.loads(request.content.decode("utf-8"))
+        return json.loads(content.decode("utf-8"))
     except Exception:
         return None
 

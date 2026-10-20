@@ -3,6 +3,8 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+import backstop
+
 repo_root = next(
     parent
     for parent in Path(__file__).resolve().parents
@@ -33,16 +35,18 @@ def test_install_sh_has_cosign_step_in_ci():
     assert "sbom" in content.lower() or "SBOM" in content
 
 
-def test_install_sh_version_matches_pyproject():
+def test_install_sh_version_matches_the_package():
+    """The installer pins the same version the package reports.
+
+    ``pyproject.toml`` does not carry a version of its own any more — the
+    build reads it out of ``src/backstop/__init__.py`` — so the comparison is
+    against the package's own version rather than against a second copy of the
+    number in the project table.
+    """
     with open(repo_root.joinpath("install.sh"), "r", encoding="utf-8") as fh:
         content = fh.read()
-    with open(repo_root.joinpath("pyproject.toml"), "r", encoding="utf-8") as fh:
-        import re
+    import re
 
-        pyproject = fh.read()
-    version_match = re.search(r'version\s*=\s*"([^"]+)"', pyproject)
-    assert version_match, "version not found in pyproject.toml"
-    pyproject_version = version_match.group(1)
     install_version_match = re.search(r'BACKSTOP_VERSION="([^"]+)"', content)
     assert install_version_match, "BACKSTOP_VERSION not found in install.sh"
-    assert install_version_match.group(1) == pyproject_version
+    assert install_version_match.group(1) == backstop.__version__

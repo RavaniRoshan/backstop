@@ -1,0 +1,33 @@
+# Keep the dependencies current, and say so when they move.
+#
+# The lockfile drift this repository had — an npm lockfile naming a
+# different package at a different version through a release — is the kind
+# of thing a bot would have caught.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      python-minor:
+        update-types: ["minor", "patch"]
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 2
+    groups:
+      python-major:
+        update-types: ["major"]
+  - package-ecosystem: npm
+    directory: "/ts/backstop"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5

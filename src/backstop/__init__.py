@@ -2,12 +2,15 @@ from .config import BackstopConfig, Priority
 from .cost import CostEstimate
 from .cost import estimate as cost_estimate
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"
 from .exceptions import (
+    AdmissionTimeoutError,
     BackstopError,
     BudgetExceededError,
     CircuitBreakerOpenError,
+    GuardrailViolationError,
     LatencyBudgetExceededError,
+    RateLimitError,
     UnsupportedClientError,
 )
 from .extract import count_tokens
@@ -30,6 +33,7 @@ from .wrapper import Backstop
 
 __all__ = [
     "AfterResponseHook",
+    "AdmissionTimeoutError",
     "Attribution",
     "Backstop",
     "BackstopConfig",
@@ -39,8 +43,10 @@ __all__ = [
     "BudgetLedger",
     "CircuitBreakerOpenError",
     "CostEstimate",
+    "GuardrailViolationError",
     "LatencyBudgetExceededError",
     "Priority",
+    "RateLimitError",
     "ReservationTicket",
     "SpendEvent",
     "TenantBudget",
@@ -49,11 +55,11 @@ __all__ = [
     "attribution",
     "budgets",
     "count_tokens",
+    "cost_estimate",
     "current_attribution",
     "get_current_tenant",
     "with_attribution",
     "with_budget",
-    "cost",
 ]
 
 # `backstop.budgets` is kept as a public alias for the process-global ledger, but
@@ -66,5 +72,4 @@ def __getattr__(name: str):
     if name == "budgets":
         return get_ledger()
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-cost = type("_CostModule", (), {"estimate": staticmethod(cost_estimate)})()
 

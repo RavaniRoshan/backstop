@@ -499,7 +499,6 @@ def test_gateway_proxies_through_backstop():
         return httpx.Response(200, json={"ok": True, "usage": {"total_tokens": 2}})
 
     mock = httpx.MockTransport(handler)
-    app = make_gateway_app("https://api.openai.com/v1", 1000, cfg)
     from backstop.transports import AsyncBackstopTransport
 
     orig = AsyncBackstopTransport.__init__
@@ -507,8 +506,14 @@ def test_gateway_proxies_through_backstop():
     def patched(self, state, transport=None, **kw):
         orig(self, state, mock, **kw)
 
+    # The patch goes on *before* the app is built: the gateway constructs its
+    # upstream transport once, at construction, so that the connection pool is
+    # shared across requests rather than a fresh one per request. Patching
+    # afterwards left the real transport in place and the test dialled the
+    # actual provider.
     AsyncBackstopTransport.__init__ = patched
     try:
+        app = make_gateway_app("https://api.openai.com/v1", 1000, cfg)
         client = TestClient(app)
         resp = client.post(
             "/chat/completions",

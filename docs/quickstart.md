@@ -9,7 +9,7 @@ pip install "backstop-ai"             # OpenAI only
 pip install "backstop-ai[anthropic]"  # OpenAI + Anthropic
 ```
 
-> `0.6.0` is published. To work against unreleased work past that tag:
+> `0.8.0` is published. To work against unreleased work past that tag:
 > ```bash
 > git clone https://github.com/RavaniRoshan/backstop.git
 > cd backstop && pip install -e ".[anthropic]"

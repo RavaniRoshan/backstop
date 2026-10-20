@@ -4,6 +4,7 @@ import os
 import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
+from decimal import Decimal
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
@@ -158,12 +159,6 @@ class BackstopConfig:
     # ``AgentGuard`` instance fencing runaway agent loops.
     agent_guard: Any = None
 
-    # --- Structured logging ---
-    # When True, emit a JSON line per request/response to the ``log_sink``
-    # (a file path or callable(str)) for operational debugging.
-    log_json: bool = False
-    log_sink: Any = None
-
     # --- Cost forecasting → enforcement (Deep Research P1#7) ---
     # When the projected burn rate would exhaust the budget within this
     # horizon, proactively tighten the AIMD concurrency limit. ``0`` disables.
@@ -202,6 +197,35 @@ class BackstopConfig:
     ledger_enabled: bool = False
     ledger_path: str | None = None
     ledger_memory_events: int = 10_000
+
+    # --- Dollar budgets ---
+    #: A spend ceiling in US dollars, on top of the token ceiling.
+    #:
+    #: A token budget says how much *work* a session may do; a dollar budget
+    #: says how much it may *cost*. The two answer different questions — a
+    #: team that prices its requests differently per model cannot express
+    #: its budget in tokens without doing the arithmetic themselves, and
+    #: doing it themselves is how the ceiling stops matching the bill.
+    #:
+    #: The figure is a :class:`~decimal.Decimal`. A float cannot represent
+    #: most decimal fractions of a dollar exactly, and a ceiling that is a
+    #: cent away from the truth is a ceiling that lets the wrong request
+    #: through.
+    #:
+    #: Setting this **requires the price catalog**, so it turns the ledger
+    #: on: a dollar ceiling is only enforceable if the cost of every
+    #: request is measured, and the ledger is what measures it.
+    budget_usd: Decimal | None = None
+    #: What to do when a request's model has no price, and a dollar ceiling
+    #: is in force: ``"deny"`` (the default) or ``"allow"``.
+    #:
+    #: ``"deny"`` refuses the request, because a ceiling with an unpriced
+    #: hole in it is not a ceiling. ``"allow"`` lets it through and records
+    #: it as unpriced, which is what the ledger does with every unpriced
+    #: request — a visible hole rather than a plausible wrong number. The
+    #: choice is the deployment's, and it is a choice with a name, because
+    #: "it silently did not enforce" is not one.
+    budget_usd_unpriced_policy: str = "deny"
 
     # --- Price catalog (Ledger Foundation) ---
     # A JSON file of negotiated rates, layered over the bundled list prices by
@@ -285,8 +309,6 @@ class BackstopConfig:
             raise ValueError("max_wrap_sessions must be >= 0")
         if self.forecast_horizon_seconds < 0:
             raise ValueError("forecast_horizon_seconds must be >= 0")
-        if self.log_json and self.log_sink is None:
-            raise ValueError("log_json requires log_sink (file path or callable)")
         if self.audit_enabled:
             if self.audit_hmac_key is None:
                 raise ValueError("audit_enabled requires audit_hmac_key for tamper-evidence")
@@ -338,6 +360,21 @@ class BackstopConfig:
                     f"price_catalog_path does not exist or is not a file: "
                     f"{self.price_catalog_path!r}"
                 )
+        if self.budget_usd is not None:
+            if not isinstance(self.budget_usd, Decimal):
+                raise TypeError(
+                    f"budget_usd must be a Decimal, got {type(self.budget_usd).__name__}. "
+                    "A float cannot represent most fractions of a dollar exactly, "
+                    "and a ceiling that is a cent out is a ceiling that lets the "
+                    "wrong request through."
+                )
+            if self.budget_usd < 0:
+                raise ValueError("budget_usd must be >= 0")
+        if self.budget_usd_unpriced_policy not in ("deny", "allow"):
+            raise ValueError(
+                "budget_usd_unpriced_policy must be 'deny' or 'allow', got "
+                f"{self.budget_usd_unpriced_policy!r}"
+            )
         if not isinstance(self.detection_enabled, bool):
             raise TypeError(
                 f"detection_enabled must be a bool, got "
@@ -360,9 +397,17 @@ class BackstopConfig:
             for prio, chain in self.fallback_chain_for_priority.items():
                 if not isinstance(chain, list) or not chain:
                     raise ValueError(f"fallback_chain_for_priority[{prio!r}] must be a non-empty list")
-            for entry in chain:
-                if not isinstance(entry, dict) or not isinstance(entry.get("model"), str):
-                    raise ValueError(f"fallback_chain_for_priority[{prio!r}] entries need a string 'model'")
+                # The entry check belongs inside this loop. It used to sit
+                # after it, where it validated only the *last* priority's
+                # chain and named that priority in the error — so whether a
+                # malformed chain was caught depended on the order the keys
+                # happened to be written in, and a chain that was invalid
+                # under any other ordering was accepted silently.
+                for entry in chain:
+                    if not isinstance(entry, dict) or not isinstance(entry.get("model"), str):
+                        raise ValueError(
+                            f"fallback_chain_for_priority[{prio!r}] entries need a string 'model'"
+                        )
         if self.secret_provider is None and self.virtual_keys:
             # `BackstopConfig` is a frozen dataclass, so a plain assignment raises
             # FrozenInstanceError. That used to be swallowed by a bare

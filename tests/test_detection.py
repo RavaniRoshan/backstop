@@ -1045,6 +1045,7 @@ def test_window_memory_is_bounded_by_window_size_per_key():
     assert h.detector.sample_count() == 4 * 16
 
 
+@pytest.mark.perf
 def test_observe_steady_state_cost_stays_inside_the_overhead_class() -> None:
     """Measured, not asserted by construction, with both paths timed.
 

@@ -6,6 +6,7 @@ export { ResponseCache } from "./cache.js";
 export { AuditLog } from "./audit.js";
 export { QuotaMonitor } from "./quotas.js";
 export { AgentGuard } from "./agent.js";
+export { AgentGuardViolationError, LatencyBudgetExceededError } from "./exceptions.js";
 export * from "./forecast.js";
 export type {
   AfterResponseHook,

@@ -1,6 +1,6 @@
 # Compatibility Matrix
 
-> 0.6.0 is published (PyPI `backstop-ai`, GitHub Release `v0.6.0`). The SDK
+> 0.8.0 is published (PyPI `backstop-ai`, GitHub Release `v0.8.0`). The SDK
 > ranges below are the **tested** ranges from `.github/workflows/ci.yml` — not
 > a claim of universal support, and not a claim that every combination is
 > exercised. Wrapping an SDK outside these ranges emits a loud `UserWarning`
@@ -102,8 +102,10 @@ The `pyyaml` wedge dependency *is* installed by CI.
 A separate `backstop-ai` on **npm** implements a subset of the above for the
 OpenAI TypeScript SDK. It is not covered by anything in this page: it is a
 different interception strategy (`client.chat.completions.create` patching, not
-transport injection), has no Anthropic support, roughly half the config surface,
-and no CI. Do not read the tables here as describing it.
+transport injection), has no Anthropic support, and roughly half the config
+surface. It *is* in CI — its typecheck, build and tests run on every push, and
+CI checks that its version agrees with the Python distribution's — but the
+tables here describe the Python package, not it.
 
 ## Compatibility Policy
 

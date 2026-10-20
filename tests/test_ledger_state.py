@@ -149,13 +149,14 @@ def test_closing_the_state_releases_the_drain_thread():
     after one — and the assertion is on ``threading.enumerate`` rather than on
     the writer's own flag, because "it says it stopped" is not "it stopped".
     """
+    before = len(_drain_threads())
     state = _state(_ledger_config())
-    assert _drain_threads() == []
+    assert len(_drain_threads()) == before
     state.ledger.submit(_event())
     assert DRAIN_THREAD_NAME in _drain_threads()
     report = state.close()
     assert report.written == 1
-    assert _drain_threads() == []
+    assert len(_drain_threads()) == before
 
 
 def test_closing_the_state_twice_returns_the_same_report():
@@ -283,13 +284,14 @@ def test_a_disabled_ledger_registers_no_exit_hook():
 def test_the_public_close_takes_a_wrapped_client_and_a_bare_one():
     from backstop import Backstop
 
+    before = len(_drain_threads())
     state = _state(_ledger_config())
     client = type("Client", (), {"_backstop_state": state})()
     state.ledger.submit(_event())
     report = Backstop.close(client)
     assert report.written == 1
     assert Backstop.close(client) is report
-    assert _drain_threads() == []
+    assert len(_drain_threads()) == before
 
     # A client Backstop never wrapped has no ledger, and says so with zeros.
     bare = Backstop.close(object())

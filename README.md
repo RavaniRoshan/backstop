@@ -11,7 +11,7 @@
     <img src="https://github.com/RavaniRoshan/backstop/actions/workflows/ci.yml/badge.svg" alt="CI" />
   </a>
   <a href="https://github.com/RavaniRoshan/backstop/releases/latest">
-    <img src="https://img.shields.io/github/v/release/RavaniRoshan/backstop" alt="Release: v0.6.0" />
+    <img src="https://img.shields.io/github/v/release/RavaniRoshan/backstop" alt="Release: v0.8.0" />
   </a>
   <a href="https://github.com/RavaniRoshan/backstop/blob/main/LICENSE.txt">
     <img src="https://img.shields.io/github/license/RavaniRoshan/backstop" alt="License: MIT" />
@@ -109,10 +109,10 @@ backstop demo
 
 ## Install
 
-`0.6.0` is published — on PyPI as `backstop-ai`, on npm as `backstop-ai`, and
-as the `v0.6.0` GitHub Release. `pip install` gives you that release; the
+`0.8.0` is published — on PyPI as `backstop-ai`, on npm as `backstop-ai`, and
+as the `v0.8.0` GitHub Release. `pip install` gives you that release; the
 default branch carries unreleased work past it, so the source install below
-tracks `main` rather than `v0.6.0`.
+tracks `main` rather than `v0.8.0`.
 
 ```bash
 pip install "backstop-ai"             # OpenAI only
@@ -201,6 +201,7 @@ except BudgetExceededError as exc:
 | Spend ledger | Opt-in. One priced, attributed record per completed request, to a JSONL file or an in-memory ring; see below and [docs/ledger.md](docs/ledger.md) |
 | Chargeback export | `backstop ledger export` writes a finance-grade CSV that joins to your own revenue data |
 | Runaway-spend detection | Velocity, drift, retry amplification and context growth, per attribution key. Shadow by default: reports, never blocks |
+| **Dollar budgets** | A second ceiling, in dollars, on top of the token one. A request is admitted only if it fits under both; see [docs/usd-budgets.md](docs/usd-budgets.md) |
 
 ### Priority admission
 
@@ -227,6 +228,32 @@ client = Backstop.wrap(
     config=BackstopConfig(starvation_after_seconds=1.0, queue_timeout=10.0),
 )
 ```
+
+### Dollar budgets
+
+A token ceiling says how much **work** a session may do. A dollar ceiling says
+how much it may **cost**, which is the question a team with a budget actually
+asked, and the one a token ceiling cannot answer: two models that take the
+same number of tokens can differ in price twenty times.
+
+```python
+from decimal import Decimal
+
+client = Backstop.wrap(
+    OpenAI(),
+    budget=50_000,                # tokens — unchanged
+    budget_usd=Decimal("5.00"),   # dollars
+)
+```
+
+It is a **second** ceiling, not a replacement: a request is admitted only if it
+fits under both. The money is `Decimal` end to end — a float is refused,
+because a float cannot represent most fractions of a dollar exactly, and a
+ceiling a cent out is a ceiling that lets the wrong request through.
+
+A dollar ceiling needs every request's cost measured, so **it turns the spend
+ledger on**. The cost of a dollar ceiling is the cost of the ledger, and the
+price is stated: [docs/usd-budgets.md](docs/usd-budgets.md).
 
 ### Spend ledger
 
@@ -315,9 +342,11 @@ under-count on Anthropic's 1-hour TTL — are in [docs/ledger.md](docs/ledger.md
     process chose. Rotation, archival, retention policy and querying are yours.
     (`virtual_keys` and per-tenant budgets are about *enforcement*, not about
     partitioning storage.)
-  - **No forecasting.** `backstop.forecast` projects budget exhaustion from a
-    measured burn rate; it does not project spend, and the ledger is a record of
-    what happened, not a model of what will.
+  - **No forecasting of *spend*.** `backstop forecast` projects budget
+    exhaustion from a measured burn rate, and the transport can tighten the
+    concurrency limit when the rate projects exhaustion inside a horizon. What
+    it does not do is model what the next month will cost: the ledger is a
+    record of what happened, not a model of what will.
   - **No cross-customer benchmarks.** Nothing aggregates across deployments and
     there is no published "normal cost per request" for you to compare against.
     The demo's numbers are a synthetic scenario, not a reference.
@@ -394,22 +423,33 @@ See [docs/architecture.md](docs/architecture.md) for the full design.
 ## Benchmarks
 
 Control-path overhead, from the committed snapshot
-[`docs/benchmark-results-2026-07-20.md`](docs/benchmark-results-2026-07-20.md)
-— 1,000 requests through a local `httpx.MockTransport`, no network:
+[`docs/benchmark-results-2026-10-20.md`](docs/benchmark-results-2026-10-20.md)
+— 2,000 requests through a local `httpx.MockTransport`, no network, at **two
+payload sizes**:
 
-| Percentile | Direct | Backstop | Overhead |
-|---|---|---|---|
-| p50 | 0.12 ms | 0.19 ms | **0.07 ms** |
-| p95 | 0.22 ms | 0.30 ms | **0.07 ms** |
-| p99 | 0.30 ms | 0.38 ms | **0.07 ms** |
+| Payload | Direct p50 | Backstop p50 | Overhead p50 | Overhead p99 |
+|---|---|---|---|---|
+| 94 B | 0.1084 ms | 0.2056 ms | **0.0972 ms** | 0.1318 ms |
+| 4096 B | 0.1184 ms | 0.2196 ms | **0.1012 ms** | 0.1105 ms |
 
-Those are the only overhead numbers this repository commits. What the snapshot
-records about conditions: date 2026-07-20, seed `0x00C0FFEE`, local mock
-transport, no network, 1,000 requests. It does **not** record the host CPU, the
-OS, the Python version, or the provider SDK version — so read 0.07 ms as one
-recorded run, not a guarantee. (An earlier version of this file claimed
-~0.09 ms p50 on a named MacBook M1 / openai 3.14 / httpx 0.28 configuration that
-no artifact in this repo records; that claim is gone rather than restated.)
+**Two payload sizes, deliberately.** The 94-byte one is the body the
+previously published 0.07 ms figure used; the 4 KB one is closer to a real
+prompt. The overhead is body-proportional — the guardrail reads, parses and
+inspects every request — so a snapshot that reported only the small body made
+the guardrail look cheaper than it is.
+
+**These are not the old 0.07 ms, and that is the point.** The old snapshot
+recorded the date, the seed, the transport and the request count, and *not* the
+host, the OS, the Python version or the SDK versions — so it could not be
+reproduced on another machine or compared with anything. The new one records
+all of it. A number nobody can reproduce is not a better number for being
+smaller.
+
+The conditions of this run: Linux x86_64 (WSL2), CPython 3.12.3, httpx
+0.28.1, openai 2.46.0, anthropic 0.116.0, prometheus-client 0.26.0, local
+mock transport, no network, 2,000 requests per payload. The snapshot also
+breaks down what the overhead is made of — the body parse, the gauges, the
+counters, and the ledger's share, which is off by default.
 
 Reproduce the measurement yourself:
 
@@ -438,6 +478,29 @@ that it hit any particular figure.
 See [docs/benchmarks.md](docs/benchmarks.md).
 
 ---
+
+## Documentation
+
+| Page | What it covers |
+|---|---|
+| [docs/quickstart.md](docs/quickstart.md) | Install to first guarded request, in six steps |
+| [docs/install.md](docs/install.md) | Every install path, including air-gapped |
+| [docs/architecture.md](docs/architecture.md) | How the transport, the ledger and the gate fit together |
+| [docs/usd-budgets.md](docs/usd-budgets.md) | A ceiling in dollars, and what it costs |
+| [docs/ledger.md](docs/ledger.md) | The spend ledger, the charge-back export and the price catalog |
+| [docs/detection.md](docs/detection.md) | The four runaway-spend detectors |
+| [docs/alerts.md](docs/alerts.md) | Budget alerts and webhooks |
+| [docs/frameworks.md](docs/frameworks.md) | The framework adapters |
+| [docs/dashboard.md](docs/dashboard.md) | The built-in dashboard |
+| [docs/benchmarks.md](docs/benchmarks.md) | How the overhead numbers are measured |
+| [docs/benchmark-results-2026-10-20.md](docs/benchmark-results-2026-10-20.md) | The current committed overhead snapshot, with its conditions |
+| [docs/benchmark-results-2026-07-20.md](docs/benchmark-results-2026-07-20.md) | The superseded snapshot, kept for history |
+| [docs/compatibility.md](docs/compatibility.md) | The SDK version matrix, and what is not supported |
+| [docs/sdk-matrix.md](docs/sdk-matrix.md) | Which SDK versions CI actually proves |
+| [docs/concurrency.md](docs/concurrency.md) | The GIL ceiling, and when to reach for a proxy |
+| [docs/threat-model.md](docs/threat-model.md) | Assets, trust boundaries and the privacy posture |
+| [observability/prometheus-alerts.yml](observability/prometheus-alerts.yml) | Ready-made Prometheus alert rules for the metric surface |
+| [usecases/](usecases/) | Five deployments end to end, with walkthroughs |
 
 ## Examples
 
@@ -484,13 +547,18 @@ Python package:
   injecting a transport, so it is a different interception strategy, not the
   design documented above.
 - It covers roughly half the Python `BackstopConfig` surface: budget, circuit,
-  retry, fallback, cache, audit, agent guard, admission. No semantic cache, no
-  Redis shared budget, no OTel, no gateway, no shadow mode, no Wedge.
-- It is **not in CI.** `.github/workflows/ci.yml` is Python-only; the TypeScript
-  tests run only when someone runs `npm test` in `ts/backstop/` by hand.
+  retry, fallback chains, cache (exact and semantic), audit, agent guard,
+  admission, AIMD, quota auto-tuning, forecast, request deadlines, hooks. No
+  Redis shared budget, no OTel, no gateway, no shadow mode, no spend ledger,
+  no dollar budgets, no Wedge.
+- It **is** in CI: `.github/workflows/ci.yml` runs its typecheck, build and
+  tests on every push, checks that its lockfile and package metadata agree
+  with the Python distribution's version, and the release tag publishes it to
+  npm with provenance.
 
-Use the Python package when you need the full feature set or Anthropic. Treat
-the npm package as a smaller subset and verify it against your own SDK version.
+Use the Python package when you need the full feature set, Anthropic, or the
+money features. The npm package is a smaller subset, and its README says
+exactly which parts those are — treat the Python package as the reference.
 
 ---
 

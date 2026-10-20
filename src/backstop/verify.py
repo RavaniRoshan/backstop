@@ -558,16 +558,18 @@ class VerifyRunner:
         """With shadow=True, exhausting a budget must still let requests through."""
         t0 = time.perf_counter()
         try:
-            from .rollout import ShadowCollector
 
             state = BackstopState.create(
                 20, BackstopConfig(retry_max_attempts=1, circuit_min_requests=10_000, shadow=True)
             )
-            collector = ShadowCollector(sink=state.config.audit_sink)
             import backstop.transports as _t
 
             transport = _t.BackstopTransport(state, httpx.MockTransport(self._mock_response({"ok": True, "usage": {"total_tokens": 10}})))
-            transport._shadow = collector
+            # The transport's own collector, so this check exercises the real
+            # wiring rather than an injected one.
+            collector = transport.shadow_collector
+            if collector is None:
+                raise RuntimeError("shadow mode is on but no shadow collector was built")
             client = httpx.Client(transport=transport, base_url="https://mock.local")
             served = 0
             blocked = 0

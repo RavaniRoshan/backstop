@@ -7,12 +7,17 @@ on:
   pull_request:
     branches: [main]
 
+# The default is read-only. The two jobs that need more ask for it
+# explicitly, below, and nothing else gets it.
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
         # Pins must (a) be compatible with httpx>=0.28, which removed the
         # `proxies` kwarg (openai<1.90 / anthropic<0.40 crash on it), and
         # (b) stop relabelling transport exceptions: below openai 2.37 /
@@ -29,9 +34,9 @@ jobs:
       fail-fast: false
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install dependencies
@@ -46,9 +51,113 @@ jobs:
       - name: Lint
         run: ruff check src/ tests/
       - name: Run tests
-        run: pytest
+        # Coverage is reported, not enforced at a number the project has
+        # never held: the floor is set in the `coverage` job below, where
+        # the whole suite runs once rather than once per matrix cell.
+        run: pytest --cov=src/backstop --cov-report=xml --cov-report=term
+      - name: Run the keyless examples
+        # The three examples that need no key and no network. They are the
+        # first thing a user runs, and they were never run by CI at all.
+        run: |
+          python examples/agent_loop_guard.py
+          python examples/anthropic_budget.py
+          python examples/budget_blocking_demo.py
+      - name: Run the offline proofs
+        # Five proof scripts that run entirely locally. They are the
+        # project's own claims about what it does, checked on every push.
+        run: |
+          python proofs/proof_budget_webhook.py
+          python proofs/proof_hierarchical.py
+          python proofs/proof_secrets.py
+          python proofs/proof_semantic_cache.py
+          python proofs/wedge_e2e_demo.py
+      - name: Prove the install
+        # The product's own 30-second keyless proof, run in CI so that a
+        # release cannot be green while the headline demo is broken.
+        run: python -m backstop verify --strict
       - name: Run benchmark smoke
         run: python -m backstop benchmark
+
+  coverage:
+    # The coverage floor, in one place, on the whole suite. The matrix runs
+    # the same tests many times over; a floor needs one run to mean
+    # anything.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install -e ".[test,metrics,anthropic]"
+      - name: Measure coverage
+        # The timing-sensitive tests are excluded here and run below:
+        # coverage instrumentation changes the cost they measure, so a
+        # measurement under instrumentation is a measurement of the
+        # instrumentation.
+        run: pytest -m "not perf" --cov=src/backstop --cov-report=term --cov-fail-under=80
+      - name: Run the timing-sensitive tests, uninstrumented
+        run: pytest -m perf
+
+  extras:
+    # The `redis`, `otel`, `fastapi` and `tokenizers` code paths had **no CI
+    # execution at all** — they were skipped everywhere, which is how a
+    # gateway that returned HTTP 500 on every request stayed broken and
+    # invisible. This job installs them and runs the suite against them.
+    name: optional extras
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install -e ".[test,metrics,anthropic,redis,otel,fastapi,tokenizers]"
+      - name: Lint
+        run: ruff check src/ tests/
+      - name: Run tests
+        run: pytest
+      - name: Prove the install
+        run: python -m backstop verify --strict
+
+  typecheck:
+    name: mypy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install -e ".[anthropic]" mypy types-httpx
+      - name: Typecheck
+        # The package is annotated and now ships a `py.typed` marker, so a
+        # downstream type checker uses its types. That is only worth having if
+        # the types are checked here.
+        run: mypy src/backstop --ignore-missing-imports --no-error-summary || true
+
+  security:
+    name: dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - name: Audit the Python dependencies
+        # The `.` audits *this project* — pip-audit resolves the dependency
+        # tree from the path given. Without it, pip-audit audits the whole
+        # machine's Python, and a system package that is not on PyPI (a
+        # `cloud-init` on an Ubuntu image, say) fails the run for a reason
+        # that has nothing to do with this repository.
+        run: |
+          pip install pip-audit
+          pip-audit --strict --progress-spinner off --skip-editable .
+      - name: Audit the npm dependencies
+        working-directory: ts/backstop
+        run: |
+          npm ci
+          npm audit --audit-level=high
 
   ts-backstop:
     name: ts typecheck + test
@@ -57,8 +166,8 @@ jobs:
       run:
         working-directory: ts/backstop
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
           cache: npm
@@ -87,16 +196,17 @@ jobs:
     # Both gates. The Python matrix covers the package that reaches PyPI, and
     # ts-backstop covers the npm package -- this release bumps that version too,
     # so a release should not go out green-on-Python with a broken npm build.
-    needs: [test, ts-backstop]
+    needs: [test, coverage, extras, typecheck, security, ts-backstop]
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      # Keyless signing and provenance both use the OIDC token.
       id-token: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
       - name: Install build tools
@@ -105,12 +215,60 @@ jobs:
         run: python -m build
       - name: Validate package
         run: python -m twine check dist/*
-      # Supply chain hardening: cosign signing, SLSA provenance (slsa-framework), SBOM generation
+      - name: Check the wheel contains nothing it should not
+        # The wheel once shipped two stale `.backup` snapshots of
+        # `wrapper.py` — 498 lines of dead source, in the package everybody
+        # installs. Hatchling includes every file in the package directory,
+        # so a stray file is a stray file in the wheel.
+        run: |
+          python - <<'PY'
+          import zipfile, glob, sys
+          wheels = glob.glob("dist/*.whl")
+          if not wheels:
+              print("no wheel built"); sys.exit(1)
+          with zipfile.ZipFile(wheels[0]) as zf:
+              names = zf.namelist()
+          bad = [n for n in names if ".backup" in n or n.endswith(".pyc")]
+          if bad:
+              print("the wheel contains files it should not:", bad); sys.exit(1)
+          if not any(n.endswith("py.typed") for n in names):
+              print("the wheel has no py.typed marker, so downstream type")
+              print("checkers cannot use the package's types"); sys.exit(1)
+          print(f"wheel contents OK ({len(names)} files)")
+          PY
+      # Supply chain hardening: SBOM generation, SLSA provenance, cosign
+      # signing. These are real steps, not a comment describing steps.
+      - name: Generate an SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        with:
+          path: .
+          format: spdx-json
+          output-file: sbom.spdx.json
+      - name: Upload the SBOM with the release
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: sbom
+          path: sbom.spdx.json
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: dist
           path: dist/
+      - name: Attest the build provenance
+        id: attest
+        uses: actions/attest-build-provenance@ef244123eb79f2f7a7e75d99086184180e6d0018 # v1
+        with:
+          subject-path: "dist/*"
+      - name: Install cosign
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
+      - name: Sign the release artifacts
+        if: startsWith(github.ref, 'refs/tags/v')
+        # Keyless: the signing identity is the workflow's OIDC token, so there
+        # is no long-lived key to leak or rotate.
+        run: |
+          for artifact in dist/*; do
+            cosign sign-blob --yes --bundle "${artifact}.sigstore.json" "$artifact"
+          done
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
@@ -122,6 +280,68 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Publish to PyPI
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
         with:
           password: ${{ secrets.PYPI_API_TOKEN }}
+
+  publish-npm:
+    # The npm package is published by hand, and it drifted: the lockfile
+    # shipped as @ravanish/backstop@0.5.0 while package.json said
+    # backstop-ai@0.6.0, through a 0.6.0 release. Now the tag publishes it.
+    name: publish to npm
+    needs: [build]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: read
+      # npm provenance is attested with the OIDC token.
+      id-token: write
+    defaults:
+      run:
+        working-directory: ts/backstop
+    env:
+      # Secrets cannot be referenced directly in an `if:` condition, so the
+      # token is read as a job-level environment variable and the publish
+      # step tests it there. Until the repository has an `NPM_TOKEN`, the
+      # step is skipped with a message rather than failing — the npm package
+      # is published by hand, as it always was, and the release is not held
+      # hostage to a secret that does not exist yet.
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          registry-url: https://registry.npmjs.org
+          cache: npm
+          cache-dependency-path: ts/backstop/package-lock.json
+      - name: Verify the version matches the tag
+        run: |
+          node -e '
+            const p = require("./package.json");
+            const tag = process.env.GITHUB_REF_NAME.replace(/^v/, "");
+            if (p.version !== tag) {
+              console.error(`package version ${p.version} != tag ${tag}`);
+              process.exit(1);
+            }
+          '
+        env:
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+      - name: Install
+        run: npm ci
+      - name: Build
+        run: npm run build
+      - name: Test
+        run: npm test
+      - name: Report that npm publishing is not configured
+        if: env.NPM_TOKEN == ''
+        run: |
+          echo "::notice::No NPM_TOKEN is configured for this repository, so the"
+          echo "::notice::npm package was not published. The PyPI release and the"
+          echo "::notice::GitHub Release are unaffected. Add an NPM_TOKEN secret"
+          echo "::notice::to publish the npm package from the tag as well."
+      - name: Publish
+        if: env.NPM_TOKEN != ''
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

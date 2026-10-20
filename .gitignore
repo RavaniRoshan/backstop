@@ -51,3 +51,19 @@ videos/backstop-film/snapshots/
 videos/backstop-reel/snapshots/
 videos/backstop-film/renders/
 videos/backstop-reel/renders/
+
+# Stale source snapshots. Hatchling includes every file in the package
+# directory, so a `.backup` file in `src/backstop/` ships in the wheel — and
+# two of them did, 498 lines of dead source, in the package everybody
+# installs.
+*.backup
+*.backup2
+
+# Internal agent scratch: a multi-agent workspace, not a product.
+# The files stay on disk; they are simply not part of the repository.
+/.agents/
+
+# A one-shot regex patch script, and the completed ledger checklist that
+# pointed at a plan file which was deleted.
+fix_wrapper.py
+/TODO.md

@@ -26,6 +26,9 @@ from backstop.telemetry import (
 from backstop.transports import BackstopTransport
 
 _TRANSPORTS = Path(__file__).resolve().parents[1] / "src" / "backstop" / "transports.py"
+#: The labelled call sites moved into the Policy when the sync and async
+#: transports stopped duplicating the decisions, so both files are scanned.
+_POLICY = Path(__file__).resolve().parents[1] / "src" / "backstop" / "policy.py"
 
 
 @pytest.fixture(autouse=True)
@@ -99,12 +102,14 @@ def test_label_schema_covers_every_labelled_call_site_backstop_makes():
     lookahead must span the whole identifier so ``method=`` never passes as a
     label by backtracking into a shorter match.
 
-    Two producers feed this choke point, not one: the transports emit their own
-    call sites, and the runaway-spend sink reports signals from wherever the
-    detector noticed them. Both are covered, so a label the map does not declare
-    cannot arrive from either, and a map entry neither producer emits is caught.
+    Three producers feed this choke point, not one: the transports emit their
+    own call sites, the Policy emits the ones that were once duplicated
+    between them, and the runaway-spend sink reports signals from wherever
+    the detector noticed them. All are covered, so a label the map does not
+    declare cannot arrive from any of them, and a map entry none of them emits
+    is caught.
     """
-    source = _TRANSPORTS.read_text(encoding="utf-8")
+    source = _TRANSPORTS.read_text(encoding="utf-8") + _POLICY.read_text(encoding="utf-8")
     labelled = set(
         re.findall(
             r'_metrics\.call\(\s*"([a-z_]+)",\s*(?:"[^"]*"|[A-Za-z_][\w.\[\]]*)(?![\w.\[\]]*\s*=)',

@@ -181,7 +181,11 @@ def run_demo(
         compat = compat_for(probe._client)
 
     pricing = Pricing()
-    cost_per_call = pricing.estimate_cost(prompt_tokens, completion_tokens, target_model)
+    # The estimate is a Decimal; the comparison table renders dollars as
+    # floats, so the conversion happens once, here, at the display boundary.
+    cost_per_call = float(
+        pricing.estimate_cost(prompt_tokens, completion_tokens, target_model)
+    )
 
     # ------------------------------------------------------------------
     # 1. Unprotected Run
