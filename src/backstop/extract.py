@@ -26,8 +26,26 @@ class RequestMetadata:
     estimated_output_tokens: int = 0
 
 
-def request_metadata(request: httpx.Request, config: BackstopConfig) -> RequestMetadata:
-    body = _json_body(request)
+#: "the body was not handed over", as distinct from "the body is None",
+#: which is what a non-JSON request decodes to. The two are different, and
+#: conflating them means decoding the body twice.
+_UNSET: Any = object()
+
+
+def request_metadata(
+    request: httpx.Request,
+    config: BackstopConfig,
+    body: Any = _UNSET,
+) -> RequestMetadata:
+    """The request's metadata, and its body decoded at most once.
+
+    ``body`` may be passed in when the caller has already decoded it. The
+    transport decodes the body once and needs it twice — once for the
+    metadata, once for the request itself — and decoding it twice meant two
+    full JSON parses per request, which cost real time on a large body.
+    """
+    if body is _UNSET:
+        body = _json_body(request)
     endpoint = request.url.path
     input_tokens, output_tokens = estimate_token_split(body, request.content, config, endpoint)
     return RequestMetadata(
@@ -437,13 +455,29 @@ def _token_usage(usage: Mapping[str, Any], model: Any) -> TokenUsage | None:
 
 
 def _json_body(request: httpx.Request) -> Any:
-    if not request.content:
+    """The request's decoded JSON body, or ``None`` if it is not JSON.
+
+    The content-type check comes first, and the body is only sniffed when
+    the header does not say. The sniff used to be
+    ``request.content.strip().startswith(...)``, and ``bytes.strip()``
+    **always allocates a copy of the whole body** — so every request paid for
+    a full copy of itself, of any size, to look at one byte. The scan below
+    reads the first non-whitespace byte in place.
+    """
+    content = request.content
+    if not content:
         return None
     content_type = request.headers.get("content-type", "")
-    if "json" not in content_type and not request.content.strip().startswith((b"{", b"[")):
-        return None
+    if "json" not in content_type:
+        index = 0
+        length = len(content)
+        while index < length and content[index] in b" \t\r\n":
+            index += 1
+        # 0x7b is "{" and 0x5b is "[".
+        if index >= length or content[index] not in (0x7B, 0x5B):
+            return None
     try:
-        return json.loads(request.content.decode("utf-8"))
+        return json.loads(content.decode("utf-8"))
     except Exception:
         return None
 

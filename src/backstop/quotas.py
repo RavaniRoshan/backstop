@@ -54,6 +54,24 @@ _KNOWN = {
 }
 
 
+def has_ratelimit_headers(headers) -> bool:
+    """Whether the response carries any provider quota header at all.
+
+    Most responses carry none. The monitor used to rebuild a lowercased dict
+    of *every* header and do twelve lookups on every response, to usually
+    discover that there was nothing to find — on a path that runs for every
+    request in every deployment, because ``quota_aware`` defaults to on.
+
+    This scans the header names once and stops at the first match, and it
+    does not build a dict.
+    """
+    for key in headers.keys():
+        lowered = key.lower()
+        if lowered.startswith("x-ratelimit-") or lowered.startswith("anthropic-ratelimit-"):
+            return True
+    return False
+
+
 def parse_ratelimit_headers(headers: dict[str, str]) -> QuotaState:
     state = QuotaState()
     lower = {k.lower(): v for k, v in headers.items()}

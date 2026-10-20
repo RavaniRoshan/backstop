@@ -423,22 +423,33 @@ See [docs/architecture.md](docs/architecture.md) for the full design.
 ## Benchmarks
 
 Control-path overhead, from the committed snapshot
-[`docs/benchmark-results-2026-07-20.md`](docs/benchmark-results-2026-07-20.md)
-— 1,000 requests through a local `httpx.MockTransport`, no network:
+[`docs/benchmark-results-2026-10-20.md`](docs/benchmark-results-2026-10-20.md)
+— 2,000 requests through a local `httpx.MockTransport`, no network, at **two
+payload sizes**:
 
-| Percentile | Direct | Backstop | Overhead |
-|---|---|---|---|
-| p50 | 0.12 ms | 0.19 ms | **0.07 ms** |
-| p95 | 0.22 ms | 0.30 ms | **0.07 ms** |
-| p99 | 0.30 ms | 0.38 ms | **0.07 ms** |
+| Payload | Direct p50 | Backstop p50 | Overhead p50 | Overhead p99 |
+|---|---|---|---|---|
+| 94 B | 0.1084 ms | 0.2056 ms | **0.0972 ms** | 0.1318 ms |
+| 4096 B | 0.1184 ms | 0.2196 ms | **0.1012 ms** | 0.1105 ms |
 
-Those are the only overhead numbers this repository commits. What the snapshot
-records about conditions: date 2026-07-20, seed `0x00C0FFEE`, local mock
-transport, no network, 1,000 requests. It does **not** record the host CPU, the
-OS, the Python version, or the provider SDK version — so read 0.07 ms as one
-recorded run, not a guarantee. (An earlier version of this file claimed
-~0.09 ms p50 on a named MacBook M1 / openai 3.14 / httpx 0.28 configuration that
-no artifact in this repo records; that claim is gone rather than restated.)
+**Two payload sizes, deliberately.** The 94-byte one is the body the
+previously published 0.07 ms figure used; the 4 KB one is closer to a real
+prompt. The overhead is body-proportional — the guardrail reads, parses and
+inspects every request — so a snapshot that reported only the small body made
+the guardrail look cheaper than it is.
+
+**These are not the old 0.07 ms, and that is the point.** The old snapshot
+recorded the date, the seed, the transport and the request count, and *not* the
+host, the OS, the Python version or the SDK versions — so it could not be
+reproduced on another machine or compared with anything. The new one records
+all of it. A number nobody can reproduce is not a better number for being
+smaller.
+
+The conditions of this run: Linux x86_64 (WSL2), CPython 3.12.3, httpx
+0.28.1, openai 2.46.0, anthropic 0.116.0, prometheus-client 0.26.0, local
+mock transport, no network, 2,000 requests per payload. The snapshot also
+breaks down what the overhead is made of — the body parse, the gauges, the
+counters, and the ledger's share, which is off by default.
 
 Reproduce the measurement yourself:
 
@@ -482,6 +493,8 @@ See [docs/benchmarks.md](docs/benchmarks.md).
 | [docs/frameworks.md](docs/frameworks.md) | The framework adapters |
 | [docs/dashboard.md](docs/dashboard.md) | The built-in dashboard |
 | [docs/benchmarks.md](docs/benchmarks.md) | How the overhead numbers are measured |
+| [docs/benchmark-results-2026-10-20.md](docs/benchmark-results-2026-10-20.md) | The current committed overhead snapshot, with its conditions |
+| [docs/benchmark-results-2026-07-20.md](docs/benchmark-results-2026-07-20.md) | The superseded snapshot, kept for history |
 | [docs/compatibility.md](docs/compatibility.md) | The SDK version matrix, and what is not supported |
 | [docs/sdk-matrix.md](docs/sdk-matrix.md) | Which SDK versions CI actually proves |
 | [docs/concurrency.md](docs/concurrency.md) | The GIL ceiling, and when to reach for a proxy |

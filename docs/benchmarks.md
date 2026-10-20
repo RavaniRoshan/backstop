@@ -56,9 +56,19 @@ from CI.
 
 ## What the committed snapshot does and does not pin
 
-[`benchmark-results-2026-07-20.md`](benchmark-results-2026-07-20.md) records
-0.07 ms overhead at p50, p95 and p99 over 1,000 requests against a local
-`httpx.MockTransport`, with seed `0x00C0FFEE` and no network.
+[`benchmark-results-2026-10-20.md`](benchmark-results-2026-10-20.md) records
+the overhead over 2,000 requests against a local `httpx.MockTransport`, with
+no network, at **two payload sizes** — 94 bytes and 4 KB — because the
+overhead is body-proportional and a single small body made the guardrail look
+cheaper than it is.
+
+That snapshot records the host, the OS, the interpreter and the package
+versions, which the previous one did not. It also records a larger overhead
+figure than the previous snapshot's 0.07 ms. The figure is not comparable to
+the old one — different host, different conditions, and the old one recorded
+too little to check — and the difference is stated rather than smoothed over.
+
+The 2026-07-20 snapshot is kept for history. It is superseded.
 
 **Nothing in that file reproduces digit-for-digit, including the counts.** The
 seed makes the *input sequence* deterministic, not the outcome of every path.
@@ -96,9 +106,17 @@ Report the conditions alongside any number, per the rules above.
 
 ## Latest Snapshot
 
-See [`benchmark-results-2026-07-20.md`](benchmark-results-2026-07-20.md) for
-the current committed local benchmark snapshot. Regenerate it with
-`backstop benchmark --publish`, which writes
-`docs/benchmark-results-<today's date>.md` — a new dated file each day, so a
-regeneration is a diff you review and commit rather than a silent update of the
-existing snapshot.
+See [`benchmark-results-2026-10-20.md`](benchmark-results-2026-10-20.md) for
+the current committed local benchmark snapshot.
+
+Regenerate it with:
+
+```bash
+PYTHONPATH=src python3 benchmarks/local_overhead.py --requests 2000
+```
+
+which prints the table **and** the environment it was measured in — the host,
+the OS, the interpreter, the package versions, and both payload sizes. Copy
+the output into a dated `docs/benchmark-results-<date>.md` and commit it, so a
+regeneration is a diff you review rather than a silent update of the existing
+snapshot.

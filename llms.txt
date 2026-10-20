@@ -10,7 +10,7 @@
 - Architecture: /docs/architecture.md
 - Benchmarks: /docs/benchmarks.md
 - Examples: /examples/
-- Committed benchmark snapshot: /docs/benchmark-results-2026-07-20.md
+- Committed benchmark snapshot: /docs/benchmark-results-2026-10-20.md
 - Concurrency and scale limits: /docs/concurrency.md
 - Spend ledger, chargeback export and runaway-spend detection: /docs/ledger.md
 - Dollar budgets: /docs/usd-budgets.md
@@ -150,12 +150,16 @@ Every report-taking command takes `--json` as well as the default Markdown.
 ## Benchmarks
 
 The only committed overhead figures are in
-`docs/benchmark-results-2026-07-20.md`: 0.07 ms at p50, p95 and p99 over 1,000
-requests against a local `httpx.MockTransport`. That snapshot records the date,
-seed, mock transport and request count; it does **not** record CPU, OS, Python
-version or SDK version. Re-measure with `backstop benchmark`. The overhead check
-inside `verify` passes below a 5 ms p99 bound, not at a specific figure, and CI
-runs the benchmark as a threshold-free smoke test.
+`docs/benchmark-results-2026-10-20.md`: 0.097 ms at p50 for a 94-byte body
+and 0.101 ms at p50 for a 4 KB body, over 2,000 requests against a local
+`httpx.MockTransport`, with no network. The overhead is body-proportional, so
+both sizes are published.
+
+That snapshot records the host, the OS, the interpreter and the package
+versions, so it can be checked on another machine. Re-measure with
+`PYTHONPATH=src python3 benchmarks/local_overhead.py --requests 2000`. The
+overhead check inside `verify` passes below a 5 ms p99 bound, not at a
+specific figure, and CI runs the benchmark as a threshold-free smoke test.
 
 ## Agentic-installer quickstart
 

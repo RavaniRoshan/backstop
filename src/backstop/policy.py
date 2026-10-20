@@ -340,7 +340,20 @@ class Policy:
         tenant_id: str | None = None,
         circuit: CircuitBreaker | None = None,
     ) -> None:
-        """Publish the queue-wait observation and the gauges that go with it."""
+        """Publish the queue-wait observation and the gauges that go with it.
+
+        The gauges are published **twice** per request — once here, as the
+        request enters the service, and once when it leaves. That is not an
+        oversight: the first reading is the in-flight one, and it is the only
+        moment at which ``concurrency_active`` says how many requests are
+        *running* rather than how many are running after this one finished.
+        The second reading is the authoritative state.
+
+        It costs about 3.3 µs, five gauge publications at roughly 0.7 µs
+        each. The alternative — publishing once, at the end — would make the
+        saturation gauge useless for exactly the question it exists to
+        answer.
+        """
         self._metrics.call("queue_wait", priority.value, method="observe", amount=wait)
         self.observe_gauges(circuit, tenant_budget=tenant_budget, tenant_id=tenant_id)
 

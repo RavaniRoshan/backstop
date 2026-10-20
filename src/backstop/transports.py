@@ -33,6 +33,7 @@ from .ledger import (
 from .metrics import get_metrics
 from .policy import DOWNGRADE, Policy, build_policy
 from .pricing_catalog import compute_cost
+from .quotas import has_ratelimit_headers
 from .retry import backoff_delay, is_retryable_status
 from .state import BackstopState
 from .streaming import async_setup_streaming, is_streaming, setup_streaming
@@ -513,11 +514,14 @@ class BackstopTransport:
 
     def handle_request(self, request: httpx.Request) -> httpx.Response:
         tracker = _LatencyTracker()
-        meta = request_metadata(request, self.state.config)
         reservation: Reservation | LedgerReservation | None = None
         admitted = False
 
+        # Decoded once. The metadata needs the body and the request path
+        # needs it again, and decoding it twice meant two full JSON parses
+        # per request.
         body = _json_body(request)
+        meta = request_metadata(request, self.state.config, body=body)
         streaming = is_streaming(body) if body is not None else False
 
         if body is not None and not streaming:
@@ -561,7 +565,7 @@ class BackstopTransport:
             )
             if action == DOWNGRADE:
                 downgraded = True
-                meta = request_metadata(request, self.state.config)
+                meta = request_metadata(request, self.state.config, body=body)
                 usd_estimate = self._dollar_estimate(meta, body, tenant_budget)
                 try:
                     reservation = self._reserve(
@@ -658,7 +662,7 @@ class BackstopTransport:
                 usage_split = response_usage(response)
                 usage = None if usage_split is None else usage_split.total
                 success = response.status_code < 400
-                if self.state.quota is not None:
+                if self.state.quota is not None and has_ratelimit_headers(response.headers):
                     self.state.quota.ingest(dict(response.headers))
                     self.state.quota.adjust(self.state.aimd)
                 # The spend record runs first, so its exact cost is available
@@ -966,11 +970,14 @@ class AsyncBackstopTransport:
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         tracker = _LatencyTracker()
-        meta = request_metadata(request, self.state.config)
         reservation: Reservation | LedgerReservation | None = None
         admitted = False
 
+        # Decoded once. The metadata needs the body and the request path
+        # needs it again, and decoding it twice meant two full JSON parses
+        # per request.
         body = _json_body(request)
+        meta = request_metadata(request, self.state.config, body=body)
         streaming = is_streaming(body) if body is not None else False
 
         if body is not None and not streaming:
@@ -1016,7 +1023,7 @@ class AsyncBackstopTransport:
             )
             if action == DOWNGRADE:
                 downgraded = True
-                meta = request_metadata(request, self.state.config)
+                meta = request_metadata(request, self.state.config, body=body)
                 usd_estimate = self._dollar_estimate(meta, body, tenant_budget)
                 try:
                     reservation = await self._areserve(
@@ -1106,7 +1113,7 @@ class AsyncBackstopTransport:
                 usage_split = response_usage(response)
                 usage = None if usage_split is None else usage_split.total
                 success = response.status_code < 400
-                if self.state.quota is not None:
+                if self.state.quota is not None and has_ratelimit_headers(response.headers):
                     self.state.quota.ingest(dict(response.headers))
                     self.state.quota.adjust(self.state.aimd)
                 # The spend record runs first, so its exact cost is available
