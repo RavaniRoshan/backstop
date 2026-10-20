@@ -208,6 +208,11 @@ jobs:
       contents: write
       # Keyless signing and provenance both use the OIDC token.
       id-token: write
+      # The provenance attestation is written to the repository's attestation
+      # store, which needs its own permission. Without it the step fails with
+      # "Resource not accessible by integration" — after the build, the SBOM
+      # and the checks, and before the release.
+      attestations: write
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
