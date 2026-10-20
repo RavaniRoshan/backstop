@@ -160,30 +160,25 @@ def test_the_active_filter_is_visible_and_dismissable():
     assert "clearFilter" in js()
 
 
-@pending("Task 7")
 def test_canvases_declare_a_text_alternative():
     assert 'role="img"' in page()
     assert "aria-label" in js()
 
 
-@pending("Task 7")
 def test_the_tooltip_can_be_dismissed_with_escape():
     assert '"Escape"' in js()
 
 
-@pending("Task 7")
 def test_charts_have_a_text_alternative():
     assert "function chartSummary(" in js()
     assert "function renderChartTable(" in js()
 
 
-@pending("Task 7")
 def test_the_tooltip_is_dismissible_and_hoverable():
     assert '"Escape"' in js()
     assert "pointer-events: auto" in css()
 
 
-@pending("Task 7")
 def test_the_chart_can_be_read_as_a_table():
     assert "chart-toggle" in page()
 

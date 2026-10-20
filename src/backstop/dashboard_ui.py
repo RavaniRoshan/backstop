@@ -127,6 +127,8 @@ PAGE_HTML = """<!doctype html>
       <div class="chart-wrap"><canvas id="chart-traffic" role="img" aria-label="throughput and prevention"></canvas></div>
       <div class="chart-axis" id="axis-traffic"></div>
       <div class="legend" id="legend-traffic"></div>
+      <button class="chart-toggle" id="toggle-traffic" type="button" aria-expanded="false">Show as table</button>
+      <div class="chart-table" id="chart-traffic-table" hidden></div>
     </article>
 
     <article class="panel">
@@ -134,6 +136,8 @@ PAGE_HTML = """<!doctype html>
       <div class="chart-wrap"><canvas id="chart-burn" role="img" aria-label="budget burn"></canvas></div>
       <div class="chart-axis" id="axis-burn"></div>
       <div class="legend" id="legend-burn"></div>
+      <button class="chart-toggle" id="toggle-burn" type="button" aria-expanded="false">Show as table</button>
+      <div class="chart-table" id="chart-burn-table" hidden></div>
     </article>
 
     <article class="panel span-2">
@@ -383,6 +387,15 @@ select:focus-visible, .theme-toggle:focus-visible, .skip:focus, a:focus-visible 
   color: var(--dim); font-size: 10px; font-family: var(--mono);
   display: flex; justify-content: space-between; gap: 10px;
 }
+.chart-toggle {
+  font: inherit; font-size: 10px; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--muted); background: none;
+  border: 1px solid var(--line-strong); border-radius: 999px;
+  padding: 2px 8px; cursor: pointer; align-self: flex-start;
+}
+.chart-toggle:hover { color: var(--text); }
+.chart-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.chart-table { max-height: 220px; overflow: auto; }
 
 /* Needs attention ----------------------------------------------------------
    One configuration note must not cost a full row of vertical space, so the
@@ -553,7 +566,9 @@ td.mut { color: var(--muted); }
 
 /* Tooltip ---------------------------------------------------------------- */
 .tip {
-  position: fixed; z-index: 5; pointer-events: none; opacity: 0;
+  /* Hoverable, so the tooltip can be read and dismissed rather than
+     vanishing the moment the pointer moves off the canvas (WCAG 1.4.13). */
+  position: fixed; z-index: 5; pointer-events: auto; opacity: 0;
   transform: translate3d(-50%, -128%, 0);
   background: var(--raise); border: 1px solid var(--line-strong);
   border-radius: 4px; padding: 5px 7px; font-size: 11px;
@@ -562,6 +577,8 @@ td.mut { color: var(--muted); }
   white-space: nowrap;
 }
 .tip[data-on="1"] { opacity: 1; }
+/* A hidden tooltip must not swallow the clicks underneath it. */
+.tip:not([data-on="1"]) { pointer-events: none; }
 .tip b { font-family: var(--mono); font-weight: 550; }
 .tip .tip-row { display: flex; justify-content: space-between; gap: 10px; }
 
@@ -876,6 +893,9 @@ APP_JS = """
     if (!canvas) return;
     CHARTS[id] = spec;
     drawChart(canvas, spec);
+    canvas.setAttribute("aria-label", chartSummary(spec));
+    var table = document.getElementById(id + "-table");
+    if (table && !table.hidden) renderChartTable(id, spec);
     if (!canvas.__bound) {
       canvas.__bound = true;
       canvas.addEventListener("mousemove", function (ev) { onHover(canvas, id, ev); });
@@ -1040,6 +1060,56 @@ APP_JS = """
       });
       showTip(rows, point.x, point.y);
     });
+  }
+
+  /* A canvas has no text, so it needs an alternative: a summary for the
+     screen reader and a table for the reader who wants the numbers. */
+  function chartSummary(spec) {
+    if (!spec || !spec.t || spec.t.length < 2) return "No samples yet.";
+    var parts = [];
+    spec.series.forEach(function (s) {
+      var last = null;
+      for (var i = s.data.length - 1; i >= 0; i--) {
+        if (!isNil(s.data[i])) { last = s.data[i]; break; }
+      }
+      if (last !== null) {
+        parts.push(s.name + " " + (s.format ? s.format(last) : axis(last)));
+      }
+    });
+    var span = spec.times && spec.times.length > 1
+      ? dur(spec.times[spec.times.length - 1] - spec.times[0])
+      : "an unknown window";
+    return parts.join(", ") + " over " + span + ".";
+  }
+
+  function renderChartTable(id, spec) {
+    var host = document.getElementById(id + "-table");
+    if (!host) return;
+    clear(host);
+    if (!spec || !spec.t || spec.t.length < 2) {
+      host.appendChild(node("p", "empty", "No samples yet."));
+      return;
+    }
+    var table = node("table");
+    var thead = node("thead");
+    var headRow = node("tr");
+    headRow.appendChild(node("th", null, "Time"));
+    spec.series.forEach(function (s) { headRow.appendChild(node("th", "num", s.name)); });
+    thead.appendChild(headRow);
+    table.appendChild(thead);
+    var tbody = node("tbody");
+    spec.t.forEach(function (_, index) {
+      var tr = node("tr");
+      var stamp = spec.times ? spec.times[index] : null;
+      tr.appendChild(cell(isNil(stamp) ? null : clock(stamp), "num mut"));
+      spec.series.forEach(function (s) {
+        var v = s.data[index];
+        tr.appendChild(cell(isNil(v) ? null : (s.format ? s.format(v) : axis(v)), "num"));
+      });
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    host.appendChild(table);
   }
 
   function renderLegend(id, entries) {
@@ -1800,7 +1870,20 @@ APP_JS = """
     document.getElementById("main").setAttribute("aria-busy", String(!latest && !disconnected));
   }
 
+  // A hover-triggered tooltip must be dismissible without moving the pointer
+  // (WCAG 1.4.13), and it must not vanish while the pointer is over it.
+  function dismissTips() {
+    hideTip();
+    Array.prototype.forEach.call(document.querySelectorAll("canvas"), function (canvas) {
+      canvas.__hover = null;
+      if (CHARTS[canvas.id]) drawChart(canvas, CHARTS[canvas.id]);
+    });
+  }
+
   function boot() {
+    document.addEventListener("keydown", function (ev) {
+      if (ev.key === "Escape") dismissTips();
+    });
     try {
       var stored = localStorage.getItem("backstop-theme");
       if (["auto", "dark", "light"].indexOf(stored) >= 0) {
@@ -1822,6 +1905,18 @@ APP_JS = """
       });
     }
     bindTiles();
+    ["traffic", "burn"].forEach(function (name) {
+      var button = document.getElementById("toggle-" + name);
+      var host = document.getElementById("chart-" + name + "-table");
+      if (!button || !host) return;
+      button.addEventListener("click", function () {
+        var open = host.hidden;
+        if (open) renderChartTable("chart-" + name, CHARTS["chart-" + name]);
+        host.hidden = !open;
+        button.setAttribute("aria-expanded", String(open));
+        button.textContent = open ? "Hide table" : "Show as table";
+      });
+    });
     var windowSelect = document.getElementById("window");
     if (windowSelect) {
       windowSelect.value = String(windowSeconds);
