@@ -192,10 +192,27 @@ The goal's completion criterion is the conjunction: every screenshot at every
 viewport and theme satisfies the in-page invariants, the audit harness exits
 zero, and the full Python test suite passes.
 
+## One backend change
+
+The design needed one field the payload did not carry: a series for the circuit
+tile. `BackstopState` exposes the breaker's state but not its history, and the
+tile had no series to draw, so it rendered an empty sparkline — a void in the
+tile grid. The snapshot now carries `series.circuit_open_rps`, the per-interval
+rate of requests the open breaker turned away. It is derived from the sink
+counter that was already being read for the `circuit_open` outcome count, so
+the cost is one cumulative counter per sample and one series per snapshot. A
+breaker that has never opened charts a flat line at zero, which is the honest
+picture of that.
+
+The dead `provider` key went the other way: `session_view()` published
+`getattr(state, "provider", "")` for every session, and `BackstopState` has no
+`provider` attribute, so the Sessions table carried a column that was always
+`--`. It was removed from both.
+
 ## Out of scope
 
-* No backend schema change to the snapshot (the client derives everything it
-  needs from the payload that already exists).
+* No other backend schema change: everything else is derived client-side from
+  the payload that already exists.
 * No new CLI flag, no new dependency, no change to the WSGI routes.
 * No multi-process aggregation, no history beyond the in-memory ring, no saved
   views — the same boundary `docs/dashboard.md` already states.

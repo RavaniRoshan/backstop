@@ -608,6 +608,14 @@ body[data-connection="stale"] .data-status { border-color: var(--warn); }
   .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .tiles > .tile:last-child:nth-child(odd) { grid-column: 1 / -1; }
 }
+/* On a narrow phone two tiles share the row, so the headline number has to
+   shrink rather than be ellipsised: a truncated value is a wrong value. */
+@media (max-width: 420px) {
+  .tile { padding: 9px 9px 7px; }
+  .tile h2 { font-size: 9px; letter-spacing: 0.05em; }
+  .tile .value { font-size: 20px; }
+  .tile .value .u { font-size: 11px; }
+}
 @media (prefers-reduced-motion: reduce) {
   .bar-fill, .meter > i, .conn, .tip { transition: none; }
 }
@@ -1167,13 +1175,13 @@ APP_JS = """
     if (!times.length) {
       el.appendChild(node("span", null, "no samples yet"));
       el.appendChild(node("span", null, ""));
-      el.appendChild(node("span", null, ""));
       return;
     }
+    // The x-axis already carries the wall-clock times, so the strip states
+    // what the axis cannot: how wide the window is and how fine it is.
     var span = times[times.length - 1] - times[0];
-    el.appendChild(node("span", null, clock(times[0])));
     el.appendChild(node("span", null, "window " + dur(span)));
-    el.appendChild(node("span", null, clock(times[times.length - 1])));
+    el.appendChild(node("span", null, count(times.length) + " samples"));
   }
 
   /* --- tables ----------------------------------------------------------- */

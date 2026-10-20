@@ -3,14 +3,8 @@
 These are cheap and CI-safe: they read the shipped strings, not a browser. The
 browser-level verification lives in ``scripts/dashboard_audit.py``, which is a
 development harness and not a test dependency.
-
-Assertions for a feature that has not landed yet carry ``@pending("Task N")``:
-an xfail that keeps CI green and flips to a pass when the task lands. Every
-task removes the marker for its own assertions.
 """
 from __future__ import annotations
-
-import pytest
 
 from backstop.dashboard_ui import APP_CSS, APP_JS, PAGE_HTML
 
@@ -25,11 +19,6 @@ def css() -> str:
 
 def page() -> str:
     return PAGE_HTML
-
-
-def pending(task: str):
-    """Mark an assertion whose feature lands in a later task."""
-    return pytest.mark.xfail(reason="lands in " + task, strict=False)
 
 
 def test_the_page_loads_no_external_origin():

@@ -11,6 +11,40 @@ All notable changes to Backstop should be documented in this file.
 
 ## [Unreleased]
 
+### Dashboard
+
+- **Round axis ticks on every chart** (1/2/5 × 10ⁿ steps) and **one formatter
+  per quantity**, so no number changes shape mid-scale: a count is a count, a
+  rate is a rate, an axis label is an axis label.
+- **A wall-clock x-axis.** Each chart states the window it shows
+  (`14:32:05 → 14:36:05 · 4m`), so a spike lines up with a log line instead of
+  a label that shifts on every refresh. A **window** control (`1m` / `5m` /
+  `15m` / all) slices the in-memory ring.
+- **The refresh control can be turned off**, so the surface can be paused —
+  an auto-updating view has to be pausable. The sample age keeps counting so
+  the data's age stays visible.
+- **Status is text first.** Every tile carries a status token (`OK`, `WATCH`,
+  `BREACH`, `IDLE`, `NO DATA`) next to its colour, the connection state reads
+  `live` / `stale` / `lost` / `connecting`, and the amber-red pair is never the
+  only difference between two states — which is what keeps it apart for a
+  colour-blind reader. The freshness line is no longer a live region, so a
+  screen reader hears a state change once rather than once a second.
+- **No more empty panels.** Panels size to their content, a tile's sparkline
+  fills the tile, and a flat series is drawn across the middle instead of
+  glued to the bottom edge where it reads as a crash.
+- **Removed the Sessions "Provider" column**, which was always `--`:
+  `BackstopState` has no such attribute.
+- **"vs previous window" deltas** on every tile that has a series,
+  **enforcement events annotated on the traffic chart**, a compact
+  **needs-attention strip**, and **drill-down from a tile to the tables**.
+- **Charts are readable without a mouse**: each has a text summary for
+  assistive technology and a *Show as table* alternative; tooltips are
+  dismissible with `Esc`; tables take arrow-key row navigation, which the
+  on-screen hint already promised.
+- **`series.circuit_open_rps`** was added to the snapshot so the circuit tile
+  charts the requests the open breaker turned away rather than rendering an
+  empty sparkline.
+
 ## 0.8.0 — "One Policy, Two Drivers"
 
 The release theme is **every claim the product makes becomes true**. The same

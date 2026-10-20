@@ -2,6 +2,10 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** executed 2026-10-20. All nine tasks are complete; the audit harness
+(`scripts/dashboard_audit.py`) exits zero at five viewports in two themes, and
+the full test suite passes.
+
 **Goal:** Turn the built-in Backstop dashboard into a trustworthy operations surface: round axis ticks, one formatter per quantity, a wall-clock time axis with a window control, a pausable refresh, no wasted space, no colour-only status, keyboard paths to every value, and a screenshot-verified layout at five viewports in two themes.
 
 **Architecture:** All three artefacts (`PAGE_HTML`, `APP_CSS`, `APP_JS`) stay as Python string literals in `src/backstop/dashboard_ui.py` and remain the exact bytes served by `/`, `/assets/app.css` and `/assets/app.js`. The JavaScript owns all formatting and chart logic; Python changes are limited to (a) removing one dead snapshot field and (b) nothing else — every new capability is derived client-side from the snapshot payload that already exists. Verification is two-layered: `scripts/dashboard_audit.py` (a Playwright screenshot + in-page assertion harness, development-only, not a dependency) and `tests/test_dashboard_ui.py` (cheap structural assertions over the shipped strings, runs in CI).
@@ -39,7 +43,7 @@
 - Produces: a CLI `python3 scripts/dashboard_audit.py --out DIR [--url URL] [--viewports ...] [--themes ...]` that writes `<viewport>-<theme>.png` full-page shots plus `panels/<viewport>-<theme>-<panel>.png` crops, prints one line per failed invariant, and exits `1` if any invariant failed.
 - Produces: `tests/test_dashboard_ui.py` with a module-level helper `js() -> str`, `css() -> str`, `page() -> str` that return the shipped `APP_JS`, `APP_CSS` and `PAGE_HTML` strings, imported from `backstop.dashboard_ui`.
 
-- [ ] **Step 1: Write the structural test file**
+- [x] **Step 1: Write the structural test file**
 
 Every structural assertion lives in `tests/test_dashboard_ui.py` from Task 1
 onward, so the file does not churn. Assertions for a feature that a later task
@@ -150,12 +154,12 @@ def test_the_tooltip_can_be_dismissed_with_escape():
     assert '"Escape"' in js()
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `python3 -m pytest tests/test_dashboard_ui.py -q`
 Expected: FAIL — `test_the_refresh_control_can_be_turned_off` fails because `<option value="0">off</option>` is not in `PAGE_HTML`.
 
-- [ ] **Step 3: Write the audit harness**
+- [x] **Step 3: Write the audit harness**
 
 Create `scripts/dashboard_audit.py`:
 
@@ -391,12 +395,12 @@ if __name__ == "__main__":
     raise SystemExit(main())
 ```
 
-- [ ] **Step 4: Run the harness to see it report the current failures**
+- [x] **Step 4: Run the harness to see it report the current failures**
 
 Run: `python3 scripts/dashboard_audit.py --out /tmp/shots-before`
 Expected: the harness starts the demo dashboard, writes 10 PNGs (5 viewports × 2 themes) plus panel crops, and exits `1` with a non-empty `FAILED INVARIANTS` list naming the missing status tokens, the missing connection label, the outcome-mix void, and the horizontal overflow.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add scripts/dashboard_audit.py tests/test_dashboard_ui.py
@@ -425,7 +429,7 @@ git commit -m "test(dashboard): add screenshot audit harness and structural UI t
   - `axisTicks(max, step, format) -> string[]` — the label list, also stored on `canvas.__spec.tickLabels` for the audit harness.
 - `compact(v)` is removed. Every former call site is rewritten.
 
-- [ ] **Step 1: Add the failing structural assertions**
+- [x] **Step 1: Add the failing structural assertions**
 
 In `tests/test_dashboard_ui.py`, remove the `@pending("Task N")` marker from
 this task's assertions and add any assertion that is not already listed:
@@ -447,12 +451,12 @@ def test_nice_scale_produces_round_steps():
     assert "step = n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10" in js()
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `python3 -m pytest tests/test_dashboard_ui.py -q`
 Expected: FAIL on `test_one_formatter_per_quantity` — `compact(` is still present.
 
-- [ ] **Step 3: Replace the formatting block**
+- [x] **Step 3: Replace the formatting block**
 
 In `src/backstop/dashboard_ui.py`, replace the whole `compact`/`count`/`ms`/`usd`/`dur`/`pct`/`clock`/`rel` block inside `APP_JS` with:
 
@@ -537,7 +541,7 @@ In `src/backstop/dashboard_ui.py`, replace the whole `compact`/`count`/`ms`/`usd
 
 Delete the old `rel(offsetSeconds)` helper — the time axis becomes wall-clock in Task 3, so nothing needs a relative label afterwards.
 
-- [ ] **Step 4: Rewrite every `compact(` call site**
+- [x] **Step 4: Rewrite every `compact(` call site**
 
 In `APP_JS`, replace the call sites with the formatter that matches the quantity:
 
@@ -551,7 +555,7 @@ In `APP_JS`, replace the call sites with the formatter that matches the quantity
 | `format: function (v) { return compact(v) + " tok/min"; }` | `format: function (v) { return count(v); }` | budget-burn series (the unit now lives in the panel header) |
 | `var yFmt = spec.yFormat \|\| compact;` | `var yFmt = spec.yFormat \|\| axis;` | `drawChart` |
 
-- [ ] **Step 5: Replace the gridline loop with a nice scale**
+- [x] **Step 5: Replace the gridline loop with a nice scale**
 
 In `APP_JS`, replace `function niceMax(v) { … }` with:
 
@@ -595,12 +599,12 @@ Then replace the gridline loop in `drawChart`:
 
 `maxV` is computed before the loop; keep the existing `maxV = Math.max(maxV, spec.threshold)` line and delete the old `maxV = niceMax(maxV <= 0 ? 1 : maxV);` line.
 
-- [ ] **Step 6: Run the tests**
+- [x] **Step 6: Run the tests**
 
 Run: `python3 -m pytest tests/test_dashboard_ui.py -q`
 Expected: `test_one_formatter_per_quantity`, `test_the_traffic_chart_has_no_ad_hoc_formatter` and `test_nice_scale_produces_round_steps` PASS; `test_the_removed_compact_formatter_is_not_used` PASSES. Other assertions still fail (they belong to later tasks).
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/backstop/dashboard_ui.py tests/test_dashboard_ui.py
@@ -625,7 +629,7 @@ git commit -m "feat(dashboard): one formatter per quantity and round axis ticks"
   - `refreshMs` may be `0`, meaning paused.
 - `PAGE_HTML` gains: `<select id="window">` with `1m`, `5m`, `15m`, `all`; `<option value="0">off</option>` in `#refresh`; `<span id="conn-label">`; `<span class="chip" id="paused-chip" hidden>paused</span>`.
 
-- [ ] **Step 1: Add the failing structural assertions**
+- [x] **Step 1: Add the failing structural assertions**
 
 In `tests/test_dashboard_ui.py`, remove the `@pending("Task N")` marker from
 this task's assertions and add any assertion that is not already listed:
@@ -651,12 +655,12 @@ def test_the_live_region_is_only_written_on_a_transition():
     assert "function announce(" in js()
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `python3 -m pytest tests/test_dashboard_ui.py -q`
 Expected: FAIL on `test_the_window_control_offers_ranges`.
 
-- [ ] **Step 3: Add the controls to the page**
+- [x] **Step 3: Add the controls to the page**
 
 In `PAGE_HTML`, replace the top-bar right-hand block:
 
@@ -707,7 +711,7 @@ And replace the two chart panel headers so they can carry a window label:
     </article>
 ```
 
-- [ ] **Step 4: Add the CSS for the new elements**
+- [x] **Step 4: Add the CSS for the new elements**
 
 Append to `APP_CSS`:
 
@@ -733,7 +737,7 @@ becomes
 ```
 with `var PAD_L = 46` raised to `var PAD_L = 54` in the JS (Task 3, Step 5).
 
-- [ ] **Step 5: Make the x-axis wall-clock and window-aware**
+- [x] **Step 5: Make the x-axis wall-clock and window-aware**
 
 In `APP_JS`, add after the `clock` helper:
 
@@ -784,7 +788,7 @@ Replace the x-tick block in `drawChart` (the `var ticks = [0, Math.floor(lastInd
 
 and set `var PAD_L = 54, PAD_R = 10, PAD_T = 10, PAD_B = 22;`.
 
-- [ ] **Step 6: Slice the window and write the axis strip**
+- [x] **Step 6: Slice the window and write the axis strip**
 
 In `APP_JS`, add near the polling state:
 
@@ -841,7 +845,7 @@ and pass `times: windowed.times` to both `chart(...)` calls. Then write the axis
     axisStrip("axis-burn", windowed.times, "window");
 ```
 
-- [ ] **Step 7: Pause the refresh and stop the per-second announcement**
+- [x] **Step 7: Pause the refresh and stop the per-second announcement**
 
 In `APP_JS`, add a live-region helper and use it only on transitions:
 
@@ -935,7 +939,7 @@ Change `ticker()` so the freshness text is plain text and the connection state h
 
 The `announce()` call replaces the old `notice.hidden` / `notice.textContent` assignment, so the live region only changes on a transition.
 
-- [ ] **Step 8: Wire the window control**
+- [x] **Step 8: Wire the window control**
 
 In `boot()`:
 
@@ -949,7 +953,7 @@ In `boot()`:
     }
 ```
 
-- [ ] **Step 9: Run the tests and the audit harness**
+- [x] **Step 9: Run the tests and the audit harness**
 
 Run: `python3 -m pytest tests/test_dashboard_ui.py -q`
 Expected: the window, pause and live-region assertions PASS.
@@ -957,7 +961,7 @@ Expected: the window, pause and live-region assertions PASS.
 Run: `python3 scripts/dashboard_audit.py --out /tmp/shots-t3`
 Expected: the axis-label invariant now passes (the labels are wall-clock times, so the harness must not treat them as axis ticks — see Step 10).
 
-- [ ] **Step 10: Teach the harness about wall-clock labels**
+- [x] **Step 10: Teach the harness about wall-clock labels**
 
 In `scripts/dashboard_audit.py`, change the axis invariant to accept either a round number or a wall-clock time:
 
@@ -975,7 +979,7 @@ In `scripts/dashboard_audit.py`, change the axis invariant to accept either a ro
 
 (The chart canvases now carry wall-clock x labels, but `__tickLabels` still holds the *y* tick labels, which are the ones that must be round. Keep this invariant as-is.)
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 git add src/backstop/dashboard_ui.py tests/test_dashboard_ui.py scripts/dashboard_audit.py
@@ -998,7 +1002,7 @@ git commit -m "feat(dashboard): wall-clock axis, window control, pausable refres
   - `STATUS_TOKEN` map: `{ok: "OK", warn: "WATCH", bad: "BREACH", idle: "IDLE", none: "NO DATA"}`.
   - `tableKeyNav(wrap)` — the arrow-key row navigation, attached once per `.table-wrap`.
 
-- [ ] **Step 1: Add the failing structural assertions**
+- [x] **Step 1: Add the failing structural assertions**
 
 In `tests/test_dashboard_ui.py`, remove the `@pending("Task N")` marker from
 this task's assertions and add any assertion that is not already listed:
@@ -1028,12 +1032,12 @@ def test_tables_have_keyboard_row_navigation():
         assert '"%s"' % key in js()
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `python3 -m pytest tests/test_dashboard_ui.py -q`
 Expected: FAIL on `test_tiles_carry_a_status_token`.
 
-- [ ] **Step 3: Restructure the tile markup**
+- [x] **Step 3: Restructure the tile markup**
 
 In `PAGE_HTML`, replace each of the seven `<article class="tile">` blocks with this shape (the `id` and the `<h2>` differ per tile):
 
@@ -1049,7 +1053,7 @@ In `PAGE_HTML`, replace each of the seven `<article class="tile">` blocks with t
 
 Apply the same shape to `tile-spend`, `tile-prevented`, `tile-requests`, `tile-latency`, `tile-concurrency` and `tile-circuit`. The `height="28"` attribute is removed — the CSS now sizes the canvas.
 
-- [ ] **Step 4: Update the CSS**
+- [x] **Step 4: Update the CSS**
 
 In `APP_CSS`, replace the tile rules:
 
@@ -1104,7 +1108,7 @@ Replace the panels grid rule:
 }
 ```
 
-- [ ] **Step 5: Render the status token**
+- [x] **Step 5: Render the status token**
 
 In `APP_JS`, add near the formatters:
 
@@ -1128,7 +1132,7 @@ In `renderTile`, after `tile.dataset.health = opts.health || "idle";` add:
 
 Then give every tile a `health` that is honest: a tile with no samples at all is `none`, a tile with samples but a zero value is `idle`.
 
-- [ ] **Step 6: Remove the dead Provider column**
+- [x] **Step 6: Remove the dead Provider column**
 
 In `PAGE_HTML`, delete `<th>Provider</th>` from the Sessions table header.
 
@@ -1146,7 +1150,7 @@ In `src/backstop/telemetry.py`, delete this line from `session_view()`:
 
 `BackstopState` has no `provider` attribute, so the column was permanently `--`.
 
-- [ ] **Step 7: Add the arrow-key row navigation**
+- [x] **Step 7: Add the arrow-key row navigation**
 
 In `APP_JS`, add:
 
@@ -1190,7 +1194,7 @@ And call it at the end of `fillTable`:
 
 Each row needs to be focusable: in `sessionRow`, `eventRow` and `tenantRow`, add `tr.tabIndex = -1;` to the created `<tr>` (`sessionRow` already has it).
 
-- [ ] **Step 8: Run the tests and the audit harness**
+- [x] **Step 8: Run the tests and the audit harness**
 
 Run: `python3 -m pytest tests/test_dashboard_ui.py tests/test_dashboard_wsgi.py tests/test_telemetry.py -q`
 Expected: PASS. The WSGI and telemetry suites confirm removing the `provider` key broke nothing.
@@ -1198,7 +1202,7 @@ Expected: PASS. The WSGI and telemetry suites confirm removing the `provider` ke
 Run: `python3 scripts/dashboard_audit.py --out /tmp/shots-t4`
 Expected: the "panel has a void" invariant no longer fires for the outcome-mix panel, and the status-token invariant passes.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add src/backstop/dashboard_ui.py src/backstop/telemetry.py tests/test_dashboard_ui.py
@@ -1220,7 +1224,7 @@ git commit -m "feat(dashboard): tile status tokens, no panel voids, live table k
   - `eventMarks(times, events) -> number[]` — absolute times of enforcement events inside the window.
   - `renderAttention(snap)` — the needs-attention chip strip.
 
-- [ ] **Step 1: Add the failing structural assertions**
+- [x] **Step 1: Add the failing structural assertions**
 
 In `tests/test_dashboard_ui.py`, remove the `@pending("Task N")` marker from
 this task's assertions and add any assertion that is not already listed:
@@ -1240,12 +1244,12 @@ def test_warnings_are_a_compact_strip():
     assert 'id="attention"' in page()
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `python3 -m pytest tests/test_dashboard_ui.py -q`
 Expected: FAIL on `test_tiles_show_a_change_against_the_previous_window`.
 
-- [ ] **Step 3: Compute the delta**
+- [x] **Step 3: Compute the delta**
 
 In `APP_JS`, add:
 
@@ -1274,7 +1278,7 @@ In `APP_JS`, add:
   }
 ```
 
-- [ ] **Step 4: Show the delta on the tiles**
+- [x] **Step 4: Show the delta on the tiles**
 
 In `render(snap)`, compute the deltas after `var windowed = sliceSeries(snap);`:
 
@@ -1301,7 +1305,7 @@ Then add a delta chip to the meta list of the matching tile, for example in the 
 
 Add the equivalent chip to the latency tile (`latencyDelta.text`), the prevention tile (`preventedDelta.text`) and the spend tile (`burnDelta.text`).
 
-- [ ] **Step 5: Annotate enforcement events on the chart**
+- [x] **Step 5: Annotate enforcement events on the chart**
 
 In `APP_JS`, add:
 
@@ -1350,7 +1354,7 @@ Add a legend entry so the marker is explained: extend `renderLegend("legend-traf
       { label: "enforcement event", color: THEME.warn, dashed: true },
 ```
 
-- [ ] **Step 6: Replace the warning banner with an attention strip**
+- [x] **Step 6: Replace the warning banner with an attention strip**
 
 In `PAGE_HTML`, replace
 
@@ -1415,7 +1419,7 @@ and add:
   }
 ```
 
-- [ ] **Step 7: Run the tests and the audit harness**
+- [x] **Step 7: Run the tests and the audit harness**
 
 Run: `python3 -m pytest tests/test_dashboard_ui.py -q`
 Expected: PASS.
@@ -1423,7 +1427,7 @@ Expected: PASS.
 Run: `python3 scripts/dashboard_audit.py --out /tmp/shots-t5`
 Expected: exit 0 or only the remaining known failures.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/backstop/dashboard_ui.py tests/test_dashboard_ui.py
@@ -1445,7 +1449,7 @@ git commit -m "feat(dashboard): deltas, event annotations, compact attention str
   - `activeFilter` (module state, `null` or a filter key).
   - `applyFilter(key, snap)` — returns the rows to render for each table.
 
-- [ ] **Step 1: Add the failing structural assertions**
+- [x] **Step 1: Add the failing structural assertions**
 
 In `tests/test_dashboard_ui.py`, remove the `@pending("Task N")` marker from
 this task's assertions and add any assertion that is not already listed:
@@ -1462,12 +1466,12 @@ def test_the_active_filter_is_visible_and_dismissable():
     assert "clearFilter" in js()
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `python3 -m pytest tests/test_dashboard_ui.py -q`
 Expected: FAIL on `test_tiles_are_drillable`.
 
-- [ ] **Step 3: Make the tiles activatable**
+- [x] **Step 3: Make the tiles activatable**
 
 In `PAGE_HTML`, add `role="button" tabindex="0" data-drill="<key>"` to each tile, where `<key>` is one of `budget`, `spend`, `prevented`, `requests`, `latency`, `concurrency`, `circuit`. The budget tile becomes:
 
@@ -1535,7 +1539,7 @@ In `APP_JS`, add:
 
 Call `bindTiles()` once from `boot()`.
 
-- [ ] **Step 4: Apply the filter to the tables**
+- [x] **Step 4: Apply the filter to the tables**
 
 In `APP_JS`, add:
 
@@ -1576,7 +1580,7 @@ In `render(snap)`, replace the three `fillTable` calls with:
       "No request-scoped tenant budgets registered.");
 ```
 
-- [ ] **Step 5: Add the filter chip to the page**
+- [x] **Step 5: Add the filter chip to the page**
 
 In `PAGE_HTML`, add directly after the attention strip:
 
@@ -1584,12 +1588,12 @@ In `PAGE_HTML`, add directly after the attention strip:
 <div class="attention" id="filter-chip" hidden></div>
 ```
 
-- [ ] **Step 6: Run the tests and the audit harness**
+- [x] **Step 6: Run the tests and the audit harness**
 
 Run: `python3 -m pytest tests/test_dashboard_ui.py -q`
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/backstop/dashboard_ui.py tests/test_dashboard_ui.py
@@ -1611,7 +1615,7 @@ git commit -m "feat(dashboard): drill down from a KPI tile to the tables"
   - `renderChartTable(id, spec)` — the HTML table alternative, toggled by a button.
   - A `<button class="chart-toggle" id="toggle-traffic">` / `toggle-burn` pair.
 
-- [ ] **Step 1: Add the failing structural assertions**
+- [x] **Step 1: Add the failing structural assertions**
 
 In `tests/test_dashboard_ui.py`, remove the `@pending("Task N")` marker from
 this task's assertions and add any assertion that is not already listed:
@@ -1631,12 +1635,12 @@ def test_the_chart_can_be_read_as_a_table():
     assert "chart-toggle" in page()
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `python3 -m pytest tests/test_dashboard_ui.py -q`
 Expected: FAIL on `test_charts_have_a_text_alternative`.
 
-- [ ] **Step 3: Make the tooltip dismissible and hoverable**
+- [x] **Step 3: Make the tooltip dismissible and hoverable**
 
 In `APP_CSS`, replace the tooltip rule:
 
@@ -1670,7 +1674,7 @@ In `APP_JS`, add a global key handler:
   });
 ```
 
-- [ ] **Step 4: Give the canvases a text alternative**
+- [x] **Step 4: Give the canvases a text alternative**
 
 In `APP_JS`, add:
 
@@ -1734,7 +1738,7 @@ In `chart(id, spec)`, after `CHARTS[id] = spec;` add:
 
 and re-run `canvas.setAttribute("aria-label", chartSummary(spec));` at the end of `drawChart` so the label tracks the data.
 
-- [ ] **Step 5: Add the table toggle to the page**
+- [x] **Step 5: Add the table toggle to the page**
 
 In `PAGE_HTML`, replace each chart panel with:
 
@@ -1779,7 +1783,7 @@ In `APP_JS`, add a binder in `boot()`:
     });
 ```
 
-- [ ] **Step 6: Run the tests and the audit harness**
+- [x] **Step 6: Run the tests and the audit harness**
 
 Run: `python3 -m pytest tests/test_dashboard_ui.py -q`
 Expected: PASS.
@@ -1787,7 +1791,7 @@ Expected: PASS.
 Run: `python3 scripts/dashboard_audit.py --out /tmp/shots-t7`
 Expected: the canvas text-alternative invariant passes.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/backstop/dashboard_ui.py tests/test_dashboard_ui.py
@@ -1806,7 +1810,7 @@ git commit -m "feat(dashboard): chart text alternatives and dismissible tooltips
 - Consumes: `STATUS_TOKEN` from Task 4; `count` from Task 2.
 - Produces: `drawSpark` draws a muted baseline when there are fewer than two points; the chart distinguishes "collecting samples" from "no traffic in window"; a zero value reads as a zero with an explanation, not as missing data.
 
-- [ ] **Step 1: Add the failing structural assertions**
+- [x] **Step 1: Add the failing structural assertions**
 
 In `tests/test_dashboard_ui.py`, remove the `@pending("Task N")` marker from
 this task's assertions and add any assertion that is not already listed:
@@ -1821,12 +1825,12 @@ def test_a_sparkline_without_points_draws_a_baseline():
     assert "no data" in js()
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `python3 -m pytest tests/test_dashboard_ui.py -q`
 Expected: FAIL on `test_no_data_is_distinct_from_zero`.
 
-- [ ] **Step 3: Draw a baseline for an empty sparkline**
+- [x] **Step 3: Draw a baseline for an empty sparkline**
 
 In `APP_JS`, replace the early return in `drawSpark`:
 
@@ -1846,7 +1850,7 @@ In `APP_JS`, replace the early return in `drawSpark`:
     }
 ```
 
-- [ ] **Step 4: Distinguish the chart's empty states**
+- [x] **Step 4: Distinguish the chart's empty states**
 
 In `drawChart`, replace the empty-state block:
 
@@ -1862,7 +1866,7 @@ In `drawChart`, replace the empty-state block:
     }
 ```
 
-- [ ] **Step 5: Give the zero states an explanation**
+- [x] **Step 5: Give the zero states an explanation**
 
 In `render(snap)`, the prevention tile's meta becomes:
 
@@ -1882,12 +1886,12 @@ and the tile's health becomes `"idle"` when there are no samples at all and `"ok
       : (series.prevented_rps || []).length ? "idle" : "none";
 ```
 
-- [ ] **Step 6: Run the tests and the audit harness**
+- [x] **Step 6: Run the tests and the audit harness**
 
 Run: `python3 -m pytest tests/test_dashboard_ui.py -q`
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/backstop/dashboard_ui.py tests/test_dashboard_ui.py
@@ -1906,7 +1910,7 @@ git commit -m "feat(dashboard): distinguish no data from zero"
 - Consumes: everything from Tasks 1–8.
 - Produces: the documented behaviour; a green full test suite; a green audit harness.
 
-- [ ] **Step 1: Update the dashboard documentation**
+- [x] **Step 1: Update the dashboard documentation**
 
 In `docs/dashboard.md`, add a "Reading the dashboard" section after "What it shows" that documents the new controls and states:
 
@@ -1948,7 +1952,7 @@ list:
   tooltip, so a screenshot can be argued with.
 ```
 
-- [ ] **Step 2: Add the changelog entry**
+- [x] **Step 2: Add the changelog entry**
 
 In `CHANGELOG.md`, add an `Unreleased` section at the top:
 
@@ -1975,12 +1979,12 @@ In `CHANGELOG.md`, add an `Unreleased` section at the top:
   dismissible with `Esc`; tables take arrow-key row navigation.
 ```
 
-- [ ] **Step 3: Run the full test suite**
+- [x] **Step 3: Run the full test suite**
 
 Run: `python3 -m pytest -q`
 Expected: PASS, with no new failures and no new skips.
 
-- [ ] **Step 4: Run the audit harness and look at the screenshots**
+- [x] **Step 4: Run the audit harness and look at the screenshots**
 
 Run: `python3 scripts/dashboard_audit.py --out /tmp/shots-final`
 Expected: exit 0 — every invariant holds at all five viewports in both themes.
@@ -1990,7 +1994,7 @@ Then open the PNGs and read them: `/tmp/shots-final/desktop-dark.png`,
 by eye that nothing is clipped, no panel is half empty, and the numbers read
 cleanly.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add docs/dashboard.md CHANGELOG.md

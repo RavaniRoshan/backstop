@@ -53,13 +53,46 @@ first sample), and `sample_interval_s` gives the cadence — use
 | Latency | p95 of observed transport calls, with p50 and p99; provider calls included |
 | Concurrency | AIMD active/capacity, queue depth |
 | Outcome mix | request counts and proportional bars by outcome |
-| Circuit | breaker state and trip count |
+| Circuit | breaker state, trip count, and the rate of requests the open breaker turned away |
 | Isolation | live sessions, per-session rows (id, budget, spend, concurrency) |
 | Tenants | per-tenant ledger usage and remaining |
 | Events | tail of the audit log (allowlisted fields only) |
 
 The methodology footer states exactly what each number is derived from, so a
 screenshot cannot be mistaken for more than it is.
+
+## Reading the dashboard
+
+* **The x-axis is wall-clock.** Each chart header states the window it shows
+  (`14:32:05 → 14:36:05 · 4m`), so a spike lines up with a log line. The
+  **window** control slices the in-memory ring to `1m`, `5m`, `15m` or all of
+  it; the ring holds 360 samples, so `15m` may be everything the ring has.
+* **Refresh can be turned off.** The **refresh** control has an `off` option
+  that pauses polling; the sample age keeps counting so the data's age stays
+  visible. An auto-updating surface must be pausable (WCAG 2.2.2).
+* **Status is text first.** Every tile carries a status token (`OK`, `WATCH`,
+  `BREACH`, `IDLE`, `NO DATA`) next to its colour, and the connection state
+  reads `live`, `stale`, `lost` or `connecting`. Colour is redundant, never
+  load-bearing — which is what keeps amber and red apart for a colour-blind
+  reader.
+* **"No data" is not "zero".** A tile with no samples reads `NO DATA`; a tile
+  with samples and nothing blocked reads `0` with `nothing blocked yet`. A
+  sparkline with no points draws a dashed baseline, not an empty box.
+* **Charts are readable without a mouse.** Every chart has a text summary for
+  assistive technology and a *Show as table* toggle that renders the same
+  numbers as a table. Tooltips are dismissible with `Esc`.
+* **Tables take the keyboard.** Focus a table and use `↑`/`↓` to move between
+  rows, `←`/`→` to scroll, `Home`/`End` to jump.
+* **Tiles drill down.** Activating a tile title filters the tables below to the
+  rows that explain that number; the filter chip clears it.
+* **Deltas are against the previous window.** Each tile that has a series
+  shows the change over the preceding window of the same length.
+* **Enforcement events are marked on the traffic chart**, so a guardrail
+  action lines up with the traffic it acted on.
+
+Every derived figure states its own derivation: the chart window and the unit
+of each axis are printed in the header or the tooltip, so a screenshot can be
+argued with.
 
 ## Where the data comes from
 

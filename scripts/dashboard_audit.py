@@ -88,7 +88,7 @@ INVARIANTS = """
       (parseFloat(cs.borderBottomWidth) || 0);
     const content = used + gap * Math.max(0, kids.length - 1) + pad + border;
     const extra = h - content;
-    if (extra > 24) {
+    if (extra > 24 || (h > 0 && extra > h * 0.55)) {
       const title = panel.querySelector('h2');
       fails.push('panel ' + (title ? title.textContent.trim() : '?') +
         ' is stretched: ' + Math.round(h) + 'px tall for ' +
