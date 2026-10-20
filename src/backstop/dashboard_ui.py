@@ -460,6 +460,7 @@ main { padding: 12px 16px 24px; }
   font-weight: inherit; background: none; border: 0; padding: 0; cursor: pointer;
   text-align: start;
 }
+.tile-drill:hover { text-decoration: underline; }
 .tile-drill:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .tile[data-drill-active="1"] { border-color: var(--accent); }
 .tile[data-drill-active="1"] .tile-drill { text-decoration: underline; }
@@ -841,20 +842,46 @@ APP_JS = """
     ctx.clearRect(0, 0, w, h);
     var pts = (values || []).filter(function (v) { return !isNil(v); });
     canvas.__hasData = pts.length >= 2;
-    if (pts.length < 2) return;
+    var pad = 3;
+    if (pts.length < 2) {
+      // No data is drawn as a muted baseline with a label, not as an empty
+      // box: "nothing has happened yet" is different from "nothing happened".
+      ctx.save();
+      ctx.strokeStyle = THEME.line;
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath();
+      ctx.moveTo(0, h - pad); ctx.lineTo(w, h - pad);
+      ctx.stroke();
+      ctx.restore();
+      ctx.fillStyle = THEME.dim;
+      ctx.font = "9px " + MONO;
+      ctx.textAlign = "left";
+      ctx.textBaseline = "bottom";
+      ctx.fillText("no data", 1, h - pad - 1);
+      return;
+    }
     var min = Math.min.apply(null, pts), max = Math.max.apply(null, pts);
-    var span = (max - min) || 1, pad = 3;
+    var span = (max - min);
+    // A flat series is drawn across the middle of the band: a line glued to
+    // the bottom edge reads as "crashed to zero" rather than "steady at zero".
+    var flat = span === 0;
     var xAt = function (i) { return i * (w / (pts.length - 1)); };
-    var yAt = function (v) { return h - pad - ((v - min) / span) * (h - pad * 2); };
+    var yAt = function (v) {
+      if (flat) return h / 2;
+      return h - pad - ((v - min) / span) * (h - pad * 2);
+    };
     var stroke = color || THEME.accent;
 
-    ctx.beginPath();
-    trace(ctx, pts, xAt, yAt);
-    ctx.save();
-    ctx.globalAlpha = 0.15;
-    ctx.fillStyle = stroke;
-    ctx.lineTo(w, h); ctx.lineTo(0, h); ctx.closePath(); ctx.fill();
-    ctx.restore();
+    if (!flat) {
+      ctx.beginPath();
+      trace(ctx, pts, xAt, yAt);
+      ctx.save();
+      ctx.globalAlpha = 0.15;
+      ctx.fillStyle = stroke;
+      ctx.lineTo(w, h); ctx.lineTo(0, h); ctx.closePath(); ctx.fill();
+      ctx.restore();
+    }
 
     ctx.beginPath();
     trace(ctx, pts, xAt, yAt);
@@ -920,7 +947,10 @@ APP_JS = """
       ctx.font = "11px " + MONO;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText("collecting samples", w / 2, h / 2);
+      // Still collecting samples is not the same as no traffic: one means the
+      // sampler has not run yet, the other means the window is empty.
+      ctx.fillText(t.length < 2 ? "collecting samples" : "no traffic in window",
+        w / 2, h / 2);
       return;
     }
 
@@ -1576,6 +1606,7 @@ APP_JS = """
         { text: count(prevention.circuit_open) + " circuit", tone: prevention.circuit_open > 0 ? "bad" : null },
         count(prevention.rate_limited) + " rate-limit",
         deltaChip(series.prevented_rps, windowed.times, half),
+        prevention.total === 0 ? "nothing blocked yet" : null,
       ],
       spark: series.prevented,
       color: prevention.total > 0 ? THEME.ok : THEME.neutral,

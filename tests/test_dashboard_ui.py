@@ -183,12 +183,10 @@ def test_the_chart_can_be_read_as_a_table():
     assert "chart-toggle" in page()
 
 
-@pending("Task 8")
 def test_no_data_is_distinct_from_zero():
     assert "NO DATA" in js()
     assert "nothing blocked yet" in js()
 
 
-@pending("Task 8")
 def test_a_sparkline_without_points_draws_a_baseline():
     assert "no data" in js()

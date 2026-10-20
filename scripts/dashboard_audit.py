@@ -235,12 +235,26 @@ def main() -> int:
                     page.wait_for_timeout(int(args.settle * 1000))
                     page.screenshot(path=str(out / ("%s-%s.png" % (name, theme))),
                                     full_page=True)
+                    # The sticky top bar overlaps an element crop, so it is
+                    # unpinned for the crops only. The page's CSP forbids
+                    # inline styles, so the CSSOM is used instead.
+                    page.evaluate(
+                        "() => { const bar = document.querySelector('.topbar');"
+                        " if (bar) bar.style.position = 'static'; }")
                     for index, panel in enumerate(page.query_selector_all(".panel")):
                         title = panel.query_selector("h2")
                         slug = slugify(title.text_content() if title else "p%d" % index)
                         try:
                             panel.screenshot(
                                 path=str(panels_dir / ("%s-%s-%s.png" % (name, theme, slug)))
+                            )
+                        except Exception:
+                            pass
+                    tiles = page.query_selector(".tiles")
+                    if tiles is not None:
+                        try:
+                            tiles.screenshot(
+                                path=str(panels_dir / ("%s-%s-tiles.png" % (name, theme)))
                             )
                         except Exception:
                             pass
