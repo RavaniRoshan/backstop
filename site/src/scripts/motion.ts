@@ -85,6 +85,13 @@ function reveal(el: HTMLElement): void {
   );
 
   el.querySelectorAll<HTMLElement>("[data-count]").forEach(countUp);
+
+  /* A skeleton that never resolves is just an empty card. Each one is taken
+     away a beat after the card arrives, so the figure underneath it takes
+     the card's place rather than appearing under a placeholder. */
+  el.querySelectorAll<HTMLElement>("[data-skeleton]").forEach((skeleton, index) => {
+    window.setTimeout(() => skeleton.classList.add("is-resolved"), 160 + index * 110);
+  });
 }
 
 /** Bring an element in the moment it scrolls into view. */

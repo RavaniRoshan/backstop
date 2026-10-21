@@ -4,9 +4,9 @@
    bordered panel with the content at the bottom, and the content sliding a
    little to the right when the pointer arrives.
 
-   The upper half of each card is a skeleton — a shimmering placeholder, the
-   way a card looks before its content arrives. There is no screenshot to put
-   in these cards, so the placeholder stays. */
+   The "with skeletons" part is what each card shows before its figure
+   arrives — a shimmering placeholder, the way a card looks before its
+   content is there. It resolves when the card does. */
 
 .bento {
   display: grid;
@@ -17,7 +17,7 @@
 @media (min-width: 768px) {
   .bento {
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    grid-auto-rows: 18rem;
+    grid-auto-rows: 19rem;
   }
 
   /* Two cards run wide, so the grid fills every row instead of leaving a
@@ -43,26 +43,69 @@
     border-color 200ms ease;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root[data-theme="dark"] .bento-card {
-    box-shadow: none;
-  }
-}
-
 .bento-card:hover {
   border-color: color-mix(in srgb, var(--blume-accent) 40%, var(--blume-border));
   box-shadow: 0 20px 40px -24px rgb(0 0 0 / 0.35);
 }
 
+/* --- the figure ---------------------------------------------------------- */
+
+.bento-figure {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+}
+
+.fig {
+  width: 100%;
+  max-width: 15rem;
+  height: auto;
+  color: var(--blume-muted-foreground);
+  overflow: visible;
+}
+
+.fig .s {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.fig .f {
+  fill: currentColor;
+  stroke: none;
+}
+
+/* The part of the drawing that is doing the work. */
+.fig .a {
+  color: var(--blume-accent);
+}
+
 /* --- the skeleton -------------------------------------------------------- */
 
+/* It sits over the figure and is taken away when the figure is ready. With
+   no JavaScript it is never drawn at all, because the flag that shows it is
+   set by the same script that takes it away. */
 .bento-skeleton {
-  position: relative;
+  position: absolute;
+  inset: 0;
   display: flex;
   flex-direction: column;
   gap: 0.55rem;
-  flex: 1;
-  min-height: 0;
+  padding: 0.5rem 0;
+  opacity: 0;
+  transition: opacity 460ms ease;
+}
+
+html[data-motion="on"] .bento-skeleton {
+  opacity: 1;
+}
+
+html[data-motion="on"] .bento-skeleton.is-resolved {
+  opacity: 0;
 }
 
 .sk {
@@ -106,8 +149,8 @@
   }
 }
 
-/* Each card gets a different arrangement, so the row reads as a set of
-   different things rather than eight of the same block. */
+/* Each card's placeholder is arranged differently, so the row reads as a set
+   of different things rather than eight of the same block. */
 .bento-card--1 .bento-skeleton {
   flex-direction: row;
   flex-wrap: wrap;
@@ -187,6 +230,12 @@
 @media (prefers-reduced-motion: reduce) {
   .sk {
     animation: none;
+  }
+
+  /* A reader who asked for no motion gets the figure, not a placeholder
+     that shimmers. */
+  html[data-motion="on"] .bento-skeleton {
+    display: none;
   }
 
   .bento-card:hover .bento-copy {

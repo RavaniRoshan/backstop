@@ -6,10 +6,11 @@
  * rows, each card a bordered panel with the content pushed to the bottom and
  * the whole block sliding a little to the right on hover.
  *
- * The "with skeletons" part is the card's upper half — a shimmering
- * placeholder, the way a card looks before its content arrives. The cards
- * here are honest about it: there is no screenshot to put in them, so the
- * placeholder stays.
+ * The "with skeletons" part is what each card shows before its figure
+ * arrives: a shimmering placeholder, the way a card looks before its content
+ * is there. It resolves when the card does, and without JavaScript it is
+ * never drawn at all — a placeholder that never resolves is just an empty
+ * card.
  */
 import "../styles/bento.css";
 
@@ -24,19 +25,81 @@ interface Props {
 }
 
 const { features } = Astro.props;
+
+/**
+ * One small drawing per feature, in the same line-art vocabulary: the
+ * structure in the muted colour, the part that is doing the work in the
+ * accent. Each one says what the feature does without a caption.
+ */
+const FIGURES: Record<string, string> = {
+  "Token budgets": `
+    <rect class="s" x="14" y="16" width="70" height="9" rx="4.5"/>
+    <rect class="s" x="14" y="33" width="104" height="9" rx="4.5"/>
+    <rect class="s" x="14" y="50" width="46" height="9" rx="4.5"/>
+    <rect class="s" x="14" y="67" width="118" height="9" rx="4.5" opacity=".25"/>
+    <rect class="a f" x="14" y="67" width="86" height="9" rx="4.5"/>
+    <line class="a s" x1="100" y1="59" x2="100" y2="84" stroke-dasharray="4 4"/>`,
+  "Dollar budgets": `
+    <circle class="s" cx="36" cy="45" r="26"/>
+    <text class="a f" x="36" y="53" text-anchor="middle" font-size="26">$</text>
+    <rect class="s" x="78" y="30" width="68" height="10" rx="5" opacity=".25"/>
+    <rect class="a f" x="78" y="30" width="50" height="10" rx="5"/>
+    <line class="a s" x1="128" y1="22" x2="128" y2="48" stroke-dasharray="4 4"/>`,
+  "Circuit breaker": `
+    <path class="s" d="M14 45h44M102 45h44"/>
+    <path class="a s" d="M58 45 88 22"/>
+    <circle class="a s" cx="80" cy="66" r="10"/>
+    <path class="a s" d="M76 66h8"/>`,
+  "Concurrency control": `
+    <rect class="a f" x="14" y="16" width="96" height="12" rx="6"/>
+    <rect class="a f" x="14" y="36" width="96" height="12" rx="6"/>
+    <rect class="a f" x="14" y="56" width="96" height="12" rx="6"/>
+    <rect class="s" x="14" y="76" width="96" height="12" rx="6" stroke-dasharray="4 4"/>`,
+  "Per-agent isolation": `
+    <rect class="s" x="14" y="14" width="60" height="62" rx="8" opacity=".28"/>
+    <rect class="a f" x="14" y="44" width="60" height="32" rx="8"/>
+    <rect class="s" x="86" y="14" width="60" height="62" rx="8" opacity=".28"/>
+    <rect class="a f" x="86" y="58" width="60" height="18" rx="8"/>
+    <line class="s" x1="80" y1="8" x2="80" y2="84" stroke-dasharray="3 4" opacity=".55"/>`,
+  "Runaway-spend detection": `
+    <line class="s" x1="10" y1="62" x2="150" y2="62" opacity=".3"/>
+    <line class="s" x1="10" y1="46" x2="150" y2="46" stroke-dasharray="4 4"/>
+    <path class="a s" d="M14 66 40 60 58 63 76 48 92 53 108 30 124 37 146 13"/>
+    <circle class="a f" cx="108" cy="30" r="4.5"/>`,
+  "A live dashboard": `
+    <rect class="s" x="14" y="14" width="132" height="62" rx="8" opacity=".28"/>
+    <rect class="a f" x="26" y="52" width="12" height="14" rx="3"/>
+    <rect class="a f" x="44" y="42" width="12" height="24" rx="3"/>
+    <rect class="a f" x="62" y="47" width="12" height="19" rx="3"/>
+    <rect class="a f" x="80" y="32" width="12" height="34" rx="3"/>
+    <circle class="a f" cx="128" cy="28" r="5"/>`,
+  "An audit log": `
+    <rect class="s" x="12" y="28" width="36" height="34" rx="6" opacity=".3"/>
+    <rect class="s" x="62" y="28" width="36" height="34" rx="6" opacity=".3"/>
+    <rect class="s" x="112" y="28" width="36" height="34" rx="6" opacity=".3"/>
+    <path class="a s" d="M48 45h14M98 45h14"/>
+    <path class="a s" d="m54 39 8 6-8 6M104 39l8 6-8 6"/>`,
+};
 ---
 
 <div class="bento" data-reveal>
   {
     features.map((feature, index) => (
-      <article
-        class={`bento-card bento-card--${index % 4}${index === 0 || index === 6 ? " bento-card--wide" : ""}`}
-      >
-        <div class="bento-skeleton" aria-hidden="true">
-          <span class="sk sk-block" />
-          <span class="sk sk-line" style="width: 68%" />
-          <span class="sk sk-line" style="width: 42%" />
-          <span class="sk sk-dot" />
+      <article class={`bento-card bento-card--${index % 4}`}>
+        <div class="bento-figure">
+          <svg
+            class="fig"
+            viewBox="0 0 160 90"
+            role="img"
+            aria-label={feature.name}
+            set:html={FIGURES[feature.name] ?? ""}
+          />
+          <div class="bento-skeleton" data-skeleton aria-hidden="true">
+            <span class="sk sk-block" />
+            <span class="sk sk-line" style="width: 68%" />
+            <span class="sk sk-line" style="width: 42%" />
+            <span class="sk sk-dot" />
+          </div>
         </div>
         <div class="bento-copy">
           <p class="bento-index">{String(index + 1).padStart(2, "0")}</p>
