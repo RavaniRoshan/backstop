@@ -199,6 +199,10 @@ backstop dashboard                           # watch a real process
 backstop dashboard --audit audit.jsonl --cost-model gpt-4o
 ```
 
+The demo is a real workload, not a picture of one: its lanes have budgets and
+a circuit breaker, its breaker trips, and the enforcement events it produces
+are the ones the dashboard shows. It writes nothing to disk.
+
 It binds loopback only. Exposing it further needs a bearer token:
 
 ```bash
@@ -225,6 +229,7 @@ sinks are live.
 | Outcome mix | Request counts by outcome, proportional |
 | Enforcement events | The audit tail: decision, reason, endpoint, priority, estimated tokens |
 | Tenants | Per-tenant request-scoped budget usage |
+| Runaway-spend signals | The four runaway-spend detectors: what fired, how far past its threshold, and in which unit |
 
 ### Reading it
 
@@ -241,6 +246,8 @@ sinks are live.
 - **Charts are readable without a mouse**: each has a text summary for
   assistive technology and a *Show as table* alternative, and the tables take
   arrow-key row navigation.
+- **Enforcement events are marked on the traffic chart**, so a guardrail action
+  lines up with the traffic it acted on.
 
 Every derived number states how it was derived, in the panel or the footer, so
 a screenshot can be argued with.
