@@ -70,6 +70,27 @@ All notable changes to Backstop should be documented in this file.
 
 ### The website, second pass
 
+- **The site has a new palette.** A paper white, a near-black that reads as
+  ink, and one warm orange that carries every accent — the links, the hover
+  states, the live wires in the diagram, the numbers on the loader. The dark
+  theme is the same system on a black ground. The values are `oklch`, because
+  that is where the palette was written.
+- **The hero is two columns.** The words on the left, the request path on the
+  right: the agents at the top, their requests falling into Backstop, and the
+  two endpoint shapes Backstop forwards to. The headline is shorter and set
+  much larger, because a headline that reads at that size cannot be a
+  sentence.
+- **The feature list is a bento.** [Aceternity](https://ui.aceternity.com)'s
+  grid — three columns of eighteenrem rows, each card a bordered panel with
+  the content at the bottom and the whole block sliding to the right on
+  hover — with the "with skeletons" treatment: each card's upper half is a
+  shimmering placeholder, the way a card looks before its content arrives.
+- **There is a footer.** Four columns of links, a wordmark the size of the
+  page behind it, and the legal line. There was none before.
+- **The dithered hero field is gone.** It was a nice effect and the wrong
+  one: a full-screen halftone behind a headline is decoration where the
+  headline should be.
+
 - **The real brand marks.** The marketing page now draws the actual logos of
   the tools it talks about — the agents on the left of the wiring diagram, the
   servers in the integrations section, the endpoints on the right. They are

@@ -41,9 +41,8 @@ export default defineConfig({
   },
 
   theme: {
-    // The dashboard's own accent, so the site and the product it documents
-    // are the same colour.
-    accent: { light: "#0b62d0", dark: "#58a6ff" },
+    // The site's one accent, lifted for the dark theme so it still carries.
+    accent: { light: "#ff6600", dark: "#ff7d26" },
     radius: "md",
     mode: "system",
     fonts: {

@@ -56,15 +56,14 @@ the site should go out to both.
 | `blume.config.ts` | The site configuration: title, theme, navigation, deployment |
 | `theme.css` | The design tokens, set to the dashboard's palette |
 | `pages/` | The marketing pages, as Astro routes |
-| `components/` | The marketing components |
+| `components/` | The marketing components: the request path, the integrations matrix, the feature bento, the loader, the footer |
 | `styles/marketing.css` | The marketing pages' own vocabulary |
 | `styles/diagram.css` | The wiring diagram |
 | `styles/integrations.css` | The integrations section |
-| `styles/dither.css` | The dithered field behind the hero |
+| `styles/bento.css` | The feature bento |
+| `styles/footer.css` | The footer |
 | `styles/loader.css` | The loader the page arrives behind |
 | `src/scripts/motion.ts` | The page's only moving parts |
-| `src/scripts/dither-reveal.ts` | The WebGL field behind the hero |
-| `src/scripts/dither-shaders.ts` | Its shader |
 | `src/scripts/tiles-loader.ts` | The loader |
 | `src/scripts/easing.ts` | The loader's curves |
 | `assets/logos/` | The brand marks, committed as SVG |
@@ -98,14 +97,17 @@ committed files, so they cannot drift.
 
 ## The hero's field
 
-The hero sits on a dithered rendering of the dashboard screenshot, which tears
-open into full colour where the cursor sweeps. It is [Originkit](https://originkit.dev)'s
-`dither-reveal` component, ported: the component arrives as a React component
-that fetches a remote image, and this site has neither React nor a remote
-fetch. So the shader is Originkit's, unchanged, and everything around it is
-this site's — the image is the one the site already serves, the script is
-plain TypeScript, and the field is inverted on the light theme so the same
-halftone reads as ink on paper rather than as a dark band.
+The marketing page is built on a paper-and-ink palette: a white ground, a
+near-black that reads as ink, and one warm orange that carries every accent —
+the links, the hover states, the live wires in the diagram, the numbers on the
+loader. The dark theme is the same system on a black ground. The values live
+in `theme.css` as `oklch`, because that is where the palette was written.
+
+The hero is two columns: the words on the left, the request path on the right.
+That path is [Originkit](https://originkit.dev)'s-free answer to the same
+question — the agents at the top, their requests falling into Backstop, and
+the two endpoint shapes Backstop forwards to — drawn here with the real marks
+and animated with the same wires as the wide diagram further down the page.
 
 ## The loader
 

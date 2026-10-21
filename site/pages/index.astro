@@ -4,8 +4,10 @@ import data from "blume:data";
 import PageLayout from "blume/components/layout/PageLayout.astro";
 import Install from "../components/Install.astro";
 import WiringDiagram from "../components/WiringDiagram.astro";
+import RequestPath from "../components/RequestPath.astro";
+import FeatureBento from "../components/FeatureBento.astro";
+import SiteFooter from "../components/SiteFooter.astro";
 import IntegrationsMatrix from "../components/IntegrationsMatrix.astro";
-import DitherReveal from "../components/DitherReveal.astro";
 import TilesLoader from "../components/TilesLoader.astro";
 import "../styles/marketing.css";
 
@@ -223,32 +225,29 @@ const faqs = [
 
   <!-- Hero ------------------------------------------------------------- -->
   <section class="hero">
-    <DitherReveal src={doc("/dashboard.png")} dotSize={5} radius={92} softness={38} />
-    <div class="wrap">
-      <p class="eyebrow" data-reveal="hero">In-process guardrails for AI agents</p>
-      <h1 class="display" data-reveal="hero" style="margin: 1.1rem 0 0; max-width: 20ch;">
-        The thing that stops a runaway agent is <em>not a better prompt</em>.
-      </h1>
-      <p class="lead" data-reveal="hero" style="margin-top: 1.6rem;">
-        It is a limit. Backstop gives every agent you wrap a budget, a breaker and
-        a concurrency cap — inside your own process, for a tenth of a
-        millisecond, with no proxy and nothing new to run.
-      </p>
-      <div
-        data-reveal="hero"
-        style="display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; margin-top: 2.25rem;"
-      >
-        <Install />
-        <a class="btn btn-quiet" href={doc("/docs/quickstart")}>Read the quickstart</a>
+    <div class="wrap hero-grid">
+      <div class="hero-copy">
+        <p class="eyebrow" data-reveal="hero">In-process guardrails for AI agents</p>
+        <h1 class="display" data-reveal="hero">
+          Runaway agents stop at <em>limits</em>.
+        </h1>
+        <p class="lead" data-reveal="hero">
+          Not a better prompt. A hard ceiling on tokens, dollars and calls in
+          flight — enforced inside your own process, for a tenth of a
+          millisecond, with no proxy and nothing new to run.
+        </p>
+        <div class="hero-actions" data-reveal="hero">
+          <Install />
+          <a class="btn btn-quiet" href={doc("/docs/quickstart")}>Read the quickstart</a>
+        </div>
+        <p class="mono" data-reveal="hero">
+          Prefer to look first? <a class="link" href={doc("/docs/dashboard")}>The
+          dashboard</a> runs on synthetic traffic, with no keys and no network.
+        </p>
       </div>
-      <p class="mono" data-reveal="hero" style="margin-top: 1.4rem;">
-        Prefer to look first? <a class="link" href={doc("/docs/dashboard")}>The
-        dashboard</a> runs on synthetic traffic, with no keys and no network.
-      </p>
-    </div>
-
-    <div class="wrap" style="margin-top: clamp(2.5rem, 6vw, 4.5rem);">
-      <WiringDiagram />
+      <div class="hero-visual" data-reveal="hero">
+        <RequestPath />
+      </div>
     </div>
   </section>
 
@@ -296,6 +295,10 @@ const faqs = [
         transport is injected in-process, so requests still go straight to the
         provider.
       </p>
+
+      <div style="margin-top: clamp(2.5rem, 5vw, 3.5rem);">
+        <WiringDiagram />
+      </div>
 
       <div class="grid-2" style="margin-top: 3rem;">
         <div data-reveal>
@@ -410,22 +413,8 @@ const faqs = [
         Every one of them is a limit you can turn on, or leave off. The defaults
         are the boring ones.
       </p>
-      <div class="rows" style="margin-top: 2.5rem;">
-        {
-          features.map((feature, index) => (
-            <div class="row" data-reveal>
-              <p class="num" style="padding-top: 0.25rem;">
-                {String(index + 1).padStart(2, "0")}
-              </p>
-              <div>
-                <h3>
-                  <a class="link" href={feature.href}>{feature.name}</a>
-                </h3>
-                <p>{feature.body}</p>
-              </div>
-            </div>
-          ))
-        }
+      <div style="margin-top: 2.5rem;">
+        <FeatureBento features={features} />
       </div>
     </div>
   </section>
@@ -597,4 +586,6 @@ const faqs = [
   <script>
     import "../src/scripts/motion";
   </script>
+
+  <SiteFooter slot="footer" />
 </PageLayout>

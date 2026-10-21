@@ -1,0 +1,195 @@
+/* The feature bento.
+   -----------------------------------------------------------------------
+   Aceternity's bento grid: three columns of eighteenrem rows, each card a
+   bordered panel with the content at the bottom, and the content sliding a
+   little to the right when the pointer arrives.
+
+   The upper half of each card is a skeleton — a shimmering placeholder, the
+   way a card looks before its content arrives. There is no screenshot to put
+   in these cards, so the placeholder stays. */
+
+.bento {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+}
+
+@media (min-width: 768px) {
+  .bento {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-auto-rows: 18rem;
+  }
+
+  /* Two cards run wide, so the grid fills every row instead of leaving a
+     hole in the last one. */
+  .bento-card--wide {
+    grid-column: span 2;
+  }
+}
+
+.bento-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem;
+  border-radius: calc(var(--blume-radius) * 1.15);
+  border: 1px solid var(--blume-border);
+  background: var(--blume-background);
+  overflow: hidden;
+  transition:
+    box-shadow 200ms ease,
+    border-color 200ms ease;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-theme="dark"] .bento-card {
+    box-shadow: none;
+  }
+}
+
+.bento-card:hover {
+  border-color: color-mix(in srgb, var(--blume-accent) 40%, var(--blume-border));
+  box-shadow: 0 20px 40px -24px rgb(0 0 0 / 0.35);
+}
+
+/* --- the skeleton -------------------------------------------------------- */
+
+.bento-skeleton {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  flex: 1;
+  min-height: 0;
+}
+
+.sk {
+  display: block;
+  border-radius: 0.5rem;
+  background: linear-gradient(
+    100deg,
+    color-mix(in srgb, var(--blume-accent) 5%, transparent) 20%,
+    color-mix(in srgb, var(--blume-accent) 11%, transparent) 45%,
+    color-mix(in srgb, var(--blume-accent) 5%, transparent) 70%
+  );
+  background-size: 220% 100%;
+  animation: sk-shimmer 2.6s ease-in-out infinite;
+}
+
+.sk-block {
+  flex: 1;
+  min-height: 3.5rem;
+  border-radius: calc(var(--blume-radius) * 0.9);
+}
+
+.sk-line {
+  height: 0.5rem;
+}
+
+.sk-dot {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  position: absolute;
+  right: 0;
+  top: 0;
+}
+
+@keyframes sk-shimmer {
+  from {
+    background-position: 180% 0;
+  }
+  to {
+    background-position: -80% 0;
+  }
+}
+
+/* Each card gets a different arrangement, so the row reads as a set of
+   different things rather than eight of the same block. */
+.bento-card--1 .bento-skeleton {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 0.55rem;
+}
+
+.bento-card--1 .sk-block {
+  flex: 1 1 100%;
+  min-height: 2.5rem;
+}
+
+.bento-card--1 .sk-line {
+  flex: 1 1 40%;
+  height: 2.75rem;
+}
+
+.bento-card--2 .bento-skeleton {
+  justify-content: flex-end;
+}
+
+.bento-card--2 .sk-block {
+  min-height: 2rem;
+}
+
+.bento-card--3 .bento-skeleton {
+  flex-direction: row;
+  align-items: flex-end;
+  gap: 0.35rem;
+}
+
+.bento-card--3 .sk-block {
+  flex: 1;
+  min-height: 4rem;
+}
+
+.bento-card--3 .sk-line {
+  display: none;
+}
+
+/* --- the copy ------------------------------------------------------------ */
+
+.bento-copy {
+  transition: transform 200ms ease;
+}
+
+.bento-card:hover .bento-copy {
+  transform: translateX(0.4rem);
+}
+
+.bento-index {
+  margin: 0 0 0.4rem;
+  font-family: var(--blume-font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.1em;
+  color: var(--blume-accent);
+}
+
+.bento-copy h3 {
+  margin: 0 0 0.4rem;
+  font-family: var(--blume-font-display);
+  font-weight: 620;
+  letter-spacing: -0.02em;
+  font-size: 1.0625rem;
+  line-height: 1.3;
+}
+
+.bento-body {
+  margin: 0;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  color: var(--blume-muted-foreground);
+}
+
+/* --- no motion ----------------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .sk {
+    animation: none;
+  }
+
+  .bento-card:hover .bento-copy {
+    transform: none;
+  }
+}

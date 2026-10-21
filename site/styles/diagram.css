@@ -109,6 +109,17 @@
   font-weight: 650;
 }
 
+/* --- the portrait variant, for the hero --------------------------------- */
+
+.diagram--path svg {
+  max-width: 33rem;
+  margin-inline: auto;
+}
+
+.diagram--path .endpoint-label {
+  text-anchor: middle;
+}
+
 /* --- hover: an agent lights its own wire -------------------------------- */
 
 .diagram .agent {

@@ -1,0 +1,112 @@
+/* The footer.
+   -----------------------------------------------------------------------
+   Four columns, a wordmark, and the legal line. The wordmark is almost
+   invisible on purpose: it closes the page rather than being read. */
+
+.footer {
+  margin-top: clamp(3rem, 7vw, 6rem);
+  padding-block: clamp(2.5rem, 5vw, 4rem) 2rem;
+  border-top: 1px solid var(--blume-border);
+  background: var(--blume-muted);
+}
+
+.footer-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2rem 1.5rem;
+}
+
+@media (min-width: 768px) {
+  .footer-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.footer-label {
+  margin: 0 0 0.9rem;
+  font-family: var(--blume-font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--blume-muted-foreground);
+}
+
+.footer-col ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.footer-col a {
+  color: var(--blume-foreground);
+  text-decoration: none;
+  font-size: 0.9375rem;
+  transition: color 160ms ease;
+}
+
+.footer-col a:hover {
+  color: var(--blume-accent);
+}
+
+/* --- the wordmark -------------------------------------------------------- */
+
+.footer-mark {
+  margin: clamp(2.5rem, 5vw, 4rem) 0 0;
+  font-family: var(--blume-font-display);
+  font-weight: 700;
+  font-size: clamp(4rem, 17vw, 15rem);
+  line-height: 0.78;
+  letter-spacing: -0.055em;
+  text-align: center;
+  color: color-mix(in srgb, var(--blume-foreground) 7%, transparent);
+  user-select: none;
+  overflow: hidden;
+}
+
+/* --- the legal line ------------------------------------------------------ */
+
+.footer-bottom {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem 1.5rem;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: clamp(1.5rem, 3vw, 2.5rem);
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--blume-border);
+}
+
+.footer-copy {
+  margin: 0;
+  font-family: var(--blume-font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--blume-muted-foreground);
+}
+
+.footer-legal {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+}
+
+.footer-legal a {
+  font-family: var(--blume-font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--blume-muted-foreground);
+  text-decoration: none;
+  transition: color 160ms ease;
+}
+
+.footer-legal a:hover {
+  color: var(--blume-foreground);
+}

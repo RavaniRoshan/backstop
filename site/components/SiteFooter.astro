@@ -1,0 +1,83 @@
+---
+/**
+ * The footer.
+ *
+ * Four columns of links, a wordmark the size of the page behind it, and the
+ * legal line. The wordmark is deliberately almost invisible: it is there to
+ * close the page, not to be read.
+ */
+import "../styles/footer.css";
+
+const base = (import.meta.env.BASE_URL ?? "/").replace(/\/$/, "");
+const doc = (path: string) => `${base}${path}`;
+
+const columns = [
+  {
+    label: "Product",
+    links: [
+      { label: "How it works", href: doc("/docs/architecture") },
+      { label: "What you get", href: doc("/docs/quickstart") },
+      { label: "Any server", href: doc("/docs/integrations") },
+      { label: "The dashboard", href: doc("/docs/dashboard") },
+    ],
+  },
+  {
+    label: "Reference",
+    links: [
+      { label: "Compatibility", href: doc("/docs/compatibility") },
+      { label: "SDK matrix", href: doc("/docs/sdk-matrix") },
+      { label: "Frameworks", href: doc("/docs/frameworks") },
+      { label: "Benchmarks", href: doc("/docs/benchmarks") },
+    ],
+  },
+  {
+    label: "Operations",
+    links: [
+      { label: "Budget alerts", href: doc("/docs/alerts") },
+      { label: "The ledger", href: doc("/docs/ledger") },
+      { label: "Detection", href: doc("/docs/detection") },
+      { label: "Threat model", href: doc("/docs/threat-model") },
+    ],
+  },
+  {
+    label: "Contact",
+    links: [
+      { label: "GitHub", href: "https://github.com/RavaniRoshan/backstop" },
+      { label: "PyPI", href: "https://pypi.org/project/backstop-ai/" },
+      { label: "Quickstart", href: doc("/docs/quickstart") },
+    ],
+  },
+];
+---
+
+<footer class="footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      {
+        columns.map((column) => (
+          <nav class="footer-col" aria-label={column.label}>
+            <p class="footer-label">{column.label}</p>
+            <ul>
+              {column.links.map((link) => (
+                <li>
+                  <a href={link.href}>{link.label}</a>
+                </li>
+              ))}
+            </ul>
+          </nav>
+        ))
+      }
+    </div>
+
+    <p class="footer-mark" aria-hidden="true">Backstop</p>
+
+    <div class="footer-bottom">
+      <p class="footer-copy">©2026 Backstop. All rights reserved.</p>
+      <ul class="footer-legal">
+        <li><a href={doc("/docs/threat-model")}>Security</a></li>
+        <li><a href={doc("/docs/compatibility")}>Compatibility</a></li>
+        <li><a href="https://github.com/RavaniRoshan/backstop">Source</a></li>
+      </ul>
+    </div>
+  </div>
+</footer>

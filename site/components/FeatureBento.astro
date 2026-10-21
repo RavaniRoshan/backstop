@@ -1,0 +1,53 @@
+---
+/**
+ * The feature bento.
+ *
+ * Aceternity's bento grid, rebuilt here: a three-column grid of eighteenrem
+ * rows, each card a bordered panel with the content pushed to the bottom and
+ * the whole block sliding a little to the right on hover.
+ *
+ * The "with skeletons" part is the card's upper half — a shimmering
+ * placeholder, the way a card looks before its content arrives. The cards
+ * here are honest about it: there is no screenshot to put in them, so the
+ * placeholder stays.
+ */
+import "../styles/bento.css";
+
+interface Feature {
+  name: string;
+  body: string;
+  href: string;
+}
+
+interface Props {
+  features: Feature[];
+}
+
+const { features } = Astro.props;
+---
+
+<div class="bento" data-reveal>
+  {
+    features.map((feature, index) => (
+      <article
+        class={`bento-card bento-card--${index % 4}${index === 0 || index === 6 ? " bento-card--wide" : ""}`}
+      >
+        <div class="bento-skeleton" aria-hidden="true">
+          <span class="sk sk-block" />
+          <span class="sk sk-line" style="width: 68%" />
+          <span class="sk sk-line" style="width: 42%" />
+          <span class="sk sk-dot" />
+        </div>
+        <div class="bento-copy">
+          <p class="bento-index">{String(index + 1).padStart(2, "0")}</p>
+          <h3>
+            <a class="link" href={feature.href}>
+              {feature.name}
+            </a>
+          </h3>
+          <p class="bento-body">{feature.body}</p>
+        </div>
+      </article>
+    ))
+  }
+</div>

@@ -135,61 +135,70 @@ html[data-motion="on"] [data-reveal="chips"]:not([data-revealed]) > li {
 .hero {
   position: relative;
   overflow: hidden;
-  padding-block: clamp(4rem, 10vw, 8rem) clamp(3rem, 7vw, 5.5rem);
+  padding-block: clamp(3rem, 7vw, 5.5rem) clamp(3rem, 7vw, 5.5rem);
 }
 
-/* The hero sits on the dithered field, so the light and the scrim are both
-   in front of it: the light keeps the accent, and the scrim keeps the
-   headline legible on the left, where the words are. */
+/* One soft light, behind the headline, and nothing else. */
 .hero::before {
   content: "";
   position: absolute;
   inset: -40% 0 auto 0;
   height: 34rem;
-  z-index: 1;
   background: radial-gradient(
     46rem 22rem at 50% 0%,
-    color-mix(in srgb, var(--blume-accent) 13%, transparent),
+    color-mix(in srgb, var(--blume-accent) 11%, transparent),
     transparent 70%
   );
   pointer-events: none;
 }
 
-.hero::after {
-  content: "";
-  position: absolute;
-  inset: 0 0 auto 0;
-  height: 100%;
-  z-index: 1;
-  pointer-events: none;
-  background: linear-gradient(
-    to right,
-    color-mix(in srgb, var(--blume-background) 94%, transparent) 0%,
-    color-mix(in srgb, var(--blume-background) 78%, transparent) 44%,
-    transparent 80%
-  );
-}
-
-/* The hero's own content sits above the field. Only the content — the
-   dither canvas positions itself, and a blanket `.hero > *` would take its
-   positioning away from it. */
+/* The hero's own content sits above the light. */
 .hero > .wrap {
   position: relative;
   z-index: 2;
 }
 
-/* On a narrow screen the headline spans the full width, so a scrim that
-   fades from the left cannot help it: the words need the field cleared
-   under them, from the top down instead. */
-@media (max-width: 640px) {
-  .hero::after {
-    background: linear-gradient(
-      to bottom,
-      color-mix(in srgb, var(--blume-background) 94%, transparent) 0%,
-      color-mix(in srgb, var(--blume-background) 78%, transparent) 42%,
-      transparent 76%
-    );
+/* Two columns: the words on the left, the request path on the right. */
+.hero-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: clamp(2.5rem, 5vw, 4rem);
+  align-items: center;
+}
+
+@media (min-width: 960px) {
+  .hero-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 0.94fr);
+    gap: clamp(2rem, 4vw, 4.5rem);
   }
+}
+
+.hero-copy {
+  max-width: 33rem;
+}
+
+/* The headline is the loudest thing on the page, and it is set tight. */
+.hero .display {
+  margin-top: 1.15rem;
+  font-size: clamp(2.9rem, 5.6vw, 4.7rem);
+  line-height: 0.97;
+  letter-spacing: -0.04em;
+}
+
+.hero .lead {
+  margin-top: 1.5rem;
+}
+
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  margin-top: 2.25rem;
+}
+
+.hero .mono {
+  margin-top: 1.4rem;
 }
 
 /* --- buttons ----------------------------------------------------------- */

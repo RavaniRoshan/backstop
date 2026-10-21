@@ -1,24 +1,36 @@
-/* Blume's tokens, set to the dashboard's palette.
+/* The site's palette.
    -----------------------------------------------------------------------
-   The site and the product it documents should be the same colour. These
-   are the exact values the built-in dashboard uses, so a screenshot of the
-   app and a screenshot of the site belong to the same product. */
+   A paper white, a near-black that reads as ink, and one warm orange that
+   carries every accent: the links, the hover states, the live wires in the
+   diagram, the numbers on the loader.
+
+   The values are `oklch`, because that is where the palette was written and
+   because a hue is easier to nudge in oklch than in hex. The dark theme is
+   the same system on a black ground, with the accent lifted so it still
+   carries on a dark page.
+
+   The marketing pages and the documentation read the same tokens, so the
+   site is one thing rather than two that happen to share a header. */
 
 :root {
-  --blume-background: #f6f7f9;
-  --blume-foreground: #10141a;
-  --blume-muted: #eef0f3;
-  --blume-muted-foreground: #5b6470;
-  --blume-border: rgba(16, 22, 32, 0.13);
-  --blume-code-background: #f2f4f7;
+  --blume-background: oklch(1 0 0);
+  --blume-foreground: oklch(0.2316 0.0038 286.0989);
+  --blume-muted: oklch(0.9707 0.0027 286.3504);
+  --blume-muted-foreground: oklch(0.6217 0.0074 286.1818);
+  --blume-border: oklch(0.8652 0.0068 286.2561);
+  --blume-code-background: oklch(0.9886 0.0026 286.3515);
+  --blume-accent: oklch(0.6958 0.2043 43.491);
+  --blume-accent-foreground: oklch(1 0 0);
   --blume-content-width: 44rem;
 }
 
 :root[data-theme="dark"] {
-  --blume-background: #0b0c0e;
-  --blume-foreground: #e6e8eb;
-  --blume-muted: #16181c;
-  --blume-muted-foreground: #99a1ab;
-  --blume-border: rgba(255, 255, 255, 0.11);
-  --blume-code-background: #111316;
+  --blume-background: oklch(0 0 0);
+  --blume-foreground: oklch(0.9707 0.0027 286.3504);
+  --blume-muted: oklch(0.2316 0.0038 286.0989);
+  --blume-muted-foreground: oklch(0.6217 0.0074 286.1818);
+  --blume-border: oklch(0.3171 0 0);
+  --blume-code-background: oklch(0.2006 0.002 286.2209);
+  --blume-accent: oklch(0.7286 0.1823 48.7057);
+  --blume-accent-foreground: oklch(0 0 0);
 }

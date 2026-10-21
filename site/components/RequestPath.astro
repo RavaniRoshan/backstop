@@ -1,0 +1,222 @@
+---
+/**
+ * The request path.
+ *
+ * The hero's visual: the agents at the top, their requests falling into
+ * Backstop, and the two endpoint shapes Backstop forwards to. It is the same
+ * story as the wide diagram, told top to bottom, because the hero's visual
+ * column is a portrait and a request path is a vertical thing.
+ *
+ * Every mark is the real one, compiled from the committed SVGs, so nothing is
+ * fetched and nothing is invented.
+ */
+import { logos } from "../src/data/logos";
+import "../styles/diagram.css";
+
+const agents = [
+  { slug: "claude-code" },
+  { slug: "cursor" },
+  { slug: "copilot" },
+  { slug: "codex" },
+  { slug: "antigravity" },
+  { slug: "cline" },
+];
+
+const endpoints = [
+  { slug: "openai", label: "OpenAI-compatible" },
+  { slug: "anthropic", label: "Anthropic-compatible" },
+];
+
+/* The geometry, in one place, so the wires and the tiles cannot drift. */
+const W = 560;
+const TILE = 34;
+const TOP = 26;
+const STEP = 80;
+const LEFT = 52;
+const HUB = { x: W / 2, y: 212, r: 50 };
+const BUNDLE = 140;
+const END_Y = 366;
+
+const agentRows = agents.map((agent, index) => ({
+  slug: agent.slug,
+  title: logos[agent.slug]?.title ?? agent.slug,
+  x: LEFT + index * STEP,
+  y: TOP,
+  cy: TOP + TILE / 2,
+}));
+
+const endNodes = endpoints.map((endpoint, index) => ({
+  ...endpoint,
+  x: index === 0 ? 146 : 414,
+  y: END_Y,
+  cy: END_Y,
+  title: logos[endpoint.slug]?.title ?? endpoint.slug,
+}));
+---
+
+<figure class="diagram diagram--path">
+  <svg
+    viewBox={`0 0 ${W} 430`}
+    role="img"
+    aria-labelledby="path-title path-desc"
+    xmlns="http://www.w3.org/2000/svg"
+  >
+    <title id="path-title">Agents, Backstop, and the endpoints</title>
+    <desc id="path-desc">
+      Coding agents at the top send their requests down into Backstop, which
+      enforces a budget, a circuit breaker and a concurrency limit, and then
+      forwards them to an OpenAI-compatible or an Anthropic-compatible
+      endpoint.
+    </desc>
+
+    <defs>
+      <linearGradient id="dial" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#FF6600" />
+        <stop offset="1" stop-color="#FFA133" />
+      </linearGradient>
+      <linearGradient id="needle" x1="0" y1="1" x2="0" y2="0">
+        <stop offset="0" stop-color="#FF7D26" />
+        <stop offset="1" stop-color="#FFE0CC" />
+      </linearGradient>
+    </defs>
+
+    <!-- the agents -->
+    {
+      agentRows.map((agent, index) => (
+        <g class="node agent" data-agent={agent.slug}>
+          <title>{agent.title}</title>
+          <rect
+            x={agent.x - 8}
+            y={agent.y - 8}
+            width={TILE + 16}
+            height={TILE + 16}
+            rx="10"
+            class="node-plate"
+          />
+          <svg
+            class:list={["mark", logos[agent.slug]?.monochrome && "mono"]}
+            viewBox={logos[agent.slug]?.viewBox ?? "0 0 24 24"}
+            x={agent.x}
+            y={agent.y}
+            width={TILE}
+            height={TILE}
+            role="img"
+            aria-label={agent.title}
+            set:html={logos[agent.slug]?.body ?? ""}
+          />
+        </g>
+      ))
+    }
+
+    <!-- each agent curving into the bundle -->
+    {
+      agentRows.map((agent, index) => (
+        <path
+          class="wire"
+          d={`M ${agent.x + TILE / 2} ${agent.y + TILE + 8} C ${agent.x + TILE / 2} 106, ${HUB.x} 100, ${HUB.x} ${BUNDLE}`}
+          style={`--delay: ${0.1 + index * 0.06}s`}
+        />
+      ))
+    }
+
+    <!-- the bundle into the hub -->
+    <path
+      id="bus-to-hub"
+      class="wire wire-live"
+      d={`M ${HUB.x} ${BUNDLE} L ${HUB.x} ${HUB.y - HUB.r - 8}`}
+      style="--delay: 0.6s"
+    />
+
+    <!-- the hub out to each endpoint, leaving from the sides so the label
+         stays clear -->
+    {
+      endNodes.map((node, index) => (
+        <path
+          id={`out-${index}`}
+          class="wire wire-live"
+          d={
+            index === 0
+              ? `M 222 226 C 200 292, ${node.x} 286, ${node.x} ${node.y - 26}`
+              : `M 338 226 C 360 292, ${node.x} 286, ${node.x} ${node.y - 26}`
+          }
+          style={`--delay: ${0.9 + index * 0.12}s`}
+        />
+      ))
+    }
+
+    <!-- the travelling pulses -->
+    <circle class="pulse" r="2.6">
+      <animateMotion dur="3.4s" repeatCount="indefinite" begin="1.4s">
+        <mpath href="#bus-to-hub" />
+      </animateMotion>
+    </circle>
+    {
+      endNodes.map((node, index) => (
+        <circle class="pulse" r="2.6">
+          <animateMotion
+            dur="3.4s"
+            repeatCount="indefinite"
+            begin={`${1.7 + index * 0.4}s`}
+          >
+            <mpath href={`#out-${index}`} />
+          </animateMotion>
+        </circle>
+      ))
+    }
+
+    <!-- Backstop -->
+    <g class="node hub">
+      <circle cx={HUB.x} cy={HUB.y} r={HUB.r + 10} class="node-plate hub-plate" />
+      <circle cx={HUB.x} cy={HUB.y} r="38" fill="url(#dial)" />
+      <path
+        d={`M ${HUB.x - 24} ${HUB.y + 22} A 32 32 0 1 1 ${HUB.x + 24} ${HUB.y + 22}`}
+        fill="none"
+        stroke="#FFF7ED"
+        stroke-width="6"
+        stroke-linecap="round"
+      />
+      <line
+        x1={HUB.x}
+        y1={HUB.y}
+        x2={HUB.x}
+        y2={HUB.y - 30}
+        stroke="url(#needle)"
+        stroke-width="6"
+        stroke-linecap="round"
+      />
+      <text x={HUB.x} y={HUB.y + 76} class="label hub-label">Backstop</text>
+      <text x={HUB.x} y={HUB.y + 92} class="sub">budget · breaker · concurrency</text>
+    </g>
+
+    <!-- the endpoints -->
+    {
+      endNodes.map((node) => (
+        <g class="node endpoint">
+          <title>{node.title}</title>
+          <rect
+            x={node.x - 24}
+            y={node.y - 24}
+            width="48"
+            height="48"
+            rx="12"
+            class="node-plate"
+          />
+          <svg
+            class:list={["mark", logos[node.slug]?.monochrome && "mono"]}
+            viewBox={logos[node.slug]?.viewBox ?? "0 0 24 24"}
+            x={node.x - 15}
+            y={node.y - 15}
+            width="30"
+            height="30"
+            role="img"
+            aria-label={node.title}
+            set:html={logos[node.slug]?.body ?? ""}
+          />
+          <text x={node.x} y={node.y + 46} class="label endpoint-label">
+            {node.label}
+          </text>
+        </g>
+      ))
+    }
+  </svg>
+</figure>
