@@ -1,18 +1,15 @@
-name: Deploy the site
+name: Deploy the site to Cloudflare Pages
 
 # The marketing page and the documentation site, published to Cloudflare Pages
 # by GitHub Actions. The same shape as the other sites in this account: build
 # the static output, then hand it to wrangler.
+#
+# The site's home is GitHub Pages now — see `pages.yml` — so this one does not
+# fire on a push. It is kept because the Cloudflare deployment is still there
+# and still serves; run it by hand when it needs to catch up, or when a change
+# to the site should go out to both.
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "site/**"
-      # The documentation on the site is the repository's own docs/, so a
-      # change to a document is a change to the site.
-      - "docs/**"
-      - ".github/workflows/deploy.yml"
   workflow_dispatch:
 
 concurrency:

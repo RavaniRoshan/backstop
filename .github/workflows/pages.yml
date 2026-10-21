@@ -1,0 +1,77 @@
+name: Deploy the site to GitHub Pages
+
+# The marketing page and the documentation site, published to GitHub Pages by
+# GitHub Actions. The repository's Pages setting is already "GitHub Actions"
+# as the build source, so this workflow is what actually builds and publishes
+# it.
+#
+# The site is a project site, so it is served from a subdirectory
+# (`/backstop/`). The base path is not written down here: `configure-pages`
+# reports it, and the build takes it from there, so the site cannot drift from
+# where GitHub actually serves it.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      # The documentation on the site is the repository's own docs/, so a
+      # change to a document is a change to the site.
+      - "docs/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      # Before the build, because the build needs to know where the site will
+      # live: every link, every asset URL and the sitemap are written against
+      # this base path.
+      - id: pages
+        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
+      - name: Install
+        run: npm ci
+        working-directory: site
+      - name: Build
+        run: npm run build
+        working-directory: site
+        env:
+          SITE_BASE: ${{ steps.pages.outputs.base_path }}
+          SITE_URL: https://ravaniroshan.github.io${{ steps.pages.outputs.base_path }}
+      - name: Check the internal links
+        run: npm run check:links
+        working-directory: site
+        env:
+          SITE_BASE: ${{ steps.pages.outputs.base_path }}
+      - name: Upload the site
+        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
+        with:
+          path: site/dist
+
+  deploy:
+    name: deploy
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
