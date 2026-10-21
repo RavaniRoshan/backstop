@@ -17,11 +17,22 @@
 @media (min-width: 768px) {
   .bento {
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    grid-auto-rows: 19rem;
+    grid-auto-rows: 16rem;
   }
 
-  /* Two cards run wide, so the grid fills every row instead of leaving a
-     hole in the last one. */
+  /* A real bento: one tile runs two columns by two rows, one runs two columns
+     wide, and the other six are squares. That is twelve cells of three by
+     four, filled exactly — no hole in the last row, which is what a plain
+     grid of eight leaves behind.
+
+     No tile runs tall: every drawing on this page is wider than it is high,
+     so a tall tile would be a drawing in a letterbox. The wide tile is where
+     a wide drawing belongs. */
+  .bento-card--flag {
+    grid-column: span 2;
+    grid-row: span 2;
+  }
+
   .bento-card--wide {
     grid-column: span 2;
   }
@@ -53,15 +64,18 @@
 .bento-figure {
   position: relative;
   flex: 1;
-  min-height: 0;
-  display: grid;
-  place-items: center;
+  min-height: 4.5rem;
 }
 
+/* The figure takes whatever room the tile has left over, so it is large in
+   the flagship tile and small in a square one — the same drawing, sized to
+   its tile. The SVG is pinned to the box and the browser fits the drawing
+   inside it, so it is never clipped. */
 .fig {
+  position: absolute;
+  inset: 0;
   width: 100%;
-  max-width: 15rem;
-  height: auto;
+  height: 100%;
   color: var(--blume-muted-foreground);
   overflow: visible;
 }
@@ -216,6 +230,17 @@ html[data-motion="on"] .bento-skeleton.is-resolved {
   letter-spacing: -0.02em;
   font-size: 1.0625rem;
   line-height: 1.3;
+}
+
+/* The tiles with room for it get a bigger name. */
+.bento-card--flag .bento-copy h3 {
+  font-size: 1.35rem;
+  letter-spacing: -0.025em;
+}
+
+.bento-card--wide .bento-copy h3 {
+  font-size: 1.2rem;
+  letter-spacing: -0.02em;
 }
 
 .bento-body {

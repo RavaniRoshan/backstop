@@ -85,7 +85,9 @@ const FIGURES: Record<string, string> = {
 <div class="bento" data-reveal>
   {
     features.map((feature, index) => (
-      <article class={`bento-card bento-card--${index % 4}`}>
+      <article
+        class={`bento-card bento-card--${index % 4}${index === 0 ? " bento-card--flag" : ""}${index === 3 ? " bento-card--wide" : ""}`}
+      >
         <div class="bento-figure">
           <svg
             class="fig"

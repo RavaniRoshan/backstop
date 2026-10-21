@@ -88,10 +88,16 @@ All notable changes to Backstop should be documented in this file.
   that scrolls and fades out at both ends, in opposite directions. The lane
   that names three cloud gateways gets cards again.
 - **The feature list is a bento.** [Aceternity](https://ui.aceternity.com)'s
-  grid — three columns of eighteenrem rows, each card a bordered panel with
-  the content at the bottom and the whole block sliding to the right on
-  hover — with the "with skeletons" treatment: each card's upper half is a
-  shimmering placeholder, the way a card looks before its content arrives.
+  grid — a bordered panel with the content at the bottom and the whole block
+  sliding to the right on hover — with the "with skeletons" treatment: each
+  card's upper half is a shimmering placeholder, the way a card looks before
+  its content arrives, and it resolves when the card does.
+  It is a real bento and not a grid of eight: one tile runs two columns by
+  two rows, one runs two columns wide, and the other six are squares. That is
+  twelve cells of three by four, filled exactly — a plain grid of eight leaves
+  a hole in the last row, which is what this was. No tile runs tall: every
+  drawing on the page is wider than it is high, so a tall tile would be a
+  drawing in a letterbox.
 - **There is a footer.** Four columns of links, a wordmark the size of the
   page behind it, and the legal line. There was none before.
 - **The dithered hero field is gone.** It was a nice effect and the wrong
