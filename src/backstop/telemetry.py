@@ -500,6 +500,11 @@ def detection_view(limit: int = MAX_DETECTION_ROWS) -> dict[str, Any]:
                     "key": signal.key,
                     "observed": signal.observed,
                     "threshold": signal.threshold,
+                    # The detector's own sentence: it states the observed
+                    # value, the reference it was compared against, and how
+                    # many events the reading covers, which no pair of
+                    # numbers can carry.
+                    "detail": signal.detail,
                     "occurred_at": signal.occurred_at,
                 }
             )
@@ -579,11 +584,15 @@ _AUDIT_FIELDS = (
 )
 
 
-def audit_events(path: str | None, limit: int = MAX_EVENT_ROWS) -> list[dict[str, Any]]:
-    if not path:
-        return []
+def events_from_lines(lines: list[str], limit: int = MAX_EVENT_ROWS) -> list[dict[str, Any]]:
+    """Parse audit lines into the event rows the dashboard renders.
+
+    Newest first, and bounded. Takes the lines rather than a path so a
+    producer that already holds them does not have to write them to disk to be
+    shown — the demo workload is one such producer.
+    """
     events: list[dict[str, Any]] = []
-    for line in _tail_lines(path, limit)[::-1]:
+    for line in reversed(lines):
         try:
             record = json.loads(line)
         except (ValueError, TypeError):
@@ -596,7 +605,15 @@ def audit_events(path: str | None, limit: int = MAX_EVENT_ROWS) -> list[dict[str
             # dashboard can render, so it is dropped rather than shown blank.
             continue
         events.append(event)
+        if len(events) >= limit:
+            break
     return events
+
+
+def audit_events(path: str | None, limit: int = MAX_EVENT_ROWS) -> list[dict[str, Any]]:
+    if not path:
+        return []
+    return events_from_lines(_tail_lines(path, limit), limit)
 
 
 @dataclass

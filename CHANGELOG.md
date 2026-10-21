@@ -49,6 +49,28 @@ All notable changes to Backstop should be documented in this file.
   charts the requests the open breaker turned away rather than rendering an
   empty sparkline.
 
+### Dashboard, second pass
+
+- **Every signal the snapshot already carried is now visible.** Cache hits
+  avoided, transport exceptions prevented, tenant-scoped budget blocks, and
+  provider calls per request (which is where retry waste shows up) are on the
+  tiles instead of being in the payload and nowhere else.
+- **A panel for the runaway-spend detectors.** The four detectors reported
+  into the snapshot and had no surface at all. There is now a panel that
+  states whether detection is on, whether it is in shadow mode, and what each
+  detector fired — in the detector's own unit: dollars per minute for
+  velocity, tokens per request for drift, retries per request for retry
+  amplification, a multiplier for context growth.
+- **The demo now produces real enforcement events.** The audit log accepts a
+  callable sink, so the demo workload holds its records in memory: the
+  enforcement-events table, the chart markers and the outcome mix are populated
+  by real decisions, and the demo still writes nothing to disk.
+- **The demo's breaker now actually trips.** Its 60-second circuit window
+  averaged the error storm together with the calm stages around it, so the
+  failure rate never reached the threshold and the breaker never opened. The
+  demo's window is now as long as its error stage.
+- **The audit tail states what it cannot prove**, next to the rows it shows.
+
 ## 0.8.0 — "One Policy, Two Drivers"
 
 The release theme is **every claim the product makes becomes true**. The same

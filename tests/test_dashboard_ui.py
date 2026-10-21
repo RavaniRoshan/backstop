@@ -179,3 +179,37 @@ def test_no_data_is_distinct_from_zero():
 
 def test_a_sparkline_without_points_draws_a_baseline():
     assert "no data" in js()
+
+
+def test_the_runaway_spend_signals_have_a_surface():
+    assert 'id="panel-signals"' in page()
+    assert 'id="tbl-signals"' in page()
+    assert "function renderSignals(" in js()
+
+
+def test_the_signals_state_is_stated_when_detection_is_off():
+    assert "detection off" in js()
+    assert "shadow mode" in js()
+
+
+def test_the_signals_carry_their_own_units():
+    for kind in ("velocity", "drift", "retry_amplification", "context_growth"):
+        assert kind in js()
+    assert "tok/req" in js()
+    assert "retries/req" in js()
+
+
+def test_the_prevention_tile_says_what_was_blocked():
+    assert "budget" in js()
+    assert "exception" in js()
+    assert "rate-limit" in js()
+
+
+def test_the_requests_tile_reports_cache_and_retry_waste():
+    assert "cache avoided" in js()
+    assert "calls/req" in js()
+
+
+def test_the_audit_tail_states_what_it_cannot_prove():
+    assert 'id="audit-note"' in page()
+    assert "audit-note" in js()

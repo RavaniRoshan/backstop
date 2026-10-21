@@ -177,6 +177,10 @@ def main() -> int:
     parser.add_argument("--themes", default=",".join(THEMES))
     parser.add_argument("--settle", type=float, default=1.2,
                         help="seconds to wait after the page loads")
+    parser.add_argument("--wait-events", type=float, default=0.0,
+                        help="seconds to wait for enforcement events (the demo "
+                             "produces them a few seconds in); the wait is a "
+                             "no-op once the demo has them")
     args = parser.parse_args()
 
     out = Path(args.out)
@@ -241,6 +245,14 @@ def main() -> int:
                     except Exception:
                         pass
                     page.evaluate("t => document.documentElement.dataset.theme = t", theme)
+                    if args.wait_events:
+                        try:
+                            page.wait_for_function(
+                                "() => document.querySelectorAll('#tbl-events tbody tr').length > 0",
+                                timeout=int(args.wait_events * 1000),
+                            )
+                        except Exception:
+                            pass
                     page.wait_for_timeout(int(args.settle * 1000))
                     page.screenshot(path=str(out / ("%s-%s.png" % (name, theme))),
                                     full_page=True)

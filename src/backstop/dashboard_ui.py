@@ -170,6 +170,7 @@ PAGE_HTML = """<!doctype html>
           <tbody></tbody>
         </table>
       </div>
+      <p class="audit-note" id="audit-note"></p>
     </article>
 
     <article class="panel">
@@ -178,6 +179,20 @@ PAGE_HTML = """<!doctype html>
         <table id="tbl-tenants">
           <thead><tr>
             <th>Tenant</th><th class="num">Used</th><th class="num">Remaining</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </article>
+
+    <article class="panel span-3" id="panel-signals">
+      <header><h2>Runaway-spend signals</h2><span class="unit">detector</span></header>
+      <div class="signals-summary" id="signals-summary"></div>
+      <div class="table-wrap">
+        <table id="tbl-signals">
+          <thead><tr>
+            <th class="num">Time</th><th>Signal</th><th>Severity</th><th>Key</th>
+            <th class="num">Observed</th><th class="num">Threshold</th><th>Detail</th>
           </tr></thead>
           <tbody></tbody>
         </table>
@@ -456,10 +471,18 @@ main { padding: 12px 16px 24px; }
   align-items: start;
 }
 .span-2 { grid-column: span 2; }
+.span-3 { grid-column: span 3; }
 @media (max-width: 900px) {
   .panels { grid-template-columns: minmax(0, 1fr); }
   .span-2 { grid-column: span 1; }
+  .span-3 { grid-column: span 1; }
 }
+
+/* The signals summary: state first, then the counts it applies to. */
+.signals-summary {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px;
+}
+.signals-summary .muted { font-size: 10.5px; }
 
 /* Tiles ------------------------------------------------------------------- */
 .tile {
@@ -577,6 +600,8 @@ tbody tr:hover { background: var(--panel-2); }
 td.num, th.num { text-align: end; }
 td.mut { color: var(--muted); }
 .empty { color: var(--dim); padding: 14px 2px; font-size: 11.5px; }
+/* What the audit tail can and cannot prove, stated where the tail is shown. */
+.audit-note { color: var(--dim); font-size: 10.5px; }
 .warn-text { color: var(--warn); }
 .bad-text { color: var(--bad); }
 .ok-text { color: var(--ok); }
@@ -1466,7 +1491,16 @@ APP_JS = """
       if (ts < first || ts > last) return;
       marks.push(ts);
     });
-    return marks;
+    // A burst of decisions is one event, not a picket fence: markers within a
+    // second of each other are drawn as a single line.
+    marks.sort(function (a, b) { return a - b; });
+    var clustered = [];
+    var previous = null;
+    marks.forEach(function (ts) {
+      if (previous === null || ts - previous > 1.0) clustered.push(ts);
+      previous = ts;
+    });
+    return clustered;
   }
 
   /* The compact needs-attention strip: everything that is actionable, as
@@ -1504,6 +1538,93 @@ APP_JS = """
       host.appendChild(chip);
     });
     host.hidden = chips.length === 0;
+  }
+
+  /* --- runaway-spend signals ---------------------------------------------- */
+
+  // One formatter per signal kind: a velocity is money per minute, a drift is
+  // tokens per request, a retry amplification is a mean count, and a context
+  // growth is a multiplier. They are different quantities and they do not
+  // share a shape.
+  var SIGNAL_KINDS = {
+    velocity: { label: "Velocity", format: function (v) { return usd(v) + "/min"; } },
+    drift: { label: "Drift", format: function (v) { return count(v) + " tok/req"; } },
+    retry_amplification: {
+      label: "Retry amplification",
+      format: function (v) { return v.toFixed(2) + " retries/req"; },
+    },
+    context_growth: {
+      label: "Context growth",
+      format: function (v) { return "x" + v.toFixed(2); },
+    },
+  };
+
+  function signalFormat(kind) {
+    var entry = SIGNAL_KINDS[kind];
+    return entry ? entry.format : axis;
+  }
+
+  function severityTone(severity) {
+    var value = String(severity || "").toLowerCase();
+    if (value === "critical") return "bad";
+    if (value === "warning") return "warn";
+    return "ok";
+  }
+
+  function isoTime(stamp) {
+    if (!stamp) return "--";
+    var date = new Date(stamp);
+    if (isNaN(date.getTime())) return String(stamp);
+    return date.toLocaleTimeString(undefined, { hour12: false });
+  }
+
+  function signalRow(signal) {
+    var tr = node("tr");
+    tr.tabIndex = -1;
+    tr.appendChild(cell(isoTime(signal.occurred_at), "num mut"));
+    var kind = SIGNAL_KINDS[signal.kind];
+    tr.appendChild(cell(kind ? kind.label : String(signal.kind || "").replace(/_/g, " ")));
+    tr.appendChild(chipCell(signal.severity, severityTone(signal.severity)));
+    tr.appendChild(cell(signal.key, "mono"));
+    var format = signalFormat(signal.kind);
+    tr.appendChild(cell(format(signal.observed), "num"));
+    tr.appendChild(cell(format(signal.threshold), "num"));
+    tr.appendChild(cell(signal.detail || null, "mut"));
+    return tr;
+  }
+
+  function renderSignals(snap) {
+    var detection = snap.detection || {};
+    var summary = document.getElementById("signals-summary");
+    var enabled = detection.enabled === true;
+    var byKind = detection.by_kind || {};
+    if (summary) {
+      clear(summary);
+      if (!enabled) {
+        summary.appendChild(node("span", "chip", "detection off"));
+        summary.appendChild(node("span", "muted",
+          "Enable it with BackstopConfig(detection_enabled=True) to report "
+          + "velocity, drift, retry amplification and context growth."));
+      } else {
+        summary.appendChild(node("span", "chip",
+          detection.shadow ? "shadow mode" : "enforcing"));
+        Object.keys(SIGNAL_KINDS).forEach(function (key) {
+          var total = byKind[key] || 0;
+          var chip = node("span", "chip", SIGNAL_KINDS[key].label + " " + total);
+          if (total > 0) chip.dataset.tone = "warn";
+          summary.appendChild(chip);
+        });
+        summary.appendChild(node("span", "muted",
+          count(detection.keys) + " keys tracked · " + count(detection.samples)
+          + " samples observed"));
+        if (detection.shadow) {
+          summary.appendChild(node("span", "muted",
+            "Shadow mode reports and never blocks a request."));
+        }
+      }
+    }
+    fillTable("#tbl-signals", detection.recent || [], signalRow,
+      enabled ? "No signals yet." : "Detection is off, so there is nothing to report.");
   }
 
   /* --- drill-down -------------------------------------------------------- */
@@ -1649,15 +1770,22 @@ APP_JS = """
     });
 
     var prevention = kpi.prevention;
+    // A tenant block is a budget block, so the two are one chip: "3 budget
+    // (2 tenant)" says that two of the three were a tenant bucket.
+    var budgetChip = count(prevention.budget_blocked) + " budget";
+    if (prevention.tenant_blocked > 0) {
+      budgetChip += " (" + count(prevention.tenant_blocked) + " tenant)";
+    }
     renderTile("#tile-prevented", {
       value: count(prevention.total),
       unit: "calls",
       health: prevention.total > 0 ? "ok"
         : (series.prevented_rps || []).length ? "idle" : "none",
       meta: [
-        { text: count(prevention.budget_blocked) + " budget", tone: prevention.budget_blocked > 0 ? "warn" : null },
+        { text: budgetChip, tone: prevention.budget_blocked > 0 ? "warn" : null },
         { text: count(prevention.circuit_open) + " circuit", tone: prevention.circuit_open > 0 ? "bad" : null },
         count(prevention.rate_limited) + " rate-limit",
+        count(prevention.exceptions) + " exception",
         deltaChip(series.prevented_rps, windowed.times, half),
         prevention.total === 0 ? "nothing blocked yet" : null,
       ],
@@ -1666,6 +1794,14 @@ APP_JS = """
     });
 
     var traffic = kpi.traffic;
+    var cache = kpi.cache || {};
+    // Provider calls per request: above one, the retries cost more calls
+    // than the requests did; below one, the cache answered some of them.
+    var efficiency = traffic.provider_efficiency;
+    var cacheChip = cache.hits > 0
+      ? count(cache.hits) + " cache avoided"
+        + (isNil(cache.hit_rate) ? "" : " (" + pct(cache.hit_rate) + ")")
+      : null;
     renderTile("#tile-requests", {
       value: rate(traffic.rps),
       unit: "req/s",
@@ -1674,6 +1810,10 @@ APP_JS = """
       meta: [
         count(traffic.requests) + " total",
         count(traffic.provider_calls) + " provider calls",
+        cacheChip,
+        !isNil(efficiency) && efficiency > 1.001
+          ? { text: efficiency.toFixed(2) + " calls/req", tone: "warn" }
+          : null,
         deltaChip(series.rps, windowed.times, half),
         traffic.retries > 0
           ? { text: count(traffic.retries) + " retries", tone: "warn" }
@@ -1775,6 +1915,13 @@ APP_JS = """
     fillTable("#tbl-tenants", filtered.tenants, tenantRow,
       "No request-scoped tenant budgets registered" + filterNote + ".");
     renderOutcomes(snap.outcomes);
+    renderSignals(snap);
+
+    var auditNote = document.getElementById("audit-note");
+    if (auditNote) {
+      var audit = snap.audit || {};
+      auditNote.textContent = audit.note || "";
+    }
 
     renderAttention(snap);
 

@@ -14,6 +14,7 @@ import atexit
 import copy
 import json
 import multiprocessing
+import os
 import random
 import threading
 import time
@@ -95,6 +96,32 @@ class _Lane:
 
 
 _MAX_SNAPSHOT_BYTES = 1024 * 1024
+_MAX_AUDIT_LINES = 200
+
+
+class _MemoryAudit:
+    """Collects the demo's audit records in memory.
+
+    The audit log accepts a callable sink, so the demo can hold the records
+    the guardrails actually produced without writing them to disk: the
+    dashboard then shows the same rows a real ``--audit`` log would produce,
+    and the demo still writes nothing to the filesystem.
+    """
+
+    def __init__(self, limit: int = _MAX_AUDIT_LINES) -> None:
+        self._lines: list[str] = []
+        self._lock = threading.Lock()
+        self._limit = limit
+
+    def __call__(self, line: str) -> None:
+        with self._lock:
+            self._lines.append(line)
+            if len(self._lines) > self._limit:
+                del self._lines[: len(self._lines) - self._limit]
+
+    def lines(self) -> list[str]:
+        with self._lock:
+            return list(self._lines)
 
 
 def build_empty_demo_snapshot(runners: int, interval: float = DEFAULT_SAMPLE_INTERVAL) -> dict[str, Any]:
@@ -139,6 +166,19 @@ def build_empty_demo_snapshot(runners: int, interval: float = DEFAULT_SAMPLE_INT
         "tenants": [],
         "events": [],
         "outcomes": {},
+        "detection": {
+            "enabled": False,
+            "shadow": True,
+            "sessions": [],
+            "session_count": 0,
+            "by_kind": {},
+            "by_severity": {},
+            "keys": 0,
+            "samples": 0,
+            "evictions": 0,
+            "errors": 0,
+            "recent": [],
+        },
         "audit": {"path": None, "verified": None, "note": ""},
     }
 
@@ -258,7 +298,13 @@ class DemoWorkload:
 
 
 def _demo_process(runners, seed, interval, cost_model, buffer, size, lock, stop, ready):
-    from .telemetry import Sampler, build_snapshot, install_sink, uninstall_sink
+    from .telemetry import (
+        Sampler,
+        build_snapshot,
+        events_from_lines,
+        install_sink,
+        uninstall_sink,
+    )
 
     workload = _DemoWorker(runners, seed)
     sampler = Sampler(interval)
@@ -270,8 +316,28 @@ def _demo_process(runners, seed, interval, cost_model, buffer, size, lock, stop,
             if parent is not None and not parent.is_alive():
                 break
             sampler.sample_once()
+            snapshot = build_snapshot(sampler, mode="demo", cost_model=cost_model)
+            # The audit records live in the workload's memory, so they are
+            # attached here rather than read back from a file.
+            snapshot["events"] = events_from_lines(workload.audit.lines())
+            # The demo configures an in-memory audit and always has live
+            # sessions, so the live-mode warning that says no audit log is
+            # configured does not apply to it.
+            snapshot["warnings"] = [
+                warning for warning in snapshot.get("warnings", [])
+                if "audit log configured" not in warning
+            ]
+            snapshot["audit"] = {
+                "path": None,
+                "verified": None,
+                "note": (
+                    "The demo workload holds its audit records in memory, so "
+                    "nothing is written to disk. The records are real "
+                    "enforcement decisions; the chain is not re-checked here."
+                ),
+            }
             payload = json.dumps({
-                "snapshot": build_snapshot(sampler, mode="demo", cost_model=cost_model),
+                "snapshot": snapshot,
                 "requests_driven": workload.requests_driven,
                 "stage": workload.stage,
             }, separators=(",", ":")).encode("utf-8")
@@ -297,6 +363,11 @@ class _DemoWorker:
         self.runners = max(1, min(runners, 8))
         self.seed = seed
         self.stage = "starting"
+        # The audit records are real enforcement decisions, held in memory so
+        # the demo writes nothing to disk. The key is per-run and never leaves
+        # the child process.
+        self.audit = _MemoryAudit()
+        self.audit_key = os.urandom(16).hex()
         self._rng = random.Random(seed)
         self._lanes: list[_Lane] = []
         # Strong references: a session must stay alive to stay visible.
@@ -322,8 +393,21 @@ class _DemoWorker:
                     retry_max_attempts=1,
                     circuit_min_requests=4,
                     circuit_failure_threshold=0.5,
+                    # A window as long as the error stage. The default 60s
+                    # window averages the storm together with the calm stages
+                    # around it, so the breaker never saw more than a third of
+                    # its requests fail and never opened.
+                    circuit_window_seconds=6.0,
                     circuit_cooldown_seconds=3.0,
                     aimd_adjustment_interval=0.5,
+                    # The audit is what makes the enforcement-events panel
+                    # show the demo's budget blocks and circuit trips, and the
+                    # detector is what makes the signals panel show the four
+                    # runaway-spend detectors doing their job.
+                    audit_enabled=True,
+                    audit_sink=self.audit,
+                    audit_hmac_key=self.audit_key,
+                    detection_enabled=True,
                 ),
             )
             provider = _MockProvider(self._rng)

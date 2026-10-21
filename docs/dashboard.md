@@ -57,6 +57,7 @@ first sample), and `sample_interval_s` gives the cadence — use
 | Isolation | live sessions, per-session rows (id, budget, spend, concurrency) |
 | Tenants | per-tenant ledger usage and remaining |
 | Events | tail of the audit log (allowlisted fields only) |
+| Signals | the runaway-spend detectors: what fired, how far past its threshold, and in which unit |
 
 The methodology footer states exactly what each number is derived from, so a
 screenshot cannot be mistaken for more than it is.
@@ -88,7 +89,11 @@ screenshot cannot be mistaken for more than it is.
 * **Deltas are against the previous window.** Each tile that has a series
   shows the change over the preceding window of the same length.
 * **Enforcement events are marked on the traffic chart**, so a guardrail
-  action lines up with the traffic it acted on.
+  action lines up with the traffic it acted on. A burst of decisions is one
+  marker, not a picket fence.
+* **The signals panel states the detector's mode.** The runaway-spend
+  detectors report in shadow mode by default — they never block — and the
+  panel says so, along with whether detection is switched on at all.
 
 Every derived figure states its own derivation: the chart window and the unit
 of each axis are printed in the header or the tooltip, so a screenshot can be
@@ -122,7 +127,9 @@ Deliberate constraints:
 * **Demo mode is process-isolated.** `--demo` runs the mock workload (its
   sessions, counters, and telemetry sink) in a spawned child process that
   publishes bounded snapshots over shared memory; the demo dashboard reads them
-  and computes `sample_age_s` locally. Construction registers nothing in the
+  and computes `sample_age_s` locally. The demo's audit records are held **in
+  the child's memory** — the audit log accepts a callable sink — so the demo
+  shows real enforcement decisions without writing anything to disk. Construction registers nothing in the
   parent: demo sessions never appear in the parent's session registry, demo
   capture never reaches the parent's sink, and demo mode cannot install,
   uninstall, or otherwise disturb a real sink the application is already using.
