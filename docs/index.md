@@ -30,6 +30,9 @@ queue is better than a rejection, and how much a guardrail is allowed to cost.
   spend pattern before it becomes an invoice.
 - **[Concurrency and scale limits](concurrency.md)** — how many requests can be
   in flight, and what happens when there are more than that.
+- **[Pointing it at any server](integrations.md)** — how to run Backstop in
+  front of an OpenAI-compatible server, and what changes when the model is not
+  one the price catalogue carries.
 
 ## Reference
 

@@ -68,6 +68,38 @@ All notable changes to Backstop should be documented in this file.
 - **A link checker** (`site/scripts/check-links.mjs`) resolves every internal
   link in the built output, and CI builds the site and runs it.
 
+### The website, second pass
+
+- **The real brand marks.** The marketing page now draws the actual logos of
+  the tools it talks about — the agents on the left of the wiring diagram, the
+  servers in the integrations section, the endpoints on the right. They are
+  fetched once, committed as SVG under `site/assets/logos/`, and compiled by
+  `site/scripts/prepare-logos.mjs` into a typed module. Nothing is fetched at
+  runtime, and nothing is invented.
+- **A mark that survives a dark page.** Most brand SVGs are drawn inside a
+  square box with the artwork filling only part of it — the AWS mark uses 14 of
+  its 24 units, NVIDIA 16. Rendered at one height, those came out visibly
+  smaller than the ones that filled their box, so every mark's viewBox is now
+  cropped to its own ink. A mark that was a single flat colour with the colour
+  baked in (the Codex mark is `#111`, which vanished on a dark page) is
+  normalised to `currentColor` and tinted by the page.
+- **The wiring diagram.** The agents on the left, Backstop in the middle, the
+  endpoint shapes on the right: one story in three columns, with the wires
+  drawing themselves in and the requests travelling along them.
+- **An integrations section, and the number behind it.** Backstop does not
+  know what a provider is, so "how many servers does this work with?" has one
+  answer: every server that speaks the OpenAI-compatible protocol, and the two
+  that do not. Twenty-two of them are named, with their real marks, in four
+  lanes — and the one line that differs between them: the price list.
+- **A documentation page for it** (`docs/integrations.md`), with the commands:
+  pointing an SDK at a local server, running the gateway in front of one, and
+  filing a price for a model the bundled catalogue does not carry.
+- **Motion across the page**, with three rules: nothing moves if the reader
+  asked for it not to; nothing is hidden unless JavaScript is going to show it
+  again, so the page is complete without it; and everything is revealed once.
+  The hero enters on load, the sections arrive as the reader reaches them, the
+  strip of marks fades in one after another, and the proof numbers count up.
+
 ### Dashboard, second pass
 
 - **Every signal the snapshot already carried is now visible.** Cache hits

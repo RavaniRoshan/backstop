@@ -48,10 +48,34 @@ site follows it — the framework's own, the marketing page's, and the ones
 | `pages/` | The marketing pages, as Astro routes |
 | `components/` | The marketing components |
 | `styles/marketing.css` | The marketing pages' own vocabulary |
+| `styles/diagram.css` | The wiring diagram |
+| `styles/integrations.css` | The integrations section |
+| `src/scripts/motion.ts` | The page's only moving parts |
+| `assets/logos/` | The brand marks, committed as SVG |
 | `scripts/prepare-content.mjs` | Derives `.content/` from the repository's `docs/` |
+| `scripts/prepare-logos.mjs` | Compiles `assets/logos/` into a typed module |
 | `scripts/check-links.mjs` | Checks every internal link in the built site |
 
 The documentation pages themselves are rendered by [Blume](https://useblume.dev),
 which is a zero-config documentation framework on Astro and Vite. The marketing
 pages are plain Astro, mounted beside the docs through Blume's custom-page
 support, and share its header, search and theme toggle.
+
+## The brand marks
+
+`assets/logos/*.svg` is the site's mark library, committed to the repository
+so the page never fetches anything at runtime. `scripts/prepare-logos.mjs`
+compiles them into `src/data/logos.ts` (which is generated, and not committed)
+and does two things that the raw SVGs cannot do for themselves:
+
+- **It crops every viewBox to the artwork's own ink.** Most brand SVGs are
+  drawn inside a square box with the artwork filling only part of it, so
+  rendered at one height they come out at three different sizes. Cropping makes
+  one rendered height one optical height for every mark.
+- **It normalises a single flat colour to `currentColor`.** A mark exported
+  with its colour baked in — the Codex mark is `#111`, which vanishes on a dark
+  page — becomes one the page can tint. A mark with more than one colour, a
+  gradient or a filter is left exactly as it is.
+
+Both the crops and the monochrome decision are made at build time from the
+committed files, so they cannot drift.
