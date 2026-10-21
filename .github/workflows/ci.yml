@@ -236,6 +236,12 @@ jobs:
       contents: write
       # Keyless signing and provenance both use the OIDC token.
       id-token: write
+      # The attestation is persisted through the attestations API, so the
+      # token needs this scope as well. An explicit `permissions` block sets
+      # every scope it does not name to none, so without it the attest step
+      # failed with "Resource not accessible by integration" — which is how
+      # the release gate failed the first time it was ever reached.
+      attestations: write
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
