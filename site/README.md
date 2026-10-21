@@ -126,8 +126,11 @@ for a real page:
 - **It cannot trap a reader.** A `<noscript>` rule removes it, a failsafe
   lifts it if the driver never runs, and a reader who asked for no motion
   never sees it.
-- **It is short.** Under two seconds, and the counter is the component's own
-  chunky curve rather than a bar that slides.
+- **It is short.** The counter climbs to 50%, waits, reaches 78%, waits,
+  reaches 82%, waits, and only then finishes — the stops are where an honest
+  loader stalls, because the page is mostly there and the last of it is not.
+  A counter that slides evenly from 0 to 100 says "we are animating"; one
+  that hangs at 82% says "there is still work happening".
 - **It is the page's theme.** The tiles are the page's background and
   foreground, so there is no flash of a colour the reader did not choose.
 

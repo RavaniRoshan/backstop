@@ -41,30 +41,51 @@ function rand(seed: number): () => number {
 }
 
 /**
- * The progress curve: seven chunks that fill in at their own times, so the
- * number jumps rather than slides. A bar that slides says "waiting"; a
- * number that jumps says "working".
+ * The progress curve, with the stops a real loader has.
+ *
+ * A counter that slides evenly from 0 to 100 says "we are animating". A
+ * counter that reaches 50%, waits, reaches 78%, waits, reaches 82%, waits,
+ * and only then finishes says "there is still work happening". Those three
+ * stops are where an honest loader stalls: the page is mostly there, and the
+ * last of it is not.
+ *
+ * The holds are a little longer at the end than in the middle, because the
+ * end is where the reader is looking hardest.
  */
-function loadCurve(seed: number, loadS: number): (t: number) => number {
-  const r = rand(seed);
-  const k = Math.min(1, loadS / 4.4);
-  const chunks: { size: number; start: number; len: number }[] = [];
-  let total = 0;
-  for (let i = 0; i < 7; i++) {
-    const size = 0.4 + r() * 1.2;
-    chunks.push({ size, start: r() * 0.78 * loadS, len: (0.25 + r() * 0.9) * k });
-    total += size;
-  }
-  chunks.push({ size: total * 0.12, start: loadS - 0.45 * k, len: 0.45 * k });
-  total *= 1.12;
-  return (t) => {
-    if (t >= loadS) return 1;
-    let p = 0;
-    for (const c of chunks) {
-      const x = clamp((t - c.start) / Math.max(1e-3, c.len), 0, 1);
-      p += c.size * x * x * (3 - 2 * x);
+const STOPS: { to: number; move: number; hold: number }[] = [
+  { to: 0.5, move: 0.26, hold: 0.24 },
+  { to: 0.78, move: 0.16, hold: 0.3 },
+  { to: 0.82, move: 0.1, hold: 0.3 },
+  { to: 1, move: 0.17, hold: 0 },
+];
+
+/** The curve, in seconds. */
+function loaderCurve(fillS: number): (t: number) => number {
+  const total = STOPS.reduce((sum, stop) => sum + stop.move + stop.hold, 0);
+  const segments = STOPS.map((stop) => ({
+    from: 0,
+    to: stop.to,
+    move: (stop.move / total) * fillS,
+    hold: (stop.hold / total) * fillS,
+  }));
+  segments.reduce((from, segment, index) => {
+    segments[index].from = from;
+    return segment.to;
+  }, 0);
+
+  return (t: number) => {
+    let cursor = 0;
+    for (const segment of segments) {
+      if (t < cursor + segment.move) {
+        const x = (t - cursor) / Math.max(1e-3, segment.move);
+        return segment.from + (segment.to - segment.from) * x * x * (3 - 2 * x);
+      }
+      cursor += segment.move;
+      /* The stop: the counter stays exactly here for a while. */
+      if (t < cursor + segment.hold) return segment.to;
+      cursor += segment.hold;
     }
-    return Math.min(0.999, p / total);
+    return 1;
   };
 }
 
@@ -93,8 +114,8 @@ export function mountTilesLoader(
   root: HTMLElement,
   options: TilesLoaderOptions = {},
 ): () => void {
-  const minTime = options.minTime ?? 0.9;
-  const revealTime = options.revealTime ?? 0.8;
+  const minTime = options.minTime ?? 1.5;
+  const revealTime = options.revealTime ?? 0.6;
 
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -180,8 +201,8 @@ export function mountTilesLoader(
   let t = 0;
   let progress = 0;
   let revealAt = -1;
-  const loadS = Math.max(0.5, minTime);
-  const curve = loadCurve(7, loadS);
+  const fillS = Math.max(0.5, minTime);
+  const curve = loaderCurve(fillS);
 
   const draw = () => {
     const reveal = revealAt < 0 ? 0 : clamp((t - revealAt) / revealTime, 0, 1);
@@ -207,8 +228,11 @@ export function mountTilesLoader(
     t += dt;
     if (revealAt < 0) {
       const target = Math.min(curve(t), realLoad());
-      progress = target >= 1 ? 1 : Math.min(target, progress + dt * 1.5);
-      if (progress >= 1 && t >= loadS) {
+      /* The rate limit is high enough that the curve governs and the stops
+         land exactly where they are supposed to. It is only a floor, for the
+         case where the curve jumps. */
+      progress = target >= 1 ? 1 : Math.min(target, progress + dt * 6);
+      if (progress >= 1 && t >= fillS) {
         revealAt = t;
         /* The tiles are about to shrink away, and what they uncover has to
            be the page. While the loader was filling, its own background was

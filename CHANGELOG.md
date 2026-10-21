@@ -144,6 +144,10 @@ All notable changes to Backstop should be documented in this file.
   `prefers-reduced-motion` all remove it — and the documentation has no
   loader at all, because a reader looking for an answer should not be made
   to wait for a curtain.
+- **The loader's counter stalls where a real loader stalls.** It climbs to
+  50%, waits, reaches 78%, waits, reaches 82%, waits, and only then finishes.
+  A counter that slides evenly from 0 to 100 says "we are animating"; one that
+  hangs at 82% says "there is still work happening".
 
 ### Dashboard, second pass
 
