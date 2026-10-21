@@ -99,6 +99,12 @@ All notable changes to Backstop should be documented in this file.
   again, so the page is complete without it; and everything is revealed once.
   The hero enters on load, the sections arrive as the reader reaches them, the
   strip of marks fades in one after another, and the proof numbers count up.
+- **The site is published to GitHub Pages**, at
+  <https://ravaniroshan.github.io/backstop/>. The repository's Pages setting was
+  already "GitHub Actions" as the build source, but nothing was building it —
+  which is why the project URL 404'd. The base path is not written down
+  anywhere: `configure-pages` reports where GitHub will actually serve the
+  site, and the build takes its base path and its canonical URL from there.
 
 ### Dashboard, second pass
 
