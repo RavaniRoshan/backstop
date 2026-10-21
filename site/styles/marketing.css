@@ -138,12 +138,15 @@ html[data-motion="on"] [data-reveal="chips"]:not([data-revealed]) > li {
   padding-block: clamp(4rem, 10vw, 8rem) clamp(3rem, 7vw, 5.5rem);
 }
 
-/* One soft light, behind the headline, and nothing else. */
+/* The hero sits on the dithered field, so the light and the scrim are both
+   in front of it: the light keeps the accent, and the scrim keeps the
+   headline legible on the left, where the words are. */
 .hero::before {
   content: "";
   position: absolute;
   inset: -40% 0 auto 0;
   height: 34rem;
+  z-index: 1;
   background: radial-gradient(
     46rem 22rem at 50% 0%,
     color-mix(in srgb, var(--blume-accent) 13%, transparent),
@@ -152,8 +155,41 @@ html[data-motion="on"] [data-reveal="chips"]:not([data-revealed]) > li {
   pointer-events: none;
 }
 
-.hero > * {
+.hero::after {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 100%;
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--blume-background) 94%, transparent) 0%,
+    color-mix(in srgb, var(--blume-background) 78%, transparent) 44%,
+    transparent 80%
+  );
+}
+
+/* The hero's own content sits above the field. Only the content — the
+   dither canvas positions itself, and a blanket `.hero > *` would take its
+   positioning away from it. */
+.hero > .wrap {
   position: relative;
+  z-index: 2;
+}
+
+/* On a narrow screen the headline spans the full width, so a scrim that
+   fades from the left cannot help it: the words need the field cleared
+   under them, from the top down instead. */
+@media (max-width: 640px) {
+  .hero::after {
+    background: linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--blume-background) 94%, transparent) 0%,
+      color-mix(in srgb, var(--blume-background) 78%, transparent) 42%,
+      transparent 76%
+    );
+  }
 }
 
 /* --- buttons ----------------------------------------------------------- */

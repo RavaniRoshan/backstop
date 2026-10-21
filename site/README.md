@@ -60,7 +60,10 @@ the site should go out to both.
 | `styles/marketing.css` | The marketing pages' own vocabulary |
 | `styles/diagram.css` | The wiring diagram |
 | `styles/integrations.css` | The integrations section |
+| `styles/dither.css` | The dithered field behind the hero |
 | `src/scripts/motion.ts` | The page's only moving parts |
+| `src/scripts/dither-reveal.ts` | The WebGL field behind the hero |
+| `src/scripts/dither-shaders.ts` | Its shader |
 | `assets/logos/` | The brand marks, committed as SVG |
 | `scripts/prepare-content.mjs` | Derives `.content/` from the repository's `docs/` |
 | `scripts/prepare-logos.mjs` | Compiles `assets/logos/` into a typed module |
@@ -89,3 +92,14 @@ and does two things that the raw SVGs cannot do for themselves:
 
 Both the crops and the monochrome decision are made at build time from the
 committed files, so they cannot drift.
+
+## The hero's field
+
+The hero sits on a dithered rendering of the dashboard screenshot, which tears
+open into full colour where the cursor sweeps. It is [Originkit](https://originkit.dev)'s
+`dither-reveal` component, ported: the component arrives as a React component
+that fetches a remote image, and this site has neither React nor a remote
+fetch. So the shader is Originkit's, unchanged, and everything around it is
+this site's — the image is the one the site already serves, the script is
+plain TypeScript, and the field is inverted on the light theme so the same
+halftone reads as ink on paper rather than as a dark band.

@@ -105,6 +105,14 @@ All notable changes to Backstop should be documented in this file.
   which is why the project URL 404'd. The base path is not written down
   anywhere: `configure-pages` reports where GitHub will actually serve the
   site, and the build takes its base path and its canonical URL from there.
+- **The hero sits on a dithered field.** The dashboard screenshot, rendered as
+  a one-bit halftone, tears open into full colour where the cursor sweeps. It
+  is [Originkit](https://originkit.dev)'s `dither-reveal` component, ported:
+  the component arrives as a React component that fetches a remote image, and
+  the site has neither React nor a remote fetch — so the shader is Originkit's
+  unchanged, the image is the one the site already serves, the driver is
+  plain TypeScript, and the field is inverted on the light theme so the same
+  halftone reads as ink on paper rather than as a dark band.
 
 ### Dashboard, second pass
 

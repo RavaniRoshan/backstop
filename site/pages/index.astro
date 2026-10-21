@@ -5,6 +5,7 @@ import PageLayout from "blume/components/layout/PageLayout.astro";
 import Install from "../components/Install.astro";
 import WiringDiagram from "../components/WiringDiagram.astro";
 import IntegrationsMatrix from "../components/IntegrationsMatrix.astro";
+import DitherReveal from "../components/DitherReveal.astro";
 import "../styles/marketing.css";
 
 const { config } = data;
@@ -217,6 +218,7 @@ const faqs = [
 
   <!-- Hero ------------------------------------------------------------- -->
   <section class="hero">
+    <DitherReveal src={doc("/dashboard.png")} dotSize={5} radius={92} softness={38} />
     <div class="wrap">
       <p class="eyebrow" data-reveal="hero">In-process guardrails for AI agents</p>
       <h1 class="display" data-reveal="hero" style="margin: 1.1rem 0 0; max-width: 20ch;">
