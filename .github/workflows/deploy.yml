@@ -9,6 +9,9 @@ on:
     branches: [main]
     paths:
       - "site/**"
+      # The documentation on the site is the repository's own docs/, so a
+      # change to a document is a change to the site.
+      - "docs/**"
       - ".github/workflows/deploy.yml"
   workflow_dispatch:
 
