@@ -1,0 +1,54 @@
+---
+/**
+ * The loader the page arrives behind.
+ *
+ * Originkit's `tiles-loader`, ported: the component arrives as a React
+ * component with a fourteen-second default wait, and this site has neither
+ * React nor fourteen seconds to spare. The wait is short, the page is
+ * rendered behind the whole time, and the loader lifts.
+ *
+ * It is an overlay, not a gate — nothing is hidden behind it that is not
+ * already in the page. A reader with no JavaScript never sees it (there is
+ * a `<noscript>` rule for that), and a reader who asked for no motion never
+ * sees it at all.
+ */
+import "../styles/loader.css";
+---
+
+<div class="tiles-loader" data-tiles-loader role="status" aria-live="polite">
+  <div class="tiles-loader-grid"></div>
+  <div class="tiles-loader-count" aria-hidden="true">
+    <span class="tiles-loader-figure">
+      <span class="tiles-loader-num"></span>
+      <span class="tiles-loader-pct">%</span>
+    </span>
+  </div>
+  <span class="tiles-loader-sr">Loading Backstop</span>
+</div>
+
+<noscript>
+  <style>
+    .tiles-loader {
+      display: none !important;
+    }
+  </style>
+</noscript>
+
+<script>
+  import { mountTilesLoader } from "../src/scripts/tiles-loader";
+
+  const root = document.querySelector<HTMLElement>("[data-tiles-loader]");
+  if (root) {
+    /* If the driver never runs — a blocked script, a thrown error — the page
+       still has to arrive. The loader is removed by the failsafe below, and
+       the page is never held behind it in the first place. */
+    const failsafe = window.setTimeout(() => {
+      document.documentElement.dataset.loading = "done";
+      root.remove();
+      document.dispatchEvent(new CustomEvent("backstop:ready"));
+    }, 4000);
+    mountTilesLoader(root, {
+      onComplete: () => window.clearTimeout(failsafe),
+    });
+  }
+</script>

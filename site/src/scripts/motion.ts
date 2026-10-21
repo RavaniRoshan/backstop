@@ -124,7 +124,35 @@ function onLoad(selector: string): void {
   );
 }
 
+/**
+ * The page's own moving parts wait for the loader.
+ *
+ * The hero enters as soon as the page does — but the page arrives behind a
+ * loader, and a hero that animates behind an overlay is an animation nobody
+ * sees. So the loader says when it is done, and the hero moves then.
+ *
+ * The handshake has to be order-independent: the loader can finish before
+ * this script runs, and it removes itself from the document a moment later,
+ * so "is the loader still here?" is not the question to ask. "Has it said it
+ * is done?" is. If it never says — a blocked script, a thrown error — the
+ * hero moves anyway.
+ */
+function whenReady(): Promise<void> {
+  return new Promise((resolve) => {
+    const done = () => resolve();
+    if (
+      document.documentElement.dataset.loading === "done" ||
+      !document.querySelector("[data-tiles-loader]")
+    ) {
+      done();
+      return;
+    }
+    document.addEventListener("backstop:ready", done, { once: true });
+    window.setTimeout(done, 4000);
+  });
+}
+
 /* The hero enters as soon as the page does. Everything else waits for the
    reader to arrive at it. */
-onLoad('[data-reveal="hero"]');
 onScroll("[data-reveal]:not([data-reveal='hero'])");
+whenReady().then(() => onLoad('[data-reveal="hero"]'));

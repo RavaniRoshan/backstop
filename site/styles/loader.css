@@ -1,0 +1,107 @@
+/* The tiles loader.
+   -----------------------------------------------------------------------
+   The loader is an overlay over a page that is already rendered. It starts
+   as the page's own background, fills with the page's own foreground as the
+   load progresses, and then shrinks away to lift.
+
+   The colours are the page's, so the loader is the page's theme rather than
+   a second one: no flash of a colour the reader has not chosen. */
+
+.tiles-loader {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  overflow: hidden;
+  background: var(--blume-background);
+  color: #fff;
+  /* The count is sized against the loader itself, not the viewport. */
+  container-type: size;
+  isolation: isolate;
+  /* The failsafe. If the driver never runs — a blocked script, a thrown
+     error — the loader lifts itself rather than trapping the reader behind
+     it. It waits first, so it never competes with the real thing, and the
+     driver removes the element long before this fires. */
+  animation: tiles-loader-failsafe 0.4s linear 5s forwards;
+}
+
+@keyframes tiles-loader-failsafe {
+  to {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+  }
+}
+
+.tiles-loader-grid {
+  position: absolute;
+  inset: 0;
+}
+
+.tiles-loader-tile {
+  position: absolute;
+  background: var(--blume-foreground);
+  transform-origin: center;
+  will-change: transform;
+}
+
+/* The paper over each tile: it is what lifts away as the load progresses,
+   and it is the page's background, so the loader starts out looking exactly
+   like the page it is about to reveal. */
+.tiles-loader-paper {
+  position: absolute;
+  inset: 0;
+  background: var(--blume-background);
+}
+
+/* The count. `difference` against the loader's own background means the
+   number is the opposite of whatever is under it, in either theme. */
+.tiles-loader-count {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  mix-blend-mode: difference;
+  color: #fff;
+  pointer-events: none;
+  white-space: nowrap;
+  font-family: var(--blume-font-display);
+  font-weight: 620;
+  letter-spacing: -0.045em;
+  font-size: min(30cqh, 40cqw);
+  font-variant-numeric: tabular-nums;
+  opacity: 0;
+}
+
+.tiles-loader-figure {
+  display: inline-flex;
+  align-items: flex-start;
+}
+
+.tiles-loader-pct {
+  font-size: 0.3em;
+  font-style: italic;
+  margin-top: 0.9em;
+  margin-left: 0.08em;
+}
+
+/* A reader who asked for no motion gets the page, not a performance. */
+@media (prefers-reduced-motion: reduce) {
+  .tiles-loader {
+    display: none !important;
+    animation: none;
+  }
+}
+
+/* The load announcement, for a reader who cannot see the count. */
+.tiles-loader-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

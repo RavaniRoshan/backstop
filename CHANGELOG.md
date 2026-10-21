@@ -113,6 +113,16 @@ All notable changes to Backstop should be documented in this file.
   unchanged, the image is the one the site already serves, the driver is
   plain TypeScript, and the field is inverted on the light theme so the same
   halftone reads as ink on paper rather than as a dark band.
+- **The page arrives behind a loader.** A grid of tiles fills with the page's
+  own foreground as the load progresses, then shrinks away in a diagonal sweep
+  to lift. It is [Originkit](https://originkit.dev)'s `tiles-loader`, ported:
+  the component arrives as a React component with a fourteen-second default
+  wait, and this site has neither React nor fourteen seconds to stand between
+  a reader and a page. The page is rendered behind the loader the whole time,
+  the loader cannot trap a reader — a `<noscript>` rule, a failsafe and
+  `prefers-reduced-motion` all remove it — and the documentation has no
+  loader at all, because a reader looking for an answer should not be made
+  to wait for a curtain.
 
 ### Dashboard, second pass
 

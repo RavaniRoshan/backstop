@@ -61,9 +61,12 @@ the site should go out to both.
 | `styles/diagram.css` | The wiring diagram |
 | `styles/integrations.css` | The integrations section |
 | `styles/dither.css` | The dithered field behind the hero |
+| `styles/loader.css` | The loader the page arrives behind |
 | `src/scripts/motion.ts` | The page's only moving parts |
 | `src/scripts/dither-reveal.ts` | The WebGL field behind the hero |
 | `src/scripts/dither-shaders.ts` | Its shader |
+| `src/scripts/tiles-loader.ts` | The loader |
+| `src/scripts/easing.ts` | The loader's curves |
 | `assets/logos/` | The brand marks, committed as SVG |
 | `scripts/prepare-content.mjs` | Derives `.content/` from the repository's `docs/` |
 | `scripts/prepare-logos.mjs` | Compiles `assets/logos/` into a typed module |
@@ -103,3 +106,28 @@ fetch. So the shader is Originkit's, unchanged, and everything around it is
 this site's — the image is the one the site already serves, the script is
 plain TypeScript, and the field is inverted on the light theme so the same
 halftone reads as ink on paper rather than as a dark band.
+
+## The loader
+
+The marketing page arrives behind a loader: a grid of tiles that fills with
+the page's own foreground as the load progresses, then shrinks away in a
+diagonal sweep to lift. It is [Originkit](https://originkit.dev)'s
+`tiles-loader`, ported — the component arrives as a React component with a
+fourteen-second default wait, and this site has neither React nor fourteen
+seconds to stand between a reader and a page.
+
+The port keeps the component's curve and its sweep, and changes what matters
+for a real page:
+
+- **The page is rendered behind the loader the whole time.** The loader is an
+  overlay, not a gate, so nothing is held back that is not already loaded.
+- **It cannot trap a reader.** A `<noscript>` rule removes it, a failsafe
+  lifts it if the driver never runs, and a reader who asked for no motion
+  never sees it.
+- **It is short.** Under two seconds, and the counter is the component's own
+  chunky curve rather than a bar that slides.
+- **It is the page's theme.** The tiles are the page's background and
+  foreground, so there is no flash of a colour the reader did not choose.
+
+Only the marketing page has one. The documentation has no loader, because a
+reader looking for an answer should not be made to wait for a curtain.

@@ -6,6 +6,7 @@ import Install from "../components/Install.astro";
 import WiringDiagram from "../components/WiringDiagram.astro";
 import IntegrationsMatrix from "../components/IntegrationsMatrix.astro";
 import DitherReveal from "../components/DitherReveal.astro";
+import TilesLoader from "../components/TilesLoader.astro";
 import "../styles/marketing.css";
 
 const { config } = data;
@@ -215,6 +216,10 @@ const faqs = [
   <script is:inline>
     document.documentElement.dataset.motion = "on";
   </script>
+
+  <!-- The page arrives behind a loader: a grid of tiles that fills as the
+       page loads and then shrinks away to lift. -->
+  <TilesLoader />
 
   <!-- Hero ------------------------------------------------------------- -->
   <section class="hero">
