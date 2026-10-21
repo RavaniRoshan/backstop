@@ -4,6 +4,7 @@ import data from "blume:data";
 import PageLayout from "blume/components/layout/PageLayout.astro";
 import Install from "../components/Install.astro";
 import WiringDiagram from "../components/WiringDiagram.astro";
+import IntegrationsMatrix from "../components/IntegrationsMatrix.astro";
 import "../styles/marketing.css";
 
 const { config } = data;
@@ -207,25 +208,33 @@ const faqs = [
     description: config.description,
   }}
 >
+  <!-- The page moves, but only when JavaScript is going to finish the movement.
+       This flag is set before the first paint, so the hidden state exists only
+       when something is going to reveal it again. -->
+  <script is:inline>
+    document.documentElement.dataset.motion = "on";
+  </script>
+
   <!-- Hero ------------------------------------------------------------- -->
   <section class="hero">
     <div class="wrap">
-      <p class="eyebrow">In-process guardrails for AI agents</p>
-      <h1 class="display" style="margin: 1.1rem 0 0; max-width: 20ch;">
+      <p class="eyebrow" data-reveal="hero">In-process guardrails for AI agents</p>
+      <h1 class="display" data-reveal="hero" style="margin: 1.1rem 0 0; max-width: 20ch;">
         The thing that stops a runaway agent is <em>not a better prompt</em>.
       </h1>
-      <p class="lead" style="margin-top: 1.6rem;">
+      <p class="lead" data-reveal="hero" style="margin-top: 1.6rem;">
         It is a limit. Backstop gives every agent you wrap a budget, a breaker and
         a concurrency cap — inside your own process, for a tenth of a
         millisecond, with no proxy and nothing new to run.
       </p>
       <div
+        data-reveal="hero"
         style="display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; margin-top: 2.25rem;"
       >
         <Install />
         <a class="btn btn-quiet" href={doc("/docs/quickstart")}>Read the quickstart</a>
       </div>
-      <p class="mono" style="margin-top: 1.4rem;">
+      <p class="mono" data-reveal="hero" style="margin-top: 1.4rem;">
         Prefer to look first? <a class="link" href={doc("/docs/dashboard")}>The
         dashboard</a> runs on synthetic traffic, with no keys and no network.
       </p>
@@ -239,18 +248,18 @@ const faqs = [
   <!-- 01 The problem ---------------------------------------------------- -->
   <section class="section-tight" id="problem">
     <div class="wrap">
-      <p class="eyebrow">01 — What actually goes wrong</p>
-      <h2 class="h2" style="margin: 0.9rem 0 0; max-width: 24ch;">
+      <p class="eyebrow" data-reveal>01 — What actually goes wrong</p>
+      <h2 class="h2" data-reveal style="margin: 0.9rem 0 0; max-width: 24ch;">
         Agents do not fail on one bad decision.
       </h2>
-      <p class="lead" style="margin-top: 1.1rem;">
+      <p class="lead" data-reveal style="margin-top: 1.1rem;">
         They fail on ten thousand good ones in a row. Three shapes, and all three
         have the same cause.
       </p>
       <div class="rows" style="margin-top: 2.5rem;">
         {
           problems.map((problem, index) => (
-            <div class="row">
+            <div class="row" data-reveal>
               <p class="num" style="padding-top: 0.2rem;">
                 {String(index + 1).padStart(2, "0")}
               </p>
@@ -271,18 +280,18 @@ const faqs = [
   <!-- 02 How it works ---------------------------------------------------- -->
   <section class="section" id="how">
     <div class="wrap">
-      <p class="eyebrow">02 — How it works</p>
-      <h2 class="h2" style="margin: 0.9rem 0 0; max-width: 22ch;">
+      <p class="eyebrow" data-reveal>02 — How it works</p>
+      <h2 class="h2" data-reveal style="margin: 0.9rem 0 0; max-width: 22ch;">
         One call, and the limits are in place.
       </h2>
-      <p class="lead" style="margin-top: 1.1rem;">
+      <p class="lead" data-reveal style="margin-top: 1.1rem;">
         No proxy, no sidecar, no changes to the code that calls the model. The
         transport is injected in-process, so requests still go straight to the
         provider.
       </p>
 
       <div class="grid-2" style="margin-top: 3rem;">
-        <div>
+        <div data-reveal>
           <p class="num">Step 01</p>
           <h3 class="h3" style="margin: 0.5rem 0 0.5rem;">Wrap the client.</h3>
           <p class="prose" style="margin: 0 0 1.25rem;">
@@ -300,7 +309,7 @@ const faqs = [
           </div>
         </div>
 
-        <div>
+        <div data-reveal>
           <p class="num">Step 02</p>
           <h3 class="h3" style="margin: 0.5rem 0 0.5rem;">Set the limits.</h3>
           <p class="prose" style="margin: 0 0 1.25rem;">
@@ -320,7 +329,7 @@ const faqs = [
       </div>
 
       <div class="grid-2" style="margin-top: 3rem;">
-        <div>
+        <div data-reveal>
           <p class="num">Step 03</p>
           <h3 class="h3" style="margin: 0.5rem 0 0.5rem;">Handle the ceiling.</h3>
           <p class="prose" style="margin: 0 0 1.25rem;">
@@ -339,7 +348,7 @@ const faqs = [
           </div>
         </div>
 
-        <div>
+        <div data-reveal>
           <p class="num">Step 04</p>
           <h3 class="h3" style="margin: 0.5rem 0 0.5rem;">Watch it.</h3>
           <p class="prose" style="margin: 0 0 1.25rem;">
@@ -358,21 +367,46 @@ const faqs = [
     </div>
   </section>
 
-  <!-- 03 What you get ---------------------------------------------------- -->
+  <!-- 03 Where it can point ----------------------------------------------- -->
+  <section class="section" id="integrations">
+    <div class="wrap">
+      <p class="eyebrow" data-reveal>03 — Where it can point</p>
+      <h2 class="h2" data-reveal style="margin: 0.9rem 0 0; max-width: 22ch;">
+        One wire. Every server.
+      </h2>
+      <p class="lead" data-reveal style="margin-top: 1.1rem;">
+        Backstop does not know what a provider is. It counts requests, dollars
+        and concurrency — so it works with anything that speaks the
+        OpenAI-compatible protocol, and with the two that do not.
+      </p>
+      <div style="margin-top: 2.75rem;">
+        <IntegrationsMatrix />
+      </div>
+      <p class="prose" style="margin-top: 2rem;">
+        <a class="link" href={doc("/docs/integrations")}>How to point it at one</a>
+        ·
+        <a class="link" href={doc("/docs/compatibility")}>The compatibility matrix</a>
+        ·
+        <a class="link" href={doc("/docs/usd-budgets")}>How the dollar budget works</a>
+      </p>
+    </div>
+  </section>
+
+  <!-- 04 What you get ---------------------------------------------------- -->
   <section class="section-tight" id="features">
     <div class="wrap">
-      <p class="eyebrow">03 — What you get</p>
-      <h2 class="h2" style="margin: 0.9rem 0 0; max-width: 20ch;">
+      <p class="eyebrow" data-reveal>04 — What you get</p>
+      <h2 class="h2" data-reveal style="margin: 0.9rem 0 0; max-width: 20ch;">
         Eight things, all of them optional.
       </h2>
-      <p class="lead" style="margin-top: 1.1rem;">
+      <p class="lead" data-reveal style="margin-top: 1.1rem;">
         Every one of them is a limit you can turn on, or leave off. The defaults
         are the boring ones.
       </p>
       <div class="rows" style="margin-top: 2.5rem;">
         {
           features.map((feature, index) => (
-            <div class="row">
+            <div class="row" data-reveal>
               <p class="num" style="padding-top: 0.25rem;">
                 {String(index + 1).padStart(2, "0")}
               </p>
@@ -392,14 +426,14 @@ const faqs = [
   <!-- 04 Plain words ----------------------------------------------------- -->
   <section class="section" id="plain">
     <div class="wrap">
-      <p class="eyebrow">04 — In plain words</p>
-      <h2 class="h2" style="margin: 0.9rem 0 0; max-width: 20ch;">
+      <p class="eyebrow" data-reveal>05 — In plain words</p>
+      <h2 class="h2" data-reveal style="margin: 0.9rem 0 0; max-width: 20ch;">
         Four hard ideas, said simply.
       </h2>
       <dl class="terms" style="margin-top: 2.5rem;">
         {
           terms.map((item) => (
-            <div class="term">
+            <div class="term" data-reveal>
               <dt>{item.term}</dt>
               <dd set:html={item.body} />
             </div>
@@ -412,16 +446,16 @@ const faqs = [
   <!-- 05 See it ---------------------------------------------------------- -->
   <section class="section-tight" id="see">
     <div class="wrap">
-      <p class="eyebrow">05 — See it</p>
-      <h2 class="h2" style="margin: 0.9rem 0 0; max-width: 22ch;">
+      <p class="eyebrow" data-reveal>06 — See it</p>
+      <h2 class="h2" data-reveal style="margin: 0.9rem 0 0; max-width: 22ch;">
         The dashboard is part of the package.
       </h2>
-      <p class="lead" style="margin-top: 1.1rem;">
+      <p class="lead" data-reveal style="margin-top: 1.1rem;">
         Not a screenshot of a product that needs a server to go with it. A
         dependency-free view of the process you are already running, bound to
         loopback, making no outbound requests.
       </p>
-      <div class="frame" style="margin-top: 2.5rem;">
+      <div class="frame" data-reveal style="margin-top: 2.5rem;">
         <div class="frame-bar">
           <span>backstop dashboard</span>
           <span style="margin-left: auto;">demo workload</span>
@@ -435,15 +469,15 @@ const faqs = [
         />
       </div>
       <div class="stat-grid" style="margin-top: 2rem;">
-        <div class="stat">
+        <div class="stat" data-reveal>
           <b>Seven tiles</b>
           <span>Budget, spend, prevented calls, request rate, latency, concurrency and the breaker — each with a status you can read without colour.</span>
         </div>
-        <div class="stat">
+        <div class="stat" data-reveal>
           <b>Wall-clock axis</b>
           <span>Every chart states the window it shows, so a spike lines up with a log line instead of a moving relative label.</span>
         </div>
-        <div class="stat">
+        <div class="stat" data-reveal>
           <b>Drill-down</b>
           <span>Activate a tile and the tables below narrow to the rows that explain that number. No Prometheus, no exporter, no collector.</span>
         </div>
@@ -454,11 +488,11 @@ const faqs = [
   <!-- 06 Proof ----------------------------------------------------------- -->
   <section class="section" id="proof">
     <div class="wrap">
-      <p class="eyebrow">06 — Proof</p>
-      <h2 class="h2" style="margin: 0.9rem 0 0; max-width: 22ch;">
+      <p class="eyebrow" data-reveal>07 — Proof</p>
+      <h2 class="h2" data-reveal style="margin: 0.9rem 0 0; max-width: 22ch;">
         Check it yourself, in thirty seconds, with no API key.
       </h2>
-      <p class="lead" style="margin-top: 1.1rem;">
+      <p class="lead" data-reveal style="margin-top: 1.1rem;">
         <code class="mono">backstop verify</code> runs a real wrap against a local
         mock transport, blocks a runaway, and prints what it measured. If it
         cannot prove the limits work, it says so and exits non-zero.
@@ -469,15 +503,15 @@ const faqs = [
           <pre>{verifyOutput}</pre>
         </div>
         <div>
-          <div class="stat">
-            <b>0.08 ms</b>
+          <div class="stat" data-reveal>
+            <b><span data-count="0.08" data-decimals="2">0.08</span> ms</b>
             <span>Control-path overhead at p99, measured on a local mock transport. The full snapshot publishes the host, the seed and both payload sizes.</span>
           </div>
-          <div class="stat" style="margin-top: 1.5rem;">
-            <b>8 of 10</b>
+          <div class="stat" data-reveal style="margin-top: 1.5rem;">
+            <b><span data-count="8">8</span> of 10</b>
             <span>Runaway calls blocked before dispatch, against a 500-token budget. The two that were allowed completed inside it.</span>
           </div>
-          <div class="stat" style="margin-top: 1.5rem;">
+          <div class="stat" data-reveal style="margin-top: 1.5rem;">
             <b>$0</b>
             <span>Spent past the ceiling. A blocked request is never dispatched, so there is nothing to bill.</span>
           </div>
@@ -489,18 +523,18 @@ const faqs = [
   <!-- 07 What it does not do ---------------------------------------------- -->
   <section class="section-tight" id="honesty">
     <div class="wrap">
-      <p class="eyebrow">07 — What it does not do</p>
-      <h2 class="h2" style="margin: 0.9rem 0 0; max-width: 24ch;">
+      <p class="eyebrow" data-reveal>08 — What it does not do</p>
+      <h2 class="h2" data-reveal style="margin: 0.9rem 0 0; max-width: 24ch;">
         The things it will not do for you.
       </h2>
-      <p class="lead" style="margin-top: 1.1rem;">
+      <p class="lead" data-reveal style="margin-top: 1.1rem;">
         Every product has a boundary. This one draws it in public, because a
         guardrail you misunderstand is worse than no guardrail.
       </p>
       <div class="nope" style="margin-top: 2.5rem;">
         {
           notDoing.map((item) => (
-            <div class="nope-item">
+            <div class="nope-item" data-reveal>
               <div>
                 <h3>{item.name}</h3>
                 <p>{item.body}</p>
@@ -519,14 +553,14 @@ const faqs = [
   <!-- 08 FAQ ------------------------------------------------------------- -->
   <section class="section" id="faq">
     <div class="wrap">
-      <p class="eyebrow">08 — Questions</p>
-      <h2 class="h2" style="margin: 0.9rem 0 0; max-width: 20ch;">
+      <p class="eyebrow" data-reveal>09 — Questions</p>
+      <h2 class="h2" data-reveal style="margin: 0.9rem 0 0; max-width: 20ch;">
         The ones worth asking.
       </h2>
       <div class="faq" style="margin-top: 2.5rem;">
         {
           faqs.map((item) => (
-            <details>
+            <details data-reveal>
               <summary>{item.q}</summary>
               <p>{item.a}</p>
             </details>
@@ -540,10 +574,10 @@ const faqs = [
   <section class="section-tight" style="padding-bottom: clamp(4rem, 9vw, 8rem);">
     <div class="wrap">
       <hr class="rule" />
-      <h2 class="h2" style="margin: 3rem 0 0; max-width: 18ch;">
+      <h2 class="h2" data-reveal style="margin: 3rem 0 0; max-width: 18ch;">
         Give it one limit and see what happens.
       </h2>
-      <p class="lead" style="margin-top: 1.1rem;">
+      <p class="lead" data-reveal style="margin-top: 1.1rem;">
         Thirty seconds, no key, no account, no network.
       </p>
       <div style="display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; margin-top: 2rem;">
@@ -552,4 +586,8 @@ const faqs = [
       </div>
     </div>
   </section>
+
+  <script>
+    import "../src/scripts/motion";
+  </script>
 </PageLayout>

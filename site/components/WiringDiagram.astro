@@ -12,7 +12,14 @@
 import { logos } from "../src/data/logos";
 import "../styles/diagram.css";
 
-const agents = ["claude-code", "cursor", "copilot", "codex", "antigravity", "cline"];
+const agents = [
+  { slug: "claude-code" },
+  { slug: "cursor" },
+  { slug: "copilot" },
+  { slug: "codex" },
+  { slug: "antigravity" },
+  { slug: "cline" },
+];
 
 const endpoints = [
   {
@@ -43,9 +50,9 @@ const END = 760;
 const MARK = 44;
 const WIDTH = 1120;
 
-const agentRows = agents.map((slug, index) => ({
-  slug,
-  title: logos[slug]?.title ?? slug,
+const agentRows = agents.map((agent, index) => ({
+  slug: agent.slug,
+  title: logos[agent.slug]?.title ?? agent.slug,
   x: LEFT,
   y: TOP + index * STEP,
   cy: TOP + index * STEP + TILE / 2,

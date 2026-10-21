@@ -570,6 +570,7 @@ See [docs/benchmarks.md](docs/benchmarks.md).
 | [docs/detection.md](docs/detection.md) | The four runaway-spend detectors |
 | [docs/alerts.md](docs/alerts.md) | Budget alerts and webhooks |
 | [docs/frameworks.md](docs/frameworks.md) | The framework adapters |
+| [docs/integrations.md](docs/integrations.md) | Pointing Backstop at any OpenAI-compatible server |
 | [docs/dashboard.md](docs/dashboard.md) | The built-in dashboard |
 | [docs/benchmarks.md](docs/benchmarks.md) | How the overhead numbers are measured |
 | [docs/benchmark-results-2026-10-20.md](docs/benchmark-results-2026-10-20.md) | The current committed overhead snapshot, with its conditions |

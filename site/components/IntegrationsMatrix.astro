@@ -1,0 +1,168 @@
+---
+/**
+ * What Backstop can point at.
+ *
+ * The honest answer to "how many servers does this work with?" is: one wire
+ * protocol, and every server that speaks it. The enforcement engine does not
+ * know what a provider is — it counts requests, dollars and concurrency. So
+ * this table is not a list of plugins Backstop ships. It is a list of the
+ * servers an operator can actually point Backstop at, and the one thing that
+ * differs between them: whether Backstop knows what a token costs.
+ */
+import { logos } from "../src/data/logos";
+import "../styles/integrations.css";
+
+type Provider = {
+  /** The slug in the logo library, or null when the project has no public mark. */
+  slug: string | null;
+  /** The name, for the servers whose mark is an icon rather than a wordmark. */
+  name: string;
+};
+
+type Lane = {
+  id: string;
+  label: string;
+  speaks: string;
+  providers: Provider[];
+  adds: string;
+  /** Whether the bundled price catalogue can price these servers' models. */
+  priced: boolean;
+};
+
+const lanes: Lane[] = [
+  {
+    id: "native",
+    label: "The provider's own API",
+    speaks: "their own endpoints",
+    priced: true,
+    providers: [
+      { slug: "openai", name: "OpenAI" },
+      { slug: "anthropic", name: "Anthropic" },
+    ],
+    adds:
+      "Budgets, breaker, concurrency — and a price, read from the catalogue that ships inside Backstop.",
+  },
+  {
+    id: "servers",
+    label: "Inference servers you run",
+    speaks: "an OpenAI-compatible endpoint",
+    priced: false,
+    providers: [
+      { slug: "vllm", name: "vLLM" },
+      { slug: null, name: "SGLang" },
+      { slug: null, name: "llama.cpp" },
+      { slug: "ollama", name: "Ollama" },
+      { slug: "lmstudio", name: "LM Studio" },
+      { slug: "docker", name: "Docker Model Runner" },
+      { slug: "huggingface", name: "TGI" },
+    ],
+    adds:
+      "The same budgets, the same breaker, the same concurrency limit. No price until you file one.",
+  },
+  {
+    id: "managed",
+    label: "Managed inference",
+    speaks: "an OpenAI-compatible endpoint",
+    priced: false,
+    providers: [
+      { slug: "deepinfra", name: "DeepInfRA" },
+      { slug: "together", name: "Together AI" },
+      { slug: "groq", name: "Groq" },
+      { slug: null, name: "Fireworks" },
+      { slug: "openrouter", name: "OpenRouter" },
+      { slug: "replicate", name: "Replicate" },
+      { slug: "baseten", name: "Baseten" },
+      { slug: "cohere", name: "Cohere" },
+      { slug: "mistral", name: "Mistral" },
+      { slug: "nvidia", name: "NVIDIA" },
+    ],
+    adds:
+      "The same budgets, the same breaker, the same concurrency limit. No price until you file one.",
+  },
+  {
+    id: "gateways",
+    label: "Cloud gateways",
+    speaks: "an OpenAI-compatible gateway",
+    priced: false,
+    providers: [
+      { slug: "aws", name: "Amazon Bedrock" },
+      { slug: "azure", name: "Azure OpenAI" },
+      { slug: "vertex", name: "Google Vertex AI" },
+    ],
+    adds:
+      "The same budgets, the same breaker, the same concurrency limit. No price until you file one.",
+  },
+];
+
+/** Every server named above, counted the way an operator would count them. */
+const total = lanes.reduce((sum, lane) => sum + lane.providers.length, 0);
+---
+
+<section class="integrations">
+  <div class="lanes">
+    {
+      lanes.map((lane, laneIndex) => (
+        <article class="lane" data-lane={lane.id}>
+          <p class="lane-index">{String(laneIndex + 1).padStart(2, "0")}</p>
+          <h3 class="lane-title" data-reveal>{lane.label}</h3>
+
+          <ul class="chips" data-reveal="chips">
+            {lane.providers.map((provider) => {
+              const logo = provider.slug ? logos[provider.slug] : undefined;
+              /* A wordmark carries its own name, so it replaces the name — but
+                 only when it is one flat colour the page can tint. A wordmark
+                 drawn in brand colours was designed for a white page, and on a
+                 dark one its lettering disappears. Those get the name. */
+              const wordmark =
+                logo?.wordmark && logo?.monochrome ? logo : undefined;
+              const icon = logo && !logo.wordmark ? logo : undefined;
+              return (
+                <li class="chip">
+                  {wordmark ? (
+                    <svg
+                      class="mark wordmark"
+                      viewBox={wordmark.viewBox}
+                      role="img"
+                      aria-label={provider.name}
+                      set:html={wordmark.body}
+                    />
+                  ) : null}
+                  {icon ? (
+                    <svg
+                      class="mark"
+                      viewBox={icon.viewBox}
+                      role="img"
+                      aria-label={provider.name}
+                      set:html={icon.body}
+                    />
+                  ) : null}
+                  {!wordmark ? (
+                    <span class="chip-name">{provider.name}</span>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+
+          <p class="lane-speaks" data-reveal>
+            They speak <strong>{lane.speaks}</strong>.
+          </p>
+
+          <p class="lane-adds" data-reveal>
+            <span class="lane-adds-label">Backstop adds</span>
+            {lane.adds}
+          </p>
+        </article>
+      ))
+    }
+  </div>
+
+  <p class="integrations-caption">
+    <strong>{total} servers.</strong> One wire protocol, one enforcement engine,
+    no per-provider plugin. The only thing that changes between them is the
+    price list: OpenAI and Anthropic models are priced from the catalogue that
+    ships inside Backstop, and everything else is unpriced until you file a
+    price for it — because a dollar ceiling with no price is a guess, and a
+    guess is not a limit.
+  </p>
+</section>

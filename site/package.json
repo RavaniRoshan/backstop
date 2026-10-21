@@ -12,6 +12,7 @@
     "preview": "blume preview"
   },
   "dependencies": {
-    "blume": "^1.7.3"
+    "blume": "^1.7.3",
+    "motion": "^14.5.0"
   }
 }

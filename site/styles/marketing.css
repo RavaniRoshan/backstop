@@ -29,13 +29,32 @@
   }
 }
 
-/* Section rhythm. */
+/* --- motion ------------------------------------------------------------- */
+
+/* The page sets data-motion="on" before the first paint, so the hidden state
+   only exists when JavaScript is going to reveal it again. A reader with no
+   JavaScript never sets the flag and never sees anything hidden.
+
+   The strip of marks is a group: the row is not hidden, its marks are, and
+   they arrive one after another. */
+html[data-motion="on"] [data-reveal]:not([data-revealed]):not([data-reveal="chips"]) {
+  opacity: 0;
+}
+
+html[data-motion="on"] [data-reveal="chips"]:not([data-revealed]) > li {
+  opacity: 0;
+}
+
+/* Section rhythm. The margin is scroll margin, not spacing: the header is
+   fixed, so an anchor jump has to leave room for it or it lands underneath. */
 .section {
   padding-block: clamp(3.5rem, 8vw, 7rem);
+  scroll-margin-top: 5rem;
 }
 
 .section-tight {
   padding-block: clamp(2.5rem, 5vw, 4.5rem);
+  scroll-margin-top: 5rem;
 }
 
 /* --- type -------------------------------------------------------------- */

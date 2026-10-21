@@ -99,6 +99,7 @@ export default defineConfig({
             { label: "The spend ledger", href: "/docs/ledger" },
             { label: "Runaway-spend detection", href: "/docs/detection" },
             { label: "Concurrency and scale", href: "/docs/concurrency" },
+            { label: "Pointing it at any server", href: "/docs/integrations" },
           ],
         },
         {
