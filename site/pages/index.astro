@@ -3,6 +3,7 @@ import { Code } from "astro:components";
 import data from "blume:data";
 import PageLayout from "blume/components/layout/PageLayout.astro";
 import Install from "../components/Install.astro";
+import WiringDiagram from "../components/WiringDiagram.astro";
 import "../styles/marketing.css";
 
 const { config } = data;
@@ -228,6 +229,10 @@ const faqs = [
         Prefer to look first? <a class="link" href={doc("/docs/dashboard")}>The
         dashboard</a> runs on synthetic traffic, with no keys and no network.
       </p>
+    </div>
+
+    <div class="wrap" style="margin-top: clamp(2.5rem, 6vw, 4.5rem);">
+      <WiringDiagram />
     </div>
   </section>
 

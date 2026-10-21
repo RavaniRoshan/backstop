@@ -19,6 +19,7 @@ const outFile = resolve(here, "..", "src", "data", "logos.ts");
 const TITLES = {
   openai: "OpenAI",
   anthropic: "Anthropic",
+  "anthropic-wordmark": "Anthropic",
   claude: "Claude",
   "claude-code": "Claude Code",
   cursor: "Cursor",
@@ -51,19 +52,46 @@ const TITLES = {
 const files = (await readdir(logoDir)).filter((name) => name.endsWith(".svg")).sort();
 const entries = [];
 
+/**
+ * A mark that is one flat colour is a monochrome mark that happens to have the
+ * colour baked in — the Codex mark is #111, which vanishes on a dark page, and
+ * a few wordmarks carry no fill at all and therefore inherit the default
+ * black. Rewrite those to currentColor so the page can tint them like any
+ * other text. A mark with more than one colour, a gradient or a filter is
+ * left exactly as it is: that is what the brand actually looks like.
+ */
+function normalise(svg, body) {
+  if (/<(linearGradient|radialGradient|filter|mask|clipPath)\b/.test(svg)) {
+    return { body, monochrome: false };
+  }
+  const colours = new Set(
+    [...svg.matchAll(/fill="([^"]+)"/g)].map((match) => match[1]),
+  );
+  const paint = [...colours].filter((c) => c !== "none");
+  if (paint.length === 0) {
+    // No fill anywhere: the default black applies. Make it explicit and tintable.
+    const tinted = body.replace(/<(path|g|polygon|rect|circle)\b/, (tag) => `${tag} fill="currentColor"`);
+    return { body: tinted, monochrome: true };
+  }
+  if (paint.length === 1 && paint[0] !== "currentColor") {
+    const only = paint[0];
+    return {
+      body: body.replaceAll(`fill="${only}"`, 'fill="currentColor"'),
+      monochrome: true,
+    };
+  }
+  return { body, monochrome: paint.every((c) => c === "currentColor") };
+}
+
 for (const file of files) {
   const slug = file.replace(/\.svg$/, "");
   const svg = await readFile(join(logoDir, file), "utf8");
   const viewBox = /viewBox="([^"]+)"/.exec(svg)?.[1] ?? "0 0 24 24";
-  const body = svg
+  const raw = svg
     .replace(/^[\s\S]*?<svg[^>]*>/, "")
     .replace(/<\/svg>\s*$/, "")
     .trim();
-  const fills = new Set(
-    [...svg.matchAll(/(?:fill|stroke)="([^"]+)"/g)].map((match) => match[1]),
-  );
-  const coloured = [...fills].some((c) => c !== "none" && c !== "currentColor");
-  const monochrome = !coloured && !svg.includes("<filter");
+  const { body, monochrome } = normalise(svg, raw);
   entries.push(
     `  ${JSON.stringify(slug)}: {\n` +
       `    slug: ${JSON.stringify(slug)},\n` +
