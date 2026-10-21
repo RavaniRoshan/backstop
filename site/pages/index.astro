@@ -7,6 +7,11 @@ import "../styles/marketing.css";
 
 const { config } = data;
 
+// GitHub Pages serves a project site from a subdirectory, so every link the
+// page makes carries the prefix the site was built with.
+const base = (import.meta.env.BASE_URL ?? "/").replace(/\/$/, "");
+const doc = (path: string) => `${base}${path}`;
+
 const wrapCode = `from openai import OpenAI
 from backstop import Backstop, BackstopConfig
 
@@ -67,42 +72,42 @@ const features = [
   {
     name: "Token budgets",
     body: "A hard ceiling per session, per agent, or per a hierarchy of them. When it is reached, the next request never leaves your machine.",
-    href: "/docs/quickstart",
+    href: doc("/docs/quickstart"),
   },
   {
     name: "Dollar budgets",
     body: "The same ceiling in money, priced from the model you actually call, with the arithmetic done in decimals so a cent out is a cent out.",
-    href: "/docs/usd-budgets",
+    href: doc("/docs/usd-budgets"),
   },
   {
     name: "Circuit breaker",
     body: "When the provider starts failing, stop sending it requests. It half-opens, tries one, and closes again if the provider recovered.",
-    href: "/docs/architecture",
+    href: doc("/docs/architecture"),
   },
   {
     name: "Concurrency control",
     body: "A limit on requests in flight, with a queue that prioritises instead of dropping. Critical work goes first; nothing is discarded.",
-    href: "/docs/concurrency",
+    href: doc("/docs/concurrency"),
   },
   {
     name: "Per-agent isolation",
     body: "Each wrapped client carries its own budget. One agent cannot spend another's, and a parent can cap a whole tree of children.",
-    href: "/docs/architecture",
+    href: doc("/docs/architecture"),
   },
   {
     name: "Runaway-spend detection",
     body: "Four detectors that notice a spend pattern — velocity, drift, retry amplification, context growth — before it becomes an invoice.",
-    href: "/docs/detection",
+    href: doc("/docs/detection"),
   },
   {
     name: "A live dashboard",
     body: "Budgets, burn rate, breaker state and enforcement events, in a browser, with no Prometheus and no exporter to install.",
-    href: "/docs/dashboard",
+    href: doc("/docs/dashboard"),
   },
   {
     name: "An audit log",
     body: "Every enforcement decision, hash-chained, so you can prove afterwards what was allowed and what was stopped.",
-    href: "/docs/architecture",
+    href: doc("/docs/architecture"),
   },
 ];
 
@@ -217,10 +222,10 @@ const faqs = [
         style="display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; margin-top: 2.25rem;"
       >
         <Install />
-        <a class="btn btn-quiet" href="/docs/quickstart">Read the quickstart</a>
+        <a class="btn btn-quiet" href={doc("/docs/quickstart")}>Read the quickstart</a>
       </div>
       <p class="mono" style="margin-top: 1.4rem;">
-        Prefer to look first? <a class="link" href="/docs/dashboard">The
+        Prefer to look first? <a class="link" href={doc("/docs/dashboard")}>The
         dashboard</a> runs on synthetic traffic, with no keys and no network.
       </p>
     </div>
@@ -339,9 +344,9 @@ const faqs = [
             a hash-chained audit log you can replay afterwards.
           </p>
           <p class="prose">
-            <a class="link" href="/docs/dashboard">Read about the dashboard</a>
+            <a class="link" href={doc("/docs/dashboard")}>Read about the dashboard</a>
             ·
-            <a class="link" href="/docs/architecture">How it fits together</a>
+            <a class="link" href={doc("/docs/architecture")}>How it fits together</a>
           </p>
         </div>
       </div>
@@ -417,7 +422,7 @@ const faqs = [
           <span style="margin-left: auto;">demo workload</span>
         </div>
         <img
-          src="/dashboard.png"
+          src={doc("/dashboard.png")}
           alt="The Backstop dashboard, showing a demo workload: budget remaining, token spend, calls prevented, request rate, latency, concurrency and breaker state as tiles, with throughput and budget-burn charts, per-session rows, an outcome mix, enforcement events and runaway-spend signals below."
           width="1440"
           height="900"
@@ -501,7 +506,7 @@ const faqs = [
       </div>
       <p class="prose" style="margin-top: 2.5rem;">
         The long version, with the reasoning and the trade-offs, is in
-        <a class="link" href="/docs/threat-model">the threat model</a>.
+        <a class="link" href={doc("/docs/threat-model")}>the threat model</a>.
       </p>
     </div>
   </section>
@@ -538,7 +543,7 @@ const faqs = [
       </p>
       <div style="display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; margin-top: 2rem;">
         <Install />
-        <a class="btn btn-quiet" href="/docs">Browse the documentation</a>
+        <a class="btn btn-quiet" href={doc("/docs")}>Browse the documentation</a>
       </div>
     </div>
   </section>

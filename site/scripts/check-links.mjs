@@ -34,6 +34,10 @@ const exists = async (path) => {
   }
 };
 
+// The site may be built for a subdirectory (GitHub Pages serves a project
+// site from one), so the prefix is stripped before a path is resolved.
+const BASE = (process.env.SITE_BASE ?? "/backstop").replace(/\/$/, "");
+
 const pages = await walk(dist);
 const broken = [];
 const seen = new Set();
@@ -50,12 +54,20 @@ for (const page of pages) {
     const key = path + (hash ?? "");
     if (seen.has(key)) continue;
     seen.add(key);
-    const target = path.startsWith("/")
-      ? join(dist, path)
-      : resolve(dirname(page), path);
+    // The site's own root link points at the deployment root, which serves
+    // the index; in the output folder that is the folder itself.
+    const rooted =
+      path === BASE || path === "/"
+        ? "/"
+        : BASE && path.startsWith(BASE + "/")
+          ? path.slice(BASE.length)
+          : path;
+    const target = rooted.startsWith("/")
+      ? join(dist, rooted)
+      : resolve(dirname(page), rooted);
     let ok = await exists(target);
-    if (!ok && !path.endsWith("/")) ok = await exists(target + "/index.html");
-    if (!ok && path.endsWith("/")) ok = await exists(join(target, "index.html"));
+    if (!ok && !rooted.endsWith("/")) ok = await exists(target + "/index.html");
+    if (!ok && rooted.endsWith("/")) ok = await exists(join(target, "index.html"));
     if (!ok) broken.push(`${relative(dist, page)} -> ${href}`);
   }
 }

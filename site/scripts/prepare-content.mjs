@@ -123,7 +123,13 @@ function firstParagraph(body) {
  * a different page. A link that leaves the docs folder — a source file, an
  * examples directory — points at the repository on GitHub.
  */
-const DOC_ROUTES = { base: "/docs", repo: "https://github.com/RavaniRoshan/backstop" };
+// The same base the site is built with. GitHub Pages serves a project site
+// from a subdirectory, so every route the site links to carries the prefix.
+const SITE_BASE = (process.env.SITE_BASE ?? "/backstop").replace(/\/$/, "");
+const DOC_ROUTES = {
+  base: `${SITE_BASE}/docs`,
+  repo: "https://github.com/RavaniRoshan/backstop",
+};
 
 function rewriteLinks(body) {
   return body.replace(/\]\(([^)\s]+)(\s+"[^"]*")?\)/g, (match, target, title) => {
