@@ -104,9 +104,16 @@ All notable changes to Backstop should be documented in this file.
   cropped to its own ink. A mark that was a single flat colour with the colour
   baked in (the Codex mark is `#111`, which vanished on a dark page) is
   normalised to `currentColor` and tinted by the page.
-- **The wiring diagram.** The agents on the left, Backstop in the middle, the
-  endpoint shapes on the right: one story in three columns, with the wires
-  drawing themselves in and the requests travelling along them.
+- **The request path.** The agents at the top, their requests falling into
+  Backstop, and the two endpoint shapes it forwards to: one story in three
+  columns, with the wires drawing themselves in and the requests travelling
+  along them.
+- **The topology appears once.** "How it works" used to redraw the same
+  agents-to-provider wiring the hero already drew. It now draws the other
+  half of the story instead: the gates one request passes through, in the
+  order the transport runs them — price, budget, gate, breaker, provider —
+  and what happens when one of them says no. The order is the code's, not a
+  drawing's.
 - **An integrations section, and the number behind it.** Backstop does not
   know what a provider is, so "how many servers does this work with?" has one
   answer: every server that speaks the OpenAI-compatible protocol, and the two

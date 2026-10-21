@@ -58,7 +58,8 @@ the site should go out to both.
 | `pages/` | The marketing pages, as Astro routes |
 | `components/` | The marketing components: the request path, the integrations matrix, the feature bento, the loader, the footer |
 | `styles/marketing.css` | The marketing pages' own vocabulary |
-| `styles/diagram.css` | The wiring diagram |
+| `styles/diagram.css` | The request path |
+| `styles/journey.css` | The request journey |
 | `styles/integrations.css` | The integrations section |
 | `styles/bento.css` | The feature bento |
 | `styles/footer.css` | The footer |

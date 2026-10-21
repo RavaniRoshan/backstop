@@ -1,0 +1,101 @@
+/* The request journey.
+   -----------------------------------------------------------------------
+   The hero shows the topology — who talks to whom. This shows the order a
+   single request passes through the gates, and what happens when one of
+   them says no.
+
+   It is a flow, not a picture of a flow: a spine down the left with the
+   gates on it, a rule separating what a gate does from what it refuses,
+   and a pulse travelling the spine so the page is still moving. */
+
+.journey {
+  margin: 0;
+}
+
+.journey svg {
+  display: block;
+  width: 100%;
+  max-width: 50rem;
+  height: auto;
+  overflow: visible;
+}
+
+.journey figcaption {
+  margin-top: 1.25rem;
+  color: var(--blume-muted-foreground);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  max-width: 40rem;
+}
+
+/* --- the spine ----------------------------------------------------------- */
+
+.spine {
+  fill: none;
+  stroke: color-mix(in srgb, var(--blume-muted-foreground) 28%, transparent);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.rule {
+  stroke: var(--blume-border);
+  stroke-width: 1;
+}
+
+.pulse {
+  fill: var(--blume-accent);
+  opacity: 0.9;
+}
+
+.gate-dot {
+  fill: var(--blume-background);
+  stroke: var(--blume-accent);
+  stroke-width: 2;
+}
+
+/* --- the text ------------------------------------------------------------ */
+
+.gate-number {
+  font-family: var(--blume-font-mono);
+  font-size: 11px;
+  fill: var(--blume-muted-foreground);
+  letter-spacing: 0.08em;
+}
+
+.gate-name {
+  font-family: var(--blume-font-display);
+  font-size: 18px;
+  font-weight: 620;
+  letter-spacing: -0.02em;
+  fill: var(--blume-foreground);
+}
+
+.gate-does {
+  font-family: var(--blume-font-body);
+  font-size: 13px;
+  fill: var(--blume-muted-foreground);
+}
+
+/* What it refuses, and what it passes on to. */
+.gate-refuses,
+.gate-passes {
+  font-family: var(--blume-font-body);
+  font-size: 12.5px;
+  fill: var(--blume-accent);
+}
+
+.outcome-mark {
+  fill: none;
+  stroke: var(--blume-accent);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* --- no motion ----------------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .pulse {
+    display: none;
+  }
+}

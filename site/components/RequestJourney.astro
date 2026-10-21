@@ -1,0 +1,143 @@
+---
+/**
+ * What happens to one request.
+ *
+ * The hero shows the topology — who talks to whom. This shows the other half:
+ * the gates a request passes through, in the order the transport runs them,
+ * and what happens when one of them says no.
+ *
+ * The order is the code's, not a drawing's: the price is looked up before the
+ * budget is reserved, the budget before the gate, the gate before the
+ * breaker, and the breaker before the provider is asked.
+ */
+import "../styles/journey.css";
+
+interface Gate {
+  /** The gate's name. */
+  name: string;
+  /** What it does, in lines. */
+  does: string[];
+  /** What happens when it says no. Null when it never says no. */
+  refuses?: string[];
+  /** What it passes on to, when it says yes. */
+  passes?: string[];
+}
+
+const gates: Gate[] = [
+  {
+    name: "Price it",
+    does: ["Only when a dollar ceiling is set.", "No ceiling, no price lookup."],
+    refuses: [
+      "An unpriced model is refused.",
+      "A ceiling with a hole in it is not a ceiling.",
+    ],
+  },
+  {
+    name: "Reserve the budget",
+    does: ["Tokens and dollars are held before the", "request leaves your machine."],
+    refuses: ["Over the ceiling: try a cheaper", "model, then carry on unreserved."],
+  },
+  {
+    name: "The gate",
+    does: ["Requests in flight are capped. The", "queue prioritises; it never drops."],
+    refuses: ["The queue times out."],
+  },
+  {
+    name: "The breaker",
+    does: ["A provider that is failing stops", "being asked for requests."],
+    refuses: ["An open circuit refuses the request."],
+  },
+  {
+    name: "The provider",
+    does: ["Sent with retries on 429 and 5xx."],
+    passes: ["The response, and one priced record", "in the ledger."],
+  },
+];
+
+const TOP = 46;
+const STEP = 100;
+const SPINE = 58;
+const RULE = 404;
+const RIGHT = 428;
+const HEIGHT = TOP + STEP * (gates.length - 1) + 66;
+---
+
+<figure class="journey">
+  <svg
+    viewBox={`0 0 700 ${HEIGHT}`}
+    role="img"
+    aria-labelledby="journey-title journey-desc"
+    xmlns="http://www.w3.org/2000/svg"
+  >
+    <title id="journey-title">The gates one request passes through</title>
+    <desc id="journey-desc">
+      A request is priced, has its budget reserved, waits for a slot at the
+      concurrency gate, passes the circuit breaker, and is sent to the provider
+      with retries. At each gate, the outcome if it is refused.
+    </desc>
+
+    <path
+      id="journey-spine"
+      class="spine"
+      d={`M ${SPINE} ${TOP - 22} L ${SPINE} ${TOP + STEP * (gates.length - 1) + 34}`}
+    />
+
+    <circle class="pulse" r="3">
+      <animateMotion dur="4.5s" repeatCount="indefinite" begin="0.8s">
+        <mpath href="#journey-spine" />
+      </animateMotion>
+    </circle>
+
+    <line class="rule" x1={RULE} y1={TOP - 26} x2={RULE} y2={HEIGHT - 22} />
+
+    {
+      gates.map((gate, index) => {
+        const y = TOP + index * STEP;
+        const number = String(index + 1).padStart(2, "0");
+        return (
+          <g class="gate">
+            <circle class="gate-dot" cx={SPINE} cy={y} r="6.5" />
+            <text x={SPINE} y={y - 22} class="gate-number" text-anchor="middle">
+              {number}
+            </text>
+
+            <text x={SPINE + 30} y={y + 2} class="gate-name">
+              {gate.name}
+            </text>
+            {gate.does.map((line, lineIndex) => (
+              <text x={SPINE + 30} y={y + 24 + lineIndex * 18} class="gate-does">
+                {line}
+              </text>
+            ))}
+
+            {gate.refuses ? (
+              <g>
+                <path class="outcome-mark" d={`M ${RIGHT} ${y + 12} l 9 9 M ${RIGHT + 9} ${y + 12} l -9 9`} />
+                {gate.refuses.map((line, lineIndex) => (
+                  <text x={RIGHT + 22} y={y + 24 + lineIndex * 18} class="gate-refuses">
+                    {line}
+                  </text>
+                ))}
+              </g>
+            ) : null}
+            {gate.passes ? (
+              <g>
+                <path class="outcome-mark" d={`M ${RIGHT} ${y + 12} h 12 M ${RIGHT + 6} ${y + 6} l 6 6 -6 6`} />
+                {gate.passes.map((line, lineIndex) => (
+                  <text x={RIGHT + 22} y={y + 24 + lineIndex * 18} class="gate-passes">
+                    {line}
+                  </text>
+                ))}
+              </g>
+            ) : null}
+          </g>
+        );
+      })
+    }
+  </svg>
+
+  <figcaption>
+    The order is the transport's, not a drawing's. Every one of these is off by
+    default; the defaults are the boring ones.
+  </figcaption>
+</figure>
