@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <a href="https://backstop-b5g.pages.dev"><strong>backstop-b5g.pages.dev</strong></a> — the marketing page and this documentation, live.
+  <a href="https://ravaniroshan.github.io/backstop/"><strong>ravaniroshan.github.io/backstop</strong></a> — the marketing page and this documentation, live.
 </p>
 
 <p align="center">
@@ -561,7 +561,7 @@ See [docs/benchmarks.md](docs/benchmarks.md).
 | Page | What it covers |
 |---|---|
 | [docs/index.md](docs/index.md) | The documentation index — what to read, and in what order |
-| [site/](site/) | The website: the marketing page and this documentation, built from `docs/` — live at [backstop-b5g.pages.dev](https://backstop-b5g.pages.dev) |
+| [site/](site/) | The website: the marketing page and this documentation, built from `docs/` — live at [ravaniroshan.github.io/backstop](https://ravaniroshan.github.io/backstop/) |
 | [docs/quickstart.md](docs/quickstart.md) | Install to first guarded request, in six steps |
 | [docs/install.md](docs/install.md) | Every install path, including air-gapped |
 | [docs/architecture.md](docs/architecture.md) | How the transport, the ledger and the gate fit together |

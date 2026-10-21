@@ -12,8 +12,8 @@ by hand in that script, and the body is copied through with its links
 rewritten for the site. The documents themselves stay as they are, because
 they are also read on GitHub.
 
-The site is published at <https://backstop-b5g.pages.dev>, and
-`backstop-b5g.pages.dev/docs` is the documentation.
+The site is published at <https://ravaniroshan.github.io/backstop/>, and
+`ravaniroshan.github.io/backstop/docs` is the documentation.
 
 ## Running it
 
@@ -29,15 +29,25 @@ host can serve.
 
 ## Deploying it
 
-`.github/workflows/deploy.yml` builds the site and hands it to Cloudflare
-Pages. It needs two repository secrets, `CLOUDFLARE_API_TOKEN` and
-`CLOUDFLARE_ACCOUNT_ID`; the workflow checks for them before it builds, so a
-missing one fails in seconds with a named error instead of after two builds.
+`.github/workflows/pages.yml` builds the site and publishes it to GitHub Pages.
+The repository's Pages setting is already "GitHub Actions" as the build source,
+so the workflow is what builds and publishes it; it runs on every push that
+touches `site/` or `docs/`, because the documentation on the site is the
+repository's own `docs/`.
 
-The site is built for the root of whatever host serves it. A deployment that
-lives in a subdirectory sets `SITE_BASE` to that prefix, and every link in the
-site follows it — the framework's own, the marketing page's, and the ones
-`prepare-content.mjs` rewrites into the documents.
+GitHub serves a project site from a subdirectory, and the base path is not
+written down anywhere: `actions/configure-pages` reports where GitHub will
+actually serve the site, and the build takes its `SITE_BASE` and its canonical
+URL from there. The two cannot drift.
+
+A deployment that lives at the root of a host sets `SITE_BASE` to nothing, and
+every link in the site follows the prefix — the framework's own, the marketing
+page's, and the ones `prepare-content.mjs` rewrites into the documents.
+
+`.github/workflows/deploy.yml` is the same build, handed to Cloudflare Pages
+instead. It needs two repository secrets, `CLOUDFLARE_API_TOKEN` and
+`CLOUDFLARE_ACCOUNT_ID`; it does not fire on a push, so run it by hand when
+the site should go out to both.
 
 ## What is in here
 

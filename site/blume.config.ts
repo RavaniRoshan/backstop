@@ -29,7 +29,7 @@ export default defineConfig({
   // that lives in a subdirectory — a GitHub Pages project site, say — sets
   // SITE_BASE to that prefix, and every link in the site follows it.
   deployment: {
-    site: process.env.SITE_URL ?? "https://backstop.pages.dev",
+    site: process.env.SITE_URL ?? "https://ravaniroshan.github.io/backstop",
     base: process.env.SITE_BASE ?? "",
   },
 
