@@ -49,6 +49,25 @@ All notable changes to Backstop should be documented in this file.
   charts the requests the open breaker turned away rather than rendering an
   empty sparkline.
 
+### The website
+
+- **A marketing page and a documentation site**, in one static build. The
+  documentation is not a copy: `site/scripts/prepare-content.mjs` derives the
+  site's content from the repository's own `docs/*.md` at build time, so the
+  documents people read on GitHub and the documents the site serves are the same
+  files.
+- **The site is built on [Blume](https://useblume.dev)** for the documentation
+  — a zero-config, Markdown-first framework on Astro and Vite — and on plain
+  Astro for the marketing page, mounted beside the docs so both share one
+  header, one search and one theme toggle.
+- **The palette is the dashboard's palette.** The site and the product it
+  documents are the same colour, in both themes.
+- **The site makes no outbound request.** The fonts are self-hosted at build
+  time, and the Content-Security-Policy says `default-src 'none'`, exactly like
+  the dashboard.
+- **A link checker** (`site/scripts/check-links.mjs`) resolves every internal
+  link in the built output, and CI builds the site and runs it.
+
 ### Dashboard, second pass
 
 - **Every signal the snapshot already carried is now visible.** Cache hits
