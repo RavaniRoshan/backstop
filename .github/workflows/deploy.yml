@@ -20,9 +20,6 @@ jobs:
   deploy:
     name: build and deploy
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: site
     steps:
       # Before anything expensive, and before checkout, because a missing secret
       # is the one failure guaranteed to make the last step fail. Wrangler
@@ -57,12 +54,15 @@ jobs:
           cache-dependency-path: site/package-lock.json
       - name: Install
         run: npm ci
+        working-directory: site
       - name: Build
         run: npm run build
+        working-directory: site
         env:
           SITE_URL: https://backstop-b5g.pages.dev
       - name: Check the internal links
         run: npm run check:links
+        working-directory: site
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@9acf94ace14e7dc412b076f2c5c20b8ce93c79cd # v3
         with:
