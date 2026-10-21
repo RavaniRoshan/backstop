@@ -186,6 +186,69 @@ except BudgetExceededError as exc:
 
 ---
 
+## The Built-In Dashboard
+
+`backstop dashboard` opens an operations view of the process it runs in —
+budgets, burn rate, AIMD concurrency, breaker state, per-session isolation and
+enforcement events — with **no Prometheus, no exporter, and nothing installed
+beyond the standard library**.
+
+```bash
+backstop dashboard --demo                    # synthetic traffic: no keys, no network
+backstop dashboard                           # watch a real process
+backstop dashboard --audit audit.jsonl --cost-model gpt-4o
+```
+
+It binds loopback only. Exposing it further needs a bearer token:
+
+```bash
+backstop dashboard --host 0.0.0.0 --token "$(openssl rand -hex 32)"
+```
+
+The page makes **zero outbound requests** — its Content-Security-Policy is
+`default-src 'none'` — and it stores nothing. What it shows comes from a
+bounded in-memory ring of samples, the live session states, and a tail of the
+audit log. For retention, fleet-wide queries and alerting, export Prometheus or
+OTel and point them at your own stack; the dashboard reports whether those
+sinks are live.
+
+![The built-in dashboard, showing the demo workload with synthetic traffic](docs/assets/dashboard-dark.png)
+
+### What it shows
+
+| Surface | What it answers |
+|---|---|
+| Seven KPI tiles | Budget remaining and its burn rate, token spend, calls prevented, request rate, p95 latency, AIMD concurrency, breaker state |
+| Throughput and prevention | Requests/s and calls stopped/s, with each enforcement event marked on the axis |
+| Budget burn | Tokens/min against the ceiling |
+| Sessions | One row per wrapped client: budget used, remaining, concurrency, breaker state |
+| Outcome mix | Request counts by outcome, proportional |
+| Enforcement events | The audit tail: decision, reason, endpoint, priority, estimated tokens |
+| Tenants | Per-tenant request-scoped budget usage |
+
+### Reading it
+
+- **The x-axis is wall-clock** and every chart states the window it shows, so a
+  spike lines up with a log line. A **window** control slices the in-memory
+  ring to `1m`, `5m`, `15m` or all of it.
+- **Refresh can be turned off.** The surface can be paused, and the sample age
+  keeps counting so the data's age stays visible.
+- **Status is text first.** Every tile carries a status token (`OK`, `WATCH`,
+  `BREACH`, `IDLE`, `NO DATA`) beside its colour, so no state depends on
+  colour alone.
+- **Tiles drill down.** Activating a tile title filters the tables below to the
+  rows that explain that number.
+- **Charts are readable without a mouse**: each has a text summary for
+  assistive technology and a *Show as table* alternative, and the tables take
+  arrow-key row navigation.
+
+Every derived number states how it was derived, in the panel or the footer, so
+a screenshot can be argued with.
+
+See [docs/dashboard.md](docs/dashboard.md) for the full description.
+
+---
+
 ## What It Enforces
 
 | Feature | Description |
@@ -359,6 +422,9 @@ under-count on Anthropic's 1-hour TTL — are in [docs/ledger.md](docs/ledger.md
     kill, and spend *avoided* is not in the ledger at all — it stays on the
     enforcement surface (`budget_exceeded` counters, the audit log's `deny`
     records), where it already was.
+  - **The built-in dashboard is a view, not a system.** It reads live process
+    state and a bounded audit tail, keeps nothing, and disappears with the
+    process. It is not a place to look up last month's spend.
 - **Not LangGraph/CrewAI-native.** Works with those frameworks only at the SDK level, not via framework-specific hooks.
 
 ---
