@@ -503,6 +503,29 @@ def _run_budget(args: argparse.Namespace) -> int:
     return 0
 
 
+def _parse_occurred_at(value: object) -> _dt.datetime | None:
+    """Parse a ledger ``occurred_at`` into a datetime, or ``None`` if it is not one.
+
+    A ledger's ``occurred_at`` is fixed-width RFC 3339 UTC — ``YYYY-MM-DDTHH:MM:SS.ffffffZ``
+    — and the rest of the package treats it as a string, because
+    :mod:`backstop.ledger.export` filters on it by comparison. This is the one
+    place that needs it as a datetime.
+
+    The trailing ``Z`` is rewritten to an explicit offset before parsing
+    because ``datetime.fromisoformat`` reads a ``Z`` only from 3.11 onward, and
+    this package supports 3.10 as well. Without the rewrite every event is
+    skipped on 3.10 and the forecast has nothing to measure.
+    """
+    if not isinstance(value, str) or not value:
+        return None
+    if value.endswith("Z"):
+        value = value[:-1] + "+00:00"
+    try:
+        return _dt.datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
 def _run_detect(args: argparse.Namespace) -> int:
     """``backstop detect`` — the runaway-spend signals, over a ledger file.
 
@@ -589,14 +612,11 @@ def _run_forecast(args: argparse.Namespace) -> int:
         )
         return 1
 
-    import datetime as dt
-
     stamps = []
     for event in events:
-        try:
-            stamps.append(dt.datetime.fromisoformat(event.occurred_at))
-        except (TypeError, ValueError):
-            continue
+        stamp = _parse_occurred_at(event.occurred_at)
+        if stamp is not None:
+            stamps.append(stamp)
     if len(stamps) < 2:
         print("Not enough events with usable timestamps.", file=sys.stderr)
         return 1

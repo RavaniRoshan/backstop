@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 import decimal
 import gc
 import json
@@ -960,6 +961,28 @@ def test_cli_detect_json_carries_the_counts(spend_ledger, capsys):
     assert payload["events"] == 5
     assert "signals" in payload
     assert "counts" in payload
+
+
+def test_cli_parses_a_ledger_timestamp_the_way_the_ledger_writes_it():
+    """A ledger's ``occurred_at`` is RFC 3339 UTC with a trailing ``Z``.
+
+    The forecast is the one place that reads it as a datetime rather than as
+    a string, and ``datetime.fromisoformat`` reads a ``Z`` only from 3.11
+    onward. So the ``Z`` is rewritten to an explicit offset before parsing,
+    and the two spellings of the same instant must agree.
+    """
+    from backstop.cli import _parse_occurred_at
+
+    zulu = _parse_occurred_at("2026-10-21T14:52:46.123456Z")
+    offset = _parse_occurred_at("2026-10-21T14:52:46.123456+00:00")
+    assert zulu is not None
+    assert zulu == offset
+    assert zulu.utcoffset() == datetime.timedelta(0)
+
+    # A stamp that is not one is refused rather than guessed at.
+    assert _parse_occurred_at("not a timestamp") is None
+    assert _parse_occurred_at("") is None
+    assert _parse_occurred_at(None) is None
 
 
 def test_cli_forecast_projects_exhaustion_from_the_measured_rate(spend_ledger, capsys):

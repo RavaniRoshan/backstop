@@ -256,6 +256,13 @@ noticed.
 
 ### Fixed
 
+- **`backstop forecast` was broken on Python 3.10.** A ledger's `occurred_at`
+  is RFC 3339 UTC with a trailing `Z`, and the forecast is the one place that
+  reads it as a datetime rather than as a string. `datetime.fromisoformat`
+  reads a `Z` only from 3.11 onward, so on 3.10 every event was skipped and
+  the command answered "Not enough events with usable timestamps." and exited
+  1 — on the version the package supports. The offset is now made explicit
+  before parsing, and the two spellings of an instant agree.
 - **A sync release never woke an async waiter.** `PriorityGate` guarded one
   set of counters and one set of queues with two independent conditions, one
   for each path. A request could wait forever for a slot that was already

@@ -54,7 +54,15 @@ jobs:
         # Coverage is reported, not enforced at a number the project has
         # never held: the floor is set in the `coverage` job below, where
         # the whole suite runs once rather than once per matrix cell.
-        run: pytest --cov=src/backstop --cov-report=xml --cov-report=term
+        #
+        # The timing-sensitive tests are excluded here for the same reason
+        # they are excluded there: coverage instrumentation changes the cost
+        # they measure, so a measurement taken under instrumentation is a
+        # measurement of the instrumentation. Run against a budget calibrated
+        # for uninstrumented cost, the overhead class failed in most cells
+        # while the uninstrumented run in the `coverage` job passed. They
+        # run uninstrumented there and in `extras`.
+        run: pytest -m "not perf" --cov=src/backstop --cov-report=xml --cov-report=term
       - name: Run the keyless examples
         # The three examples that need no key and no network. They are the
         # first thing a user runs, and they were never run by CI at all.
@@ -129,7 +137,10 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install
-        run: pip install -e ".[anthropic]" mypy types-httpx
+        # No `types-httpx`: httpx ships its own `py.typed` marker, and the
+        # stub package typeshed used to publish for it no longer exists on
+        # PyPI, so the install failed before mypy ever ran.
+        run: pip install -e ".[anthropic]" mypy
       - name: Typecheck
         # The package is annotated and now ships a `py.typed` marker, so a
         # downstream type checker uses its types. That is only worth having if
