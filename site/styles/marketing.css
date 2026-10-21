@@ -1,0 +1,532 @@
+/* The site's own layer, on top of Blume's tokens.
+   -----------------------------------------------------------------------
+   The palette is the dashboard's: the site and the product it documents
+   should look like the same thing. Blume's tokens are overridden in
+   theme.css; this file is the marketing pages' own vocabulary. */
+
+@source "./pages";
+@source "./components";
+
+/* A hairline that reads as a rule, not a border. */
+.rule {
+  border: 0;
+  border-top: 1px solid var(--blume-border);
+  margin: 0;
+}
+
+/* The container. 72rem, not 80: the page should read as a document, not
+   as a canvas someone stretched. */
+.wrap {
+  width: 100%;
+  max-width: 72rem;
+  margin-inline: auto;
+  padding-inline: 1.5rem;
+}
+
+@media (min-width: 768px) {
+  .wrap {
+    padding-inline: 2.5rem;
+  }
+}
+
+/* Section rhythm. */
+.section {
+  padding-block: clamp(3.5rem, 8vw, 7rem);
+}
+
+.section-tight {
+  padding-block: clamp(2.5rem, 5vw, 4.5rem);
+}
+
+/* --- type -------------------------------------------------------------- */
+
+.eyebrow {
+  font-family: var(--blume-font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--blume-muted-foreground);
+}
+
+.display {
+  font-family: var(--blume-font-display);
+  font-weight: 620;
+  letter-spacing: -0.035em;
+  line-height: 1.02;
+  font-size: clamp(2.6rem, 6.4vw, 4.5rem);
+  text-wrap: balance;
+}
+
+.display em {
+  font-style: normal;
+  color: var(--blume-accent);
+}
+
+.h2 {
+  font-family: var(--blume-font-display);
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  line-height: 1.12;
+  font-size: clamp(1.6rem, 3.1vw, 2.35rem);
+  text-wrap: balance;
+}
+
+.h3 {
+  font-family: var(--blume-font-display);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+  font-size: 1.0625rem;
+}
+
+.lead {
+  font-size: clamp(1.0625rem, 1.6vw, 1.25rem);
+  line-height: 1.6;
+  color: var(--blume-muted-foreground);
+  text-wrap: pretty;
+  max-width: 42rem;
+}
+
+.prose p {
+  line-height: 1.7;
+  color: var(--blume-muted-foreground);
+  text-wrap: pretty;
+}
+
+.prose strong {
+  color: var(--blume-foreground);
+  font-weight: 600;
+}
+
+.mono {
+  font-family: var(--blume-font-mono);
+  font-size: 0.8125rem;
+  letter-spacing: -0.01em;
+}
+
+.num {
+  font-family: var(--blume-font-mono);
+  font-size: 0.75rem;
+  color: var(--blume-muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- hero -------------------------------------------------------------- */
+
+.hero {
+  position: relative;
+  overflow: hidden;
+  padding-block: clamp(4rem, 10vw, 8rem) clamp(3rem, 7vw, 5.5rem);
+}
+
+/* One soft light, behind the headline, and nothing else. */
+.hero::before {
+  content: "";
+  position: absolute;
+  inset: -40% 0 auto 0;
+  height: 34rem;
+  background: radial-gradient(
+    46rem 22rem at 50% 0%,
+    color-mix(in srgb, var(--blume-accent) 13%, transparent),
+    transparent 70%
+  );
+  pointer-events: none;
+}
+
+.hero > * {
+  position: relative;
+}
+
+/* --- buttons ----------------------------------------------------------- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: calc(var(--blume-radius) * 0.9);
+  padding: 0.55rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 550;
+  line-height: 1.2;
+  border: 1px solid transparent;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease;
+  text-decoration: none;
+}
+
+.btn-primary {
+  background: var(--blume-foreground);
+  color: var(--blume-background);
+}
+
+.btn-primary:hover {
+  background: var(--blume-accent);
+  color: var(--blume-accent-foreground);
+}
+
+.btn-quiet {
+  border-color: var(--blume-border);
+  color: var(--blume-foreground);
+  background: transparent;
+}
+
+.btn-quiet:hover {
+  border-color: var(--blume-accent);
+  color: var(--blume-accent);
+}
+
+/* The install command, as a thing you can copy. */
+.install {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+  border: 1px solid var(--blume-border);
+  border-radius: calc(var(--blume-radius) * 0.9);
+  padding: 0.5rem 0.55rem 0.5rem 0.9rem;
+  background: var(--blume-muted);
+  font-family: var(--blume-font-mono);
+  font-size: 0.8125rem;
+  color: var(--blume-foreground);
+}
+
+.install .copy {
+  border: 1px solid var(--blume-border);
+  border-radius: calc(var(--blume-radius) * 0.6);
+  background: transparent;
+  color: var(--blume-muted-foreground);
+  font: inherit;
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.2rem 0.5rem;
+  cursor: pointer;
+}
+
+.install .copy:hover {
+  color: var(--blume-foreground);
+  border-color: var(--blume-accent);
+}
+
+/* --- the product frame ------------------------------------------------- */
+
+.frame {
+  border: 1px solid var(--blume-border);
+  border-radius: calc(var(--blume-radius) * 1.2);
+  overflow: hidden;
+  background: var(--blume-muted);
+}
+
+.frame-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.85rem;
+  border-bottom: 1px solid var(--blume-border);
+  font-family: var(--blume-font-mono);
+  font-size: 0.6875rem;
+  color: var(--blume-muted-foreground);
+  background: color-mix(in srgb, var(--blume-background) 60%, transparent);
+}
+
+.frame img {
+  display: block;
+  width: 100%;
+}
+
+/* --- lists ------------------------------------------------------------- */
+
+.rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 3.25rem 1fr;
+  gap: 0 1.25rem;
+  padding-block: 1.4rem;
+  border-top: 1px solid var(--blume-border);
+  align-items: start;
+}
+
+.row:last-child {
+  border-bottom: 1px solid var(--blume-border);
+}
+
+.row h3 {
+  margin: 0 0 0.2rem;
+}
+
+.row p {
+  margin: 0;
+  color: var(--blume-muted-foreground);
+  line-height: 1.6;
+  max-width: 44rem;
+}
+
+/* --- plain words ------------------------------------------------------- */
+
+.terms {
+  display: grid;
+  gap: 1px;
+  background: var(--blume-border);
+  border: 1px solid var(--blume-border);
+  border-radius: calc(var(--blume-radius) * 1.1);
+  overflow: hidden;
+}
+
+@media (min-width: 900px) {
+  .terms {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.term {
+  background: var(--blume-background);
+  padding: 1.5rem 1.5rem 1.6rem;
+}
+
+.term dt {
+  font-family: var(--blume-font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--blume-accent);
+  margin: 0 0 0.6rem;
+}
+
+.term dd {
+  margin: 0;
+  line-height: 1.65;
+  color: var(--blume-muted-foreground);
+}
+
+.term dd strong {
+  color: var(--blume-foreground);
+  font-weight: 600;
+}
+
+/* --- proof ------------------------------------------------------------- */
+
+.terminal {
+  border: 1px solid var(--blume-border);
+  border-radius: calc(var(--blume-radius) * 1.1);
+  background: var(--blume-muted);
+  overflow: hidden;
+  font-family: var(--blume-font-mono);
+  font-size: 0.75rem;
+  line-height: 1.65;
+}
+
+.terminal-head {
+  padding: 0.5rem 0.85rem;
+  border-bottom: 1px solid var(--blume-border);
+  color: var(--blume-muted-foreground);
+  font-size: 0.6875rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.terminal pre {
+  margin: 0;
+  padding: 1rem 1.1rem 1.15rem;
+  overflow-x: auto;
+  color: var(--blume-foreground);
+  /* The prose sets a larger size on `pre`; a code sample is not prose, and a
+     sample that has to be scrolled sideways to read is a broken sample. */
+  font-size: 0.75rem;
+  line-height: 1.6;
+}
+
+@media (max-width: 640px) {
+  .terminal pre {
+    font-size: 0.6875rem;
+  }
+}
+
+/* A code block that scrolls should look like it scrolls. */
+.terminal pre {
+  scrollbar-width: thin;
+  scrollbar-color: var(--blume-border) transparent;
+}
+
+.terminal pre::-webkit-scrollbar {
+  height: 6px;
+}
+
+.terminal pre::-webkit-scrollbar-thumb {
+  background: var(--blume-border);
+  border-radius: 3px;
+}
+
+/* Blume scopes its dual-theme code colours to `.prose`. The marketing pages
+   are not prose, so the same rules are repeated here — otherwise a light
+   code block sits in a dark page. */
+.terminal :where(pre.astro-code) {
+  color: var(--shiki-light, var(--blume-foreground)) !important;
+  background: 0 0 !important;
+}
+
+.terminal :where(pre.astro-code span) {
+  color: var(--shiki-light, inherit) !important;
+  font-style: var(--shiki-light-font-style, inherit) !important;
+  font-weight: var(--shiki-light-font-weight, inherit) !important;
+  text-decoration: var(--shiki-light-text-decoration, inherit) !important;
+}
+
+:root[data-theme="dark"] .terminal :where(pre.astro-code) {
+  color: var(--shiki-dark, var(--blume-foreground)) !important;
+}
+
+:root[data-theme="dark"] .terminal :where(pre.astro-code span) {
+  color: var(--shiki-dark, inherit) !important;
+  font-style: var(--shiki-dark-font-style, inherit) !important;
+  font-weight: var(--shiki-dark-font-weight, inherit) !important;
+  text-decoration: var(--shiki-dark-text-decoration, inherit) !important;
+}
+
+.terminal .ok {
+  color: #3fb950;
+}
+
+.terminal .dim {
+  color: var(--blume-muted-foreground);
+}
+
+/* --- the honesty section ----------------------------------------------- */
+
+.nope {
+  display: grid;
+  gap: 1.25rem 2.5rem;
+}
+
+@media (min-width: 900px) {
+  .nope {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.nope-item {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.75rem;
+  align-items: start;
+}
+
+.nope-item::before {
+  content: "—";
+  color: var(--blume-accent);
+  font-family: var(--blume-font-mono);
+}
+
+.nope-item h3 {
+  margin: 0 0 0.15rem;
+}
+
+.nope-item p {
+  margin: 0;
+  color: var(--blume-muted-foreground);
+  line-height: 1.6;
+  max-width: 34rem;
+}
+
+/* --- faq --------------------------------------------------------------- */
+
+.faq {
+  border-top: 1px solid var(--blume-border);
+}
+
+.faq details {
+  border-bottom: 1px solid var(--blume-border);
+}
+
+.faq summary {
+  cursor: pointer;
+  padding-block: 1.1rem;
+  font-weight: 550;
+  list-style: none;
+  display: flex;
+  justify-content: space-between;
+  gap: 1.5rem;
+  align-items: baseline;
+}
+
+.faq summary::-webkit-details-marker {
+  display: none;
+}
+
+.faq summary::after {
+  content: "+";
+  font-family: var(--blume-font-mono);
+  color: var(--blume-muted-foreground);
+}
+
+.faq details[open] summary::after {
+  content: "–";
+}
+
+.faq p {
+  margin: 0 0 1.2rem;
+  color: var(--blume-muted-foreground);
+  line-height: 1.65;
+  max-width: 44rem;
+}
+
+/* --- misc -------------------------------------------------------------- */
+
+.grid-2 {
+  display: grid;
+  gap: clamp(2rem, 5vw, 4rem);
+}
+
+@media (min-width: 900px) {
+  .grid-2 {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+  }
+}
+
+.link {
+  color: var(--blume-foreground);
+  text-decoration-color: color-mix(in srgb, var(--blume-accent) 55%, transparent);
+  text-underline-offset: 3px;
+}
+
+.link:hover {
+  color: var(--blume-accent);
+}
+
+.stat {
+  border-top: 1px solid var(--blume-border);
+  padding-top: 1rem;
+}
+
+.stat b {
+  display: block;
+  font-family: var(--blume-font-display);
+  font-size: 1.75rem;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+}
+
+.stat span {
+  display: block;
+  margin-top: 0.35rem;
+  color: var(--blume-muted-foreground);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.stat-grid {
+  display: grid;
+  gap: 1.5rem;
+}
+
+@media (min-width: 640px) {
+  .stat-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}

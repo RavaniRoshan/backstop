@@ -1,0 +1,33 @@
+---
+/**
+ * The install command, as a thing you can copy.
+ *
+ * No framework: one listener, one attribute, and the button says what it
+ * did. Blume's core theme ships no client JavaScript, and this keeps it
+ * that way.
+ */
+const command = "pip install backstop-ai";
+---
+
+<div class="install" data-command={command}>
+  <span class="mono">$ {command}</span>
+  <button class="copy" type="button" data-copy>copy</button>
+</div>
+
+<script>
+  document.querySelectorAll<HTMLElement>("[data-copy]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const command = button.closest("[data-command]")?.dataset.command ?? "";
+      try {
+        await navigator.clipboard.writeText(command);
+        button.textContent = "copied";
+      } catch {
+        button.textContent = "select it";
+        return;
+      }
+      window.setTimeout(() => {
+        button.textContent = "copy";
+      }, 1600);
+    });
+  });
+</script>

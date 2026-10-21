@@ -1,0 +1,24 @@
+/* Blume's tokens, set to the dashboard's palette.
+   -----------------------------------------------------------------------
+   The site and the product it documents should be the same colour. These
+   are the exact values the built-in dashboard uses, so a screenshot of the
+   app and a screenshot of the site belong to the same product. */
+
+:root {
+  --blume-background: #f6f7f9;
+  --blume-foreground: #10141a;
+  --blume-muted: #eef0f3;
+  --blume-muted-foreground: #5b6470;
+  --blume-border: rgba(16, 22, 32, 0.13);
+  --blume-code-background: #f2f4f7;
+  --blume-content-width: 44rem;
+}
+
+:root[data-theme="dark"] {
+  --blume-background: #0b0c0e;
+  --blume-foreground: #e6e8eb;
+  --blume-muted: #16181c;
+  --blume-muted-foreground: #99a1ab;
+  --blume-border: rgba(255, 255, 255, 0.11);
+  --blume-code-background: #111316;
+}

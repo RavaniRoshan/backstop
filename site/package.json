@@ -1,0 +1,17 @@
+{
+  "name": "backstop-site",
+  "private": true,
+  "type": "module",
+  "version": "0.8.0",
+  "scripts": {
+    "prepare": "node scripts/prepare-content.mjs",
+    "dev": "npm run prepare && blume dev",
+    "build": "npm run prepare && blume build",
+    "check:links": "node scripts/check-links.mjs",
+    "verify": "npm run build && npm run check:links",
+    "preview": "blume preview"
+  },
+  "dependencies": {
+    "blume": "^1.7.3"
+  }
+}

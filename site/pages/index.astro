@@ -1,0 +1,545 @@
+---
+import { Code } from "astro:components";
+import data from "blume:data";
+import PageLayout from "blume/components/layout/PageLayout.astro";
+import Install from "../components/Install.astro";
+import "../styles/marketing.css";
+
+const { config } = data;
+
+const wrapCode = `from openai import OpenAI
+from backstop import Backstop, BackstopConfig
+
+client = Backstop.wrap(
+    OpenAI(),
+    budget=50_000,     # token ceiling
+    config=BackstopConfig(
+        initial_concurrency=4,
+    ),
+)`;
+
+const limitsCode = `client = Backstop.wrap(
+    OpenAI(),
+    # tokens, and dollars on top
+    budget=50_000,
+    budget_usd=Decimal("5.00"),
+    config=BackstopConfig(
+        initial_concurrency=4,  # in flight
+    ),
+)`;
+
+const errorCode = `from backstop.exceptions import BudgetExceededError
+
+try:
+    response = client.chat.completions.create(...)
+except BudgetExceededError as exc:
+    # A subclass of openai.OpenAIError, so the
+    # handlers you already have still catch it.
+    log.warning("Budget reached", extra={"used": exc.tokens_used})`;
+
+const verifyOutput = `# Backstop Verify — 30-Second Keyless Proof
+
+Mode: offline (local mock transport, zero network, zero keys)
+Provider: openai (gpt-4o-mini simulation)
+
+| Metric             | Result              |
+|--------------------|---------------------|
+| Allowed calls      | 2                   |
+| Blocked calls      | 8                   |
+| Tokens reserved    | 500                 |
+| Tokens saved       | 2,000               |
+| Exception surfaced | BudgetExceededError |
+| Wall-clock overhead| 0.08 ms             |
+
+## Mechanism Checks
+- [PASS] config valid: BackstopConfig() built with sane bounds.
+- [PASS] wrap pipeline: served a mock request end-to-end.
+- [PASS] budget block: 8/10 runaway calls blocked at 500 tokens.
+- [PASS] overhead: control-path p99 = 0.080 ms (direct 0.261 ms).
+- [PASS] cache hit: the second identical request came from cache.
+- [PASS] per-agent isolation: agent A blocked 5/5 at its own cap
+        while agent B kept serving.
+
+Summary: 8 passed, 0 warn, 0 failed, 0 skipped
+Status: VERIFIED (real wrap enforcement active)`;
+
+const features = [
+  {
+    name: "Token budgets",
+    body: "A hard ceiling per session, per agent, or per a hierarchy of them. When it is reached, the next request never leaves your machine.",
+    href: "/docs/quickstart",
+  },
+  {
+    name: "Dollar budgets",
+    body: "The same ceiling in money, priced from the model you actually call, with the arithmetic done in decimals so a cent out is a cent out.",
+    href: "/docs/usd-budgets",
+  },
+  {
+    name: "Circuit breaker",
+    body: "When the provider starts failing, stop sending it requests. It half-opens, tries one, and closes again if the provider recovered.",
+    href: "/docs/architecture",
+  },
+  {
+    name: "Concurrency control",
+    body: "A limit on requests in flight, with a queue that prioritises instead of dropping. Critical work goes first; nothing is discarded.",
+    href: "/docs/concurrency",
+  },
+  {
+    name: "Per-agent isolation",
+    body: "Each wrapped client carries its own budget. One agent cannot spend another's, and a parent can cap a whole tree of children.",
+    href: "/docs/architecture",
+  },
+  {
+    name: "Runaway-spend detection",
+    body: "Four detectors that notice a spend pattern — velocity, drift, retry amplification, context growth — before it becomes an invoice.",
+    href: "/docs/detection",
+  },
+  {
+    name: "A live dashboard",
+    body: "Budgets, burn rate, breaker state and enforcement events, in a browser, with no Prometheus and no exporter to install.",
+    href: "/docs/dashboard",
+  },
+  {
+    name: "An audit log",
+    body: "Every enforcement decision, hash-chained, so you can prove afterwards what was allowed and what was stopped.",
+    href: "/docs/architecture",
+  },
+];
+
+const terms = [
+  {
+    term: "Budget",
+    body: "A number you promise. The agent may spend it however it likes — and when it is gone, <strong>the next request never leaves your machine</strong>. It fails in your code, where you can handle it.",
+  },
+  {
+    term: "Circuit breaker",
+    body: "The electrical kind. When a server keeps failing, the switch flips and stops sending it traffic for a while, then lets one request through to see if it recovered.",
+  },
+  {
+    term: "Concurrency",
+    body: "How many things are allowed to be in flight at once. Past that number, work <strong>waits in a queue</strong> rather than being thrown away — and a critical request waits less than a background one.",
+  },
+  {
+    term: "Shadow mode",
+    body: "Watch what would happen without letting it happen yet. The same budget, the same thresholds, every decision recorded — and nothing blocked.",
+  },
+];
+
+const problems = [
+  {
+    name: "The loop that never converges",
+    body: "The tool errors, the agent retries, the retry errors too. The loop is not a bug in the model — it is a missing stopping condition, and it bills you every turn.",
+  },
+  {
+    name: "One agent eats everyone's budget",
+    body: "Ten agents share a process. One of them wants the whole window, and the other nine are fine right up until they are not.",
+  },
+  {
+    name: "The provider is down, and you are paying for the retries",
+    body: "Every attempt is a billed attempt. A breaker that never opens turns a provider outage into your invoice.",
+  },
+];
+
+const notDoing = [
+  {
+    name: "It is not a proxy",
+    body: "Nothing routes through Backstop. The transport is injected in-process and requests go to the provider directly, so there is no network hop to pay for and no second place to operate.",
+  },
+  {
+    name: "It is not a hosted control plane",
+    body: "There is no Backstop server, no shared policy service, and nothing to sign up for. The limits live in the process that owns the traffic.",
+  },
+  {
+    name: "It is not a multi-provider router",
+    body: "If you need to fail over between providers, use a gateway. Backstop's fallback chain stays inside one provider, on purpose.",
+  },
+  {
+    name: "It is not observability storage",
+    body: "Metrics are yours to ship. Backstop emits them and you send them where you like — there is no collector, no retention, and no query language here.",
+  },
+  {
+    name: "It does not enforce spend",
+    body: "The runaway detectors report; they never block, cancel or kill. Enforcement is the budget's job, and the budget is explicit.",
+  },
+];
+
+const faqs = [
+  {
+    q: "Does this slow my requests down?",
+    a: "By about a tenth of a millisecond at the median, measured on two payload sizes and published with the conditions it was measured under. The guardrail has to read and price every request, so the cost is proportional to the body.",
+  },
+  {
+    q: "Do I have to change my call sites?",
+    a: "No. You wrap the SDK client once and keep calling it the way you already do. The only other change is catching one exception type when a budget is reached — and it subclasses the provider's own error, so handlers you already have keep working.",
+  },
+  {
+    q: "What happens when the budget runs out?",
+    a: "The request is refused before it is dispatched, and a BudgetExceededError is raised. Nothing is billed, because nothing was sent. The decision is written to the audit log.",
+  },
+  {
+    q: "Is it Python only?",
+    a: "The Python package is the complete implementation. A TypeScript port of the core is in progress and is not yet a drop-in replacement — the repository says so rather than the marketing page.",
+  },
+  {
+    q: "Do I need Prometheus?",
+    a: "No. The built-in dashboard reads the process's own state and needs nothing installed beyond the standard library. Prometheus and OpenTelemetry are there if you want them, and the dashboard tells you whether they are live.",
+  },
+];
+---
+
+<PageLayout
+  site={{ title: config.title, description: config.description }}
+  logo={config.logo}
+  banner={config.banner}
+  navigation={data.navigation}
+  favicon={config.favicon}
+  fontCssVars={data.fontCssVars}
+  themeMode={config.theme.mode}
+  searchEnabled={config.search.enabled}
+  page={{
+    title: "Backstop — hard limits for AI agents",
+    description: config.description,
+  }}
+>
+  <!-- Hero ------------------------------------------------------------- -->
+  <section class="hero">
+    <div class="wrap">
+      <p class="eyebrow">In-process guardrails for AI agents</p>
+      <h1 class="display" style="margin: 1.1rem 0 0; max-width: 20ch;">
+        The thing that stops a runaway agent is <em>not a better prompt</em>.
+      </h1>
+      <p class="lead" style="margin-top: 1.6rem;">
+        It is a limit. Backstop gives every agent you wrap a budget, a breaker and
+        a concurrency cap — inside your own process, for a tenth of a
+        millisecond, with no proxy and nothing new to run.
+      </p>
+      <div
+        style="display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; margin-top: 2.25rem;"
+      >
+        <Install />
+        <a class="btn btn-quiet" href="/docs/quickstart">Read the quickstart</a>
+      </div>
+      <p class="mono" style="margin-top: 1.4rem;">
+        Prefer to look first? <a class="link" href="/docs/dashboard">The
+        dashboard</a> runs on synthetic traffic, with no keys and no network.
+      </p>
+    </div>
+  </section>
+
+  <!-- 01 The problem ---------------------------------------------------- -->
+  <section class="section-tight" id="problem">
+    <div class="wrap">
+      <p class="eyebrow">01 — What actually goes wrong</p>
+      <h2 class="h2" style="margin: 0.9rem 0 0; max-width: 24ch;">
+        Agents do not fail on one bad decision.
+      </h2>
+      <p class="lead" style="margin-top: 1.1rem;">
+        They fail on ten thousand good ones in a row. Three shapes, and all three
+        have the same cause.
+      </p>
+      <div class="rows" style="margin-top: 2.5rem;">
+        {
+          problems.map((problem, index) => (
+            <div class="row">
+              <p class="num" style="padding-top: 0.2rem;">
+                {String(index + 1).padStart(2, "0")}
+              </p>
+              <div>
+                <h3>{problem.name}</h3>
+                <p>{problem.body}</p>
+              </div>
+            </div>
+          ))
+        }
+      </div>
+      <p class="prose" style="margin-top: 2.5rem; max-width: 40rem;">
+        None of these is a model problem. All of them are a missing limit.
+      </p>
+    </div>
+  </section>
+
+  <!-- 02 How it works ---------------------------------------------------- -->
+  <section class="section" id="how">
+    <div class="wrap">
+      <p class="eyebrow">02 — How it works</p>
+      <h2 class="h2" style="margin: 0.9rem 0 0; max-width: 22ch;">
+        One call, and the limits are in place.
+      </h2>
+      <p class="lead" style="margin-top: 1.1rem;">
+        No proxy, no sidecar, no changes to the code that calls the model. The
+        transport is injected in-process, so requests still go straight to the
+        provider.
+      </p>
+
+      <div class="grid-2" style="margin-top: 3rem;">
+        <div>
+          <p class="num">Step 01</p>
+          <h3 class="h3" style="margin: 0.5rem 0 0.5rem;">Wrap the client.</h3>
+          <p class="prose" style="margin: 0 0 1.25rem;">
+            The wrapped client behaves like the one you had. Same methods, same
+            arguments, same return value.
+          </p>
+          <div class="terminal">
+            <div class="terminal-head">wrap.py</div>
+            <Code
+              code={wrapCode}
+              lang="python"
+              themes={{ light: "github-light", dark: "github-dark" }}
+              defaultColor="light"
+            />
+          </div>
+        </div>
+
+        <div>
+          <p class="num">Step 02</p>
+          <h3 class="h3" style="margin: 0.5rem 0 0.5rem;">Set the limits.</h3>
+          <p class="prose" style="margin: 0 0 1.25rem;">
+            A ceiling in tokens, a ceiling in money, a cap on requests in flight,
+            and when to open the breaker.
+          </p>
+          <div class="terminal">
+            <div class="terminal-head">limits.py</div>
+            <Code
+              code={limitsCode}
+              lang="python"
+              themes={{ light: "github-light", dark: "github-dark" }}
+              defaultColor="light"
+            />
+          </div>
+        </div>
+      </div>
+
+      <div class="grid-2" style="margin-top: 3rem;">
+        <div>
+          <p class="num">Step 03</p>
+          <h3 class="h3" style="margin: 0.5rem 0 0.5rem;">Handle the ceiling.</h3>
+          <p class="prose" style="margin: 0 0 1.25rem;">
+            When the budget is reached the request never leaves your machine, and
+            one exception is raised. It is a subclass of the provider's own
+            error, so the handlers you already wrote still catch it.
+          </p>
+          <div class="terminal">
+            <div class="terminal-head">handler.py</div>
+            <Code
+              code={errorCode}
+              lang="python"
+              themes={{ light: "github-light", dark: "github-dark" }}
+              defaultColor="light"
+            />
+          </div>
+        </div>
+
+        <div>
+          <p class="num">Step 04</p>
+          <h3 class="h3" style="margin: 0.5rem 0 0.5rem;">Watch it.</h3>
+          <p class="prose" style="margin: 0 0 1.25rem;">
+            <code class="mono">backstop dashboard</code> opens a live view of
+            budgets, burn rate, breaker state and every enforcement decision —
+            with no Prometheus and no exporter. And every decision is written to
+            a hash-chained audit log you can replay afterwards.
+          </p>
+          <p class="prose">
+            <a class="link" href="/docs/dashboard">Read about the dashboard</a>
+            ·
+            <a class="link" href="/docs/architecture">How it fits together</a>
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 03 What you get ---------------------------------------------------- -->
+  <section class="section-tight" id="features">
+    <div class="wrap">
+      <p class="eyebrow">03 — What you get</p>
+      <h2 class="h2" style="margin: 0.9rem 0 0; max-width: 20ch;">
+        Eight things, all of them optional.
+      </h2>
+      <p class="lead" style="margin-top: 1.1rem;">
+        Every one of them is a limit you can turn on, or leave off. The defaults
+        are the boring ones.
+      </p>
+      <div class="rows" style="margin-top: 2.5rem;">
+        {
+          features.map((feature, index) => (
+            <div class="row">
+              <p class="num" style="padding-top: 0.25rem;">
+                {String(index + 1).padStart(2, "0")}
+              </p>
+              <div>
+                <h3>
+                  <a class="link" href={feature.href}>{feature.name}</a>
+                </h3>
+                <p>{feature.body}</p>
+              </div>
+            </div>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
+  <!-- 04 Plain words ----------------------------------------------------- -->
+  <section class="section" id="plain">
+    <div class="wrap">
+      <p class="eyebrow">04 — In plain words</p>
+      <h2 class="h2" style="margin: 0.9rem 0 0; max-width: 20ch;">
+        Four hard ideas, said simply.
+      </h2>
+      <dl class="terms" style="margin-top: 2.5rem;">
+        {
+          terms.map((item) => (
+            <div class="term">
+              <dt>{item.term}</dt>
+              <dd set:html={item.body} />
+            </div>
+          ))
+        }
+      </dl>
+    </div>
+  </section>
+
+  <!-- 05 See it ---------------------------------------------------------- -->
+  <section class="section-tight" id="see">
+    <div class="wrap">
+      <p class="eyebrow">05 — See it</p>
+      <h2 class="h2" style="margin: 0.9rem 0 0; max-width: 22ch;">
+        The dashboard is part of the package.
+      </h2>
+      <p class="lead" style="margin-top: 1.1rem;">
+        Not a screenshot of a product that needs a server to go with it. A
+        dependency-free view of the process you are already running, bound to
+        loopback, making no outbound requests.
+      </p>
+      <div class="frame" style="margin-top: 2.5rem;">
+        <div class="frame-bar">
+          <span>backstop dashboard</span>
+          <span style="margin-left: auto;">demo workload</span>
+        </div>
+        <img
+          src="/dashboard.png"
+          alt="The Backstop dashboard, showing a demo workload: budget remaining, token spend, calls prevented, request rate, latency, concurrency and breaker state as tiles, with throughput and budget-burn charts, per-session rows, an outcome mix, enforcement events and runaway-spend signals below."
+          width="1440"
+          height="900"
+          loading="lazy"
+        />
+      </div>
+      <div class="stat-grid" style="margin-top: 2rem;">
+        <div class="stat">
+          <b>Seven tiles</b>
+          <span>Budget, spend, prevented calls, request rate, latency, concurrency and the breaker — each with a status you can read without colour.</span>
+        </div>
+        <div class="stat">
+          <b>Wall-clock axis</b>
+          <span>Every chart states the window it shows, so a spike lines up with a log line instead of a moving relative label.</span>
+        </div>
+        <div class="stat">
+          <b>Drill-down</b>
+          <span>Activate a tile and the tables below narrow to the rows that explain that number. No Prometheus, no exporter, no collector.</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 06 Proof ----------------------------------------------------------- -->
+  <section class="section" id="proof">
+    <div class="wrap">
+      <p class="eyebrow">06 — Proof</p>
+      <h2 class="h2" style="margin: 0.9rem 0 0; max-width: 22ch;">
+        Check it yourself, in thirty seconds, with no API key.
+      </h2>
+      <p class="lead" style="margin-top: 1.1rem;">
+        <code class="mono">backstop verify</code> runs a real wrap against a local
+        mock transport, blocks a runaway, and prints what it measured. If it
+        cannot prove the limits work, it says so and exits non-zero.
+      </p>
+      <div class="grid-2" style="margin-top: 2.5rem; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);">
+        <div class="terminal">
+          <div class="terminal-head">$ backstop verify</div>
+          <pre>{verifyOutput}</pre>
+        </div>
+        <div>
+          <div class="stat">
+            <b>0.08 ms</b>
+            <span>Control-path overhead at p99, measured on a local mock transport. The full snapshot publishes the host, the seed and both payload sizes.</span>
+          </div>
+          <div class="stat" style="margin-top: 1.5rem;">
+            <b>8 of 10</b>
+            <span>Runaway calls blocked before dispatch, against a 500-token budget. The two that were allowed completed inside it.</span>
+          </div>
+          <div class="stat" style="margin-top: 1.5rem;">
+            <b>$0</b>
+            <span>Spent past the ceiling. A blocked request is never dispatched, so there is nothing to bill.</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 07 What it does not do ---------------------------------------------- -->
+  <section class="section-tight" id="honesty">
+    <div class="wrap">
+      <p class="eyebrow">07 — What it does not do</p>
+      <h2 class="h2" style="margin: 0.9rem 0 0; max-width: 24ch;">
+        The things it will not do for you.
+      </h2>
+      <p class="lead" style="margin-top: 1.1rem;">
+        Every product has a boundary. This one draws it in public, because a
+        guardrail you misunderstand is worse than no guardrail.
+      </p>
+      <div class="nope" style="margin-top: 2.5rem;">
+        {
+          notDoing.map((item) => (
+            <div class="nope-item">
+              <div>
+                <h3>{item.name}</h3>
+                <p>{item.body}</p>
+              </div>
+            </div>
+          ))
+        }
+      </div>
+      <p class="prose" style="margin-top: 2.5rem;">
+        The long version, with the reasoning and the trade-offs, is in
+        <a class="link" href="/docs/threat-model">the threat model</a>.
+      </p>
+    </div>
+  </section>
+
+  <!-- 08 FAQ ------------------------------------------------------------- -->
+  <section class="section" id="faq">
+    <div class="wrap">
+      <p class="eyebrow">08 — Questions</p>
+      <h2 class="h2" style="margin: 0.9rem 0 0; max-width: 20ch;">
+        The ones worth asking.
+      </h2>
+      <div class="faq" style="margin-top: 2.5rem;">
+        {
+          faqs.map((item) => (
+            <details>
+              <summary>{item.q}</summary>
+              <p>{item.a}</p>
+            </details>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
+  <!-- Closing ------------------------------------------------------------ -->
+  <section class="section-tight" style="padding-bottom: clamp(4rem, 9vw, 8rem);">
+    <div class="wrap">
+      <hr class="rule" />
+      <h2 class="h2" style="margin: 3rem 0 0; max-width: 18ch;">
+        Give it one limit and see what happens.
+      </h2>
+      <p class="lead" style="margin-top: 1.1rem;">
+        Thirty seconds, no key, no account, no network.
+      </p>
+      <div style="display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; margin-top: 2rem;">
+        <Install />
+        <a class="btn btn-quiet" href="/docs">Browse the documentation</a>
+      </div>
+    </div>
+  </section>
+</PageLayout>

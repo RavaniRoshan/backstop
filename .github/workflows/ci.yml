@@ -192,11 +192,34 @@ jobs:
       - name: Test
         run: npm test
 
+  site:
+    # The marketing site and the documentation site. Both are built from the
+    # repository's own `docs/`, so a broken link in a doc is a broken link on
+    # the site -- and the build catches it.
+    name: site build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: site
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Build
+        run: npm run build
+      - name: Check the internal links
+        run: npm run check:links
+
   build:
     # Both gates. The Python matrix covers the package that reaches PyPI, and
     # ts-backstop covers the npm package -- this release bumps that version too,
     # so a release should not go out green-on-Python with a broken npm build.
-    needs: [test, coverage, extras, typecheck, security, ts-backstop]
+    needs: [test, coverage, extras, typecheck, security, ts-backstop, site]
     runs-on: ubuntu-latest
     permissions:
       contents: write
