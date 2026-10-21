@@ -1,0 +1,65 @@
+---
+/**
+ * A strip of providers, scrolling, fading out at both ends.
+ *
+ * For the lanes that name a lot of servers: a shelf you pull from, rather
+ * than a list you read. The marks are the real ones, sized by height so an
+ * icon and a wordmark sit on one baseline.
+ *
+ * The strip is duplicated so the loop is seamless, and the second copy is
+ * hidden from a screen reader — the names are read once, not twice.
+ */
+import { logos } from "../src/data/logos";
+
+interface Provider {
+  slug: string | null;
+  name: string;
+}
+
+interface Props {
+  providers: Provider[];
+  /** Which way the strip travels. */
+  direction?: "left" | "right";
+  /** Seconds for one full pass. */
+  duration?: number;
+}
+
+const { providers, direction = "left", duration = 48 } = Astro.props;
+
+const items = providers.map((provider) => ({
+  ...provider,
+  logo: provider.slug ? logos[provider.slug] : undefined,
+}));
+---
+
+<div
+  class="strip"
+  data-direction={direction}
+  style={`--strip-duration: ${duration}s`}
+>
+  <div class="strip-track">
+    {
+      [false, true].map((copy) => (
+        <div class="strip-half" aria-hidden={copy ? "true" : undefined}>
+          {items.map((item) => (
+            <span class="strip-item">
+              {item.logo ? (
+                <svg
+                  class:list={["mark", item.logo.wordmark && "wordmark"]}
+                  viewBox={item.logo.viewBox}
+                  role="img"
+                  aria-label={item.name}
+                  set:html={item.logo.body}
+                />
+              ) : null}
+              {/* A wordmark carries its own name, so it stands alone. */}
+              {!item.logo || !item.logo.wordmark ? (
+                <span class="strip-name">{item.name}</span>
+              ) : null}
+            </span>
+          ))}
+        </div>
+      ))
+    }
+  </div>
+</div>

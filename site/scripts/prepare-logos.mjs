@@ -108,11 +108,17 @@ const VIEWBOX_CROPS = {
 
 /**
  * A mark that is one flat colour is a monochrome mark that happens to have the
- * colour baked in — the Codex mark is #111, which vanishes on a dark page, and
- * a few wordmarks carry no fill at all and therefore inherit the default
- * black. Rewrite those to currentColor so the page can tint them like any
- * other text. A mark with more than one colour, a gradient or a filter is
- * left exactly as it is: that is what the brand actually looks like.
+ * colour baked in — the Codex mark is #111, which vanishes on a dark page.
+ * Rewrite those to currentColor so the page can tint them like any other
+ * text.
+ *
+ * A path with no fill of its own paints black, the SVG default, and vanishes
+ * on a dark page just the same: the Together AI mark draws its lettering that
+ * way, so without this the wordmark is three coloured blobs and no name.
+ * Those paths get currentColor too.
+ *
+ * A mark with more than one colour, a gradient or a filter keeps its colours:
+ * that is what the brand actually looks like.
  */
 function normalise(svg, body) {
   if (/<(linearGradient|radialGradient|filter|mask|clipPath)\b/.test(svg)) {
@@ -122,19 +128,29 @@ function normalise(svg, body) {
     [...svg.matchAll(/fill="([^"]+)"/g)].map((match) => match[1]),
   );
   const paint = [...colours].filter((c) => c !== "none");
-  if (paint.length === 0) {
-    // No fill anywhere: the default black applies. Make it explicit and tintable.
-    const tinted = body.replace(/<(path|g|polygon|rect|circle)\b/, (tag) => `${tag} fill="currentColor"`);
-    return { body: tinted, monochrome: true };
-  }
+
+  let tinted = body;
+
   if (paint.length === 1 && paint[0] !== "currentColor") {
     const only = paint[0];
-    return {
-      body: body.replaceAll(`fill="${only}"`, 'fill="currentColor"'),
-      monochrome: true,
-    };
+    tinted = tinted.replaceAll(`fill="${only}"`, 'fill="currentColor"');
   }
-  return { body, monochrome: paint.every((c) => c === "currentColor") };
+
+  /* Any path left without a fill of its own paints black. Only where the
+     mark has no group carrying a fill, so a group's colour is not
+     overridden. */
+  if (!/<g[^>]*\bfill=/.test(svg)) {
+    tinted = tinted.replace(
+      /<(path|polygon|polyline|rect|circle|ellipse)\b(?![^>]*\bfill=)/g,
+      (tag) => `${tag} fill="currentColor"`,
+    );
+  }
+
+  const final = new Set(
+    [...tinted.matchAll(/fill="([^"]+)"/g)].map((match) => match[1]),
+  );
+  const monochrome = [...final].every((c) => c === "none" || c === "currentColor");
+  return { body: tinted, monochrome };
 }
 
 /**

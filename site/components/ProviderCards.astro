@@ -1,0 +1,50 @@
+---
+/**
+ * A row of providers, named.
+ *
+ * For the lanes that name only a few: OpenAI and Anthropic, or the three
+ * cloud gateways. A handful of things you pick between deserves to be
+ * picked between properly, so they get cards rather than a strip.
+ */
+import { logos } from "../src/data/logos";
+
+interface Provider {
+  slug: string | null;
+  name: string;
+}
+
+interface Props {
+  providers: Provider[];
+}
+
+const { providers } = Astro.props;
+
+const items = providers.map((provider) => ({
+  ...provider,
+  logo: provider.slug ? logos[provider.slug] : undefined,
+}));
+---
+
+<ul class="provider-cards">
+  {
+    items.map((item) => (
+      <li class="provider-card">
+        <span class="provider-plate">
+          {item.logo ? (
+            <svg
+              class:list={["mark", item.logo.wordmark && "wordmark"]}
+              viewBox={item.logo.viewBox}
+              role="img"
+              aria-label={item.name}
+              set:html={item.logo.body}
+            />
+          ) : null}
+        </span>
+        {/* A wordmark carries its own name, so it stands alone. */}
+        {!item.logo || !item.logo.wordmark ? (
+          <span class="provider-name">{item.name}</span>
+        ) : null}
+      </li>
+    ))
+  }
+</ul>

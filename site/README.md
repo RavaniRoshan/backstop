@@ -56,7 +56,7 @@ the site should go out to both.
 | `blume.config.ts` | The site configuration: title, theme, navigation, deployment |
 | `theme.css` | The design tokens, set to the dashboard's palette |
 | `pages/` | The marketing pages, as Astro routes |
-| `components/` | The marketing components: the request path, the integrations matrix, the feature bento, the loader, the footer |
+| `components/` | The marketing components: the request path, the request journey, the integrations lanes, the feature bento, the loader, the footer |
 | `styles/marketing.css` | The marketing pages' own vocabulary |
 | `styles/diagram.css` | The request path |
 | `styles/journey.css` | The request journey |

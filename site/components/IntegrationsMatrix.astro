@@ -4,20 +4,21 @@
  *
  * The honest answer to "how many servers does this work with?" is: one wire
  * protocol, and every server that speaks it. The enforcement engine does not
- * know what a provider is — it counts requests, dollars and concurrency. So
- * this table is not a list of plugins Backstop ships. It is a list of the
- * servers an operator can actually point Backstop at, and the one thing that
- * differs between them: whether Backstop knows what a token costs.
+ * know what a provider is — it counts requests, tokens and concurrency. So
+ * this is not a list of plugins Backstop ships. It is a list of the servers
+ * an operator can actually point Backstop at, and the one thing that differs
+ * between them: whether Backstop knows what a token costs.
+ *
+ * The four lanes are not drawn the same way, because they are not the same
+ * shape. A lane that names two things gets cards, because two things you
+ * choose between deserve to be chosen between properly. A lane that names
+ * seven gets a shelf you pull from.
  */
-import { logos } from "../src/data/logos";
+import ProviderStrip from "./ProviderStrip.astro";
+import ProviderCards from "./ProviderCards.astro";
 import "../styles/integrations.css";
 
-type Provider = {
-  /** The slug in the logo library, or null when the project has no public mark. */
-  slug: string | null;
-  /** The name, for the servers whose mark is an icon rather than a wordmark. */
-  name: string;
-};
+type Provider = { slug: string | null; name: string };
 
 type Lane = {
   id: string;
@@ -25,8 +26,12 @@ type Lane = {
   speaks: string;
   providers: Provider[];
   adds: string;
-  /** Whether the bundled price catalogue can price these servers' models. */
-  priced: boolean;
+  /** How the lane is drawn. */
+  device: "cards" | "marquee";
+  /** Which way a marquee travels. */
+  direction?: "left" | "right";
+  /** A short tag beside the lane's name — why this lane is different. */
+  tag?: string;
 };
 
 const lanes: Lane[] = [
@@ -34,7 +39,8 @@ const lanes: Lane[] = [
     id: "native",
     label: "The provider's own API",
     speaks: "their own endpoints",
-    priced: true,
+    device: "cards",
+    tag: "priced",
     providers: [
       { slug: "openai", name: "OpenAI" },
       { slug: "anthropic", name: "Anthropic" },
@@ -46,7 +52,8 @@ const lanes: Lane[] = [
     id: "servers",
     label: "Inference servers you run",
     speaks: "an OpenAI-compatible endpoint",
-    priced: false,
+    device: "marquee",
+    direction: "left",
     providers: [
       { slug: "vllm", name: "vLLM" },
       { slug: null, name: "SGLang" },
@@ -63,7 +70,8 @@ const lanes: Lane[] = [
     id: "managed",
     label: "Managed inference",
     speaks: "an OpenAI-compatible endpoint",
-    priced: false,
+    device: "marquee",
+    direction: "right",
     providers: [
       { slug: "deepinfra", name: "DeepInfRA" },
       { slug: "together", name: "Together AI" },
@@ -83,7 +91,7 @@ const lanes: Lane[] = [
     id: "gateways",
     label: "Cloud gateways",
     speaks: "an OpenAI-compatible gateway",
-    priced: false,
+    device: "cards",
     providers: [
       { slug: "aws", name: "Amazon Bedrock" },
       { slug: "azure", name: "Azure OpenAI" },
@@ -94,7 +102,6 @@ const lanes: Lane[] = [
   },
 ];
 
-/** Every server named above, counted the way an operator would count them. */
 const total = lanes.reduce((sum, lane) => sum + lane.providers.length, 0);
 ---
 
@@ -104,65 +111,36 @@ const total = lanes.reduce((sum, lane) => sum + lane.providers.length, 0);
       lanes.map((lane, laneIndex) => (
         <article class="lane" data-lane={lane.id}>
           <p class="lane-index">{String(laneIndex + 1).padStart(2, "0")}</p>
-          <h3 class="lane-title" data-reveal>{lane.label}</h3>
+          <div class="lane-head">
+            <h3 class="lane-title" data-reveal>
+              {lane.label}
+            </h3>
+            {lane.tag ? <span class="lane-tag">{lane.tag}</span> : null}
+          </div>
 
-          <ul class="chips" data-reveal="chips">
-            {lane.providers.map((provider) => {
-              const logo = provider.slug ? logos[provider.slug] : undefined;
-              /* A wordmark carries its own name, so it replaces the name — but
-                 only when it is one flat colour the page can tint. A wordmark
-                 drawn in brand colours was designed for a white page, and on a
-                 dark one its lettering disappears. Those get the name. */
-              const wordmark =
-                logo?.wordmark && logo?.monochrome ? logo : undefined;
-              const icon = logo && !logo.wordmark ? logo : undefined;
-              return (
-                <li class="chip">
-                  {wordmark ? (
-                    <svg
-                      class="mark wordmark"
-                      viewBox={wordmark.viewBox}
-                      role="img"
-                      aria-label={provider.name}
-                      set:html={wordmark.body}
-                    />
-                  ) : null}
-                  {icon ? (
-                    <svg
-                      class="mark"
-                      viewBox={icon.viewBox}
-                      role="img"
-                      aria-label={provider.name}
-                      set:html={icon.body}
-                    />
-                  ) : null}
-                  {!wordmark ? (
-                    <span class="chip-name">{provider.name}</span>
-                  ) : null}
-                </li>
-              );
-            })}
-          </ul>
-
-          <p class="lane-speaks" data-reveal>
-            They speak <strong>{lane.speaks}</strong>.
-          </p>
-
-          <p class="lane-adds" data-reveal>
-            <span class="lane-adds-label">Backstop adds</span>
-            {lane.adds}
-          </p>
+          <div class="lane-body" data-reveal>
+            {lane.device === "cards" ? (
+              <ProviderCards providers={lane.providers} />
+            ) : (
+              <ProviderStrip
+                providers={lane.providers}
+                direction={lane.direction}
+              />
+            )}
+            <p class="lane-speaks">
+              They speak <strong>{lane.speaks}</strong>.
+            </p>
+            <p class="lane-adds">
+              <span class="lane-adds-label">Backstop adds</span>
+              {lane.adds}
+            </p>
+          </div>
         </article>
       ))
     }
   </div>
 
   <p class="integrations-caption">
-    <strong>{total} servers.</strong> One wire protocol, one enforcement engine,
-    no per-provider plugin. The only thing that changes between them is the
-    price list: OpenAI and Anthropic models are priced from the catalogue that
-    ships inside Backstop, and everything else is unpriced until you file a
-    price for it — because a dollar ceiling with no price is a guess, and a
-    guess is not a limit.
+    <strong>{total} servers.</strong> One wire protocol, one enforcement engine, no per-provider plugin. The only thing that changes between them is the price list: OpenAI and Anthropic models are priced from the catalogue that ships inside Backstop, and everything else is unpriced until you file a price for it — because a dollar ceiling with no price is a guess, and a guess is not a limit.
   </p>
 </section>

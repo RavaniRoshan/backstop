@@ -1,11 +1,12 @@
 /* The integrations section.
    -----------------------------------------------------------------------
-   Four lanes: the provider's own API, the servers you run, the managed
-   providers, the cloud gateways. Each lane is a row of real marks with the
-   one sentence that differs — the price list.
+   Four lanes, and they are not the same shape. A lane that names two things
+   gets cards, because two things you choose between deserve to be chosen
+   between properly. A lane that names seven gets a shelf you pull from: a
+   strip that scrolls and fades out at both ends.
 
-   The marks are sized by height, never by a fixed box, so a square icon and
-   a wordmark sit on one baseline at one optical size. */
+   Everything below the strip is the same in every lane, because the strip is
+   the only thing that changes. */
 
 .integrations {
   display: flex;
@@ -21,7 +22,7 @@
 .lane {
   display: grid;
   grid-template-columns: 3.25rem 1fr;
-  grid-template-rows: auto auto auto auto;
+  grid-template-rows: auto auto;
   gap: 0 1.25rem;
   padding-block: 1.6rem;
   border-top: 1px solid var(--blume-border);
@@ -43,9 +44,16 @@
   padding-top: 0.2rem;
 }
 
-.lane-title {
+.lane-head {
   grid-column: 2;
   grid-row: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.6rem;
+}
+
+.lane-title {
   margin: 0;
   font-family: var(--blume-font-display);
   font-weight: 600;
@@ -54,68 +62,166 @@
   line-height: 1.3;
 }
 
-/* --- the strip of marks ------------------------------------------------ */
-
-.chips {
+.lane-body {
   grid-column: 2;
   grid-row: 2;
-  list-style: none;
-  margin: 1rem 0 0;
-  padding: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
+  min-width: 0;
 }
 
-.chip {
+/* --- the shelf ----------------------------------------------------------- */
+
+.strip {
+  position: relative;
+  overflow: hidden;
+  /* The fade is the point: it says there is more of the shelf than fits. */
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 7%,
+    #000 93%,
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 7%,
+    #000 93%,
+    transparent 100%
+  );
+  padding-block: 0.35rem;
+}
+
+.strip-track {
+  display: flex;
+  width: max-content;
+  animation: strip-scroll var(--strip-duration, 48s) linear infinite;
+}
+
+.strip[data-direction="right"] .strip-track {
+  animation-direction: reverse;
+}
+
+/* The pointer stops the shelf, so a name can be read. */
+.strip:hover .strip-track {
+  animation-play-state: paused;
+}
+
+.strip-half {
+  display: flex;
+  align-items: center;
+  gap: 2.75rem;
+  /* The padding closes the gap between one half and the next, so the loop is
+     seamless and the spacing never doubles. */
+  padding-right: 2.75rem;
+}
+
+.strip-item {
   display: inline-flex;
   align-items: center;
-  gap: 0.45rem;
-  padding: 0.32rem 0.7rem 0.32rem 0.55rem;
-  border: 1px solid var(--blume-border);
-  border-radius: calc(var(--blume-radius) * 0.85);
-  background: var(--blume-muted);
-  font-size: 0.8125rem;
-  line-height: 1.3;
-  color: var(--blume-foreground);
+  gap: 0.6rem;
   white-space: nowrap;
 }
 
-/* Sized by height, so a square icon and a wordmark share one baseline. */
-.chip .mark {
-  height: 1.05rem;
+/* The mark carries the brand, so it is the mark that is full strength. The
+   name is the label. */
+.strip .mark {
+  height: 1.2rem;
   width: auto;
   display: block;
   flex: none;
   color: var(--blume-foreground);
 }
 
-/* A wordmark already carries its name, so it sits a little further in. */
-.chip .mark.wordmark {
-  margin-left: 0.05rem;
-}
-
-.chip-name {
+.strip-name {
+  font-size: 0.875rem;
   letter-spacing: -0.005em;
+  color: var(--blume-muted-foreground);
+  transition: color 200ms ease;
 }
 
-/* --- the two lines that differ ----------------------------------------- */
+.strip-item:hover .strip-name {
+  color: var(--blume-foreground);
+}
+
+@keyframes strip-scroll {
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+/* --- the cards ----------------------------------------------------------- */
+
+.provider-cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.provider-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.55rem 0.95rem 0.55rem 0.6rem;
+  border: 1px solid var(--blume-border);
+  border-radius: calc(var(--blume-radius) * 0.9);
+  background: var(--blume-background);
+  transition:
+    border-color 200ms ease,
+    box-shadow 200ms ease;
+}
+
+.provider-card:hover {
+  border-color: color-mix(in srgb, var(--blume-accent) 45%, var(--blume-border));
+  box-shadow: 0 12px 24px -18px rgb(0 0 0 / 0.35);
+}
+
+.provider-plate {
+  display: grid;
+  place-items: center;
+  width: 2.4rem;
+  height: 2.4rem;
+  border-radius: calc(var(--blume-radius) * 0.7);
+  background: var(--blume-muted);
+  flex: none;
+}
+
+.provider-plate .mark {
+  height: 1.3rem;
+  width: auto;
+  max-width: 1.7rem;
+  display: block;
+  color: var(--blume-foreground);
+}
+
+.provider-name {
+  font-size: 0.9375rem;
+  letter-spacing: -0.01em;
+  color: var(--blume-foreground);
+}
+
+.lane-tag {
+  font-family: var(--blume-font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--blume-accent);
+  border: 1px solid color-mix(in srgb, var(--blume-accent) 35%, transparent);
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
+  white-space: nowrap;
+}
+
+/* --- the two lines that differ ------------------------------------------ */
 
 .lane-speaks,
 .lane-adds {
-  grid-column: 2;
   margin: 0.9rem 0 0;
   line-height: 1.6;
   color: var(--blume-muted-foreground);
   max-width: 46rem;
-}
-
-.lane-speaks {
-  grid-row: 3;
-}
-
-.lane-adds {
-  grid-row: 4;
 }
 
 .lane-speaks strong {
@@ -139,7 +245,7 @@
   white-space: nowrap;
 }
 
-/* --- the caption -------------------------------------------------------- */
+/* --- the caption --------------------------------------------------------- */
 
 .integrations-caption {
   margin: 0;
@@ -155,36 +261,49 @@
   font-weight: 600;
 }
 
-/* --- narrow screens ----------------------------------------------------- */
+/* --- narrow screens ------------------------------------------------------ */
 
 @media (max-width: 640px) {
   .lane {
     grid-template-columns: 2rem 1fr;
-    grid-template-rows: repeat(5, auto);
     gap: 0 0.75rem;
   }
 
+  .lane-title,
+  .lane-body {
+    grid-column: 1 / -1;
+  }
+
   .lane-index {
-    grid-row: 1;
+    grid-column: 1 / -1;
+    padding-top: 0;
+  }
+}
+
+/* --- no motion ----------------------------------------------------------- */
+
+/* The shelf stops and becomes something the reader scrolls themselves. */
+@media (prefers-reduced-motion: reduce) {
+  .strip-track {
+    animation: none;
   }
 
-  .lane-title {
-    grid-column: 1 / -1;
-    grid-row: 2;
+  .strip {
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-mask-image: none;
+    mask-image: none;
   }
 
-  .chips {
-    grid-column: 1 / -1;
-    grid-row: 3;
+  .strip::-webkit-scrollbar {
+    display: none;
   }
 
-  .lane-speaks {
-    grid-column: 1 / -1;
-    grid-row: 4;
+  .strip-half {
+    flex: none;
   }
 
-  .lane-adds {
-    grid-column: 1 / -1;
-    grid-row: 5;
+  .strip-half[aria-hidden="true"] {
+    display: none;
   }
 }

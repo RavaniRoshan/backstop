@@ -80,6 +80,13 @@ All notable changes to Backstop should be documented in this file.
   two endpoint shapes Backstop forwards to. The headline is shorter and set
   much larger, because a headline that reads at that size cannot be a
   sentence.
+- **The integrations section is drawn four ways, because the four lanes are
+  not the same shape.** A lane that names two things — OpenAI and Anthropic —
+  gets cards, because two things you choose between deserve to be chosen
+  between properly, and a "priced" tag beside its name. The two lanes that
+  name seven and ten get a shelf you pull from: a strip of the real marks
+  that scrolls and fades out at both ends, in opposite directions. The lane
+  that names three cloud gateways gets cards again.
 - **The feature list is a bento.** [Aceternity](https://ui.aceternity.com)'s
   grid — three columns of eighteenrem rows, each card a bordered panel with
   the content at the bottom and the whole block sliding to the right on
@@ -90,6 +97,11 @@ All notable changes to Backstop should be documented in this file.
 - **The dithered hero field is gone.** It was a nice effect and the wrong
   one: a full-screen halftone behind a headline is decoration where the
   headline should be.
+- **Five brand marks stopped disappearing.** A path with no `fill` of its own
+  paints black — the SVG default — and the Together AI mark draws its
+  lettering that way, so on the dark theme the wordmark was three coloured
+  blobs and no name. Unfilled paths are now given the current colour, like a
+  mark that has one flat colour already was.
 
 - **The real brand marks.** The marketing page now draws the actual logos of
   the tools it talks about — the agents on the left of the wiring diagram, the
