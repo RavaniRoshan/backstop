@@ -36,7 +36,7 @@ const exists = async (path) => {
 
 // The site may be built for a subdirectory (GitHub Pages serves a project
 // site from one), so the prefix is stripped before a path is resolved.
-const BASE = (process.env.SITE_BASE ?? "/backstop").replace(/\/$/, "");
+const BASE = (process.env.SITE_BASE ?? "").replace(/\/$/, "");
 
 const pages = await walk(dist);
 const broken = [];

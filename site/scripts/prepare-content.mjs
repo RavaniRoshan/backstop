@@ -123,9 +123,9 @@ function firstParagraph(body) {
  * a different page. A link that leaves the docs folder — a source file, an
  * examples directory — points at the repository on GitHub.
  */
-// The same base the site is built with. GitHub Pages serves a project site
-// from a subdirectory, so every route the site links to carries the prefix.
-const SITE_BASE = (process.env.SITE_BASE ?? "/backstop").replace(/\/$/, "");
+// The same base the site is built with: empty for a site at the root of its
+// host, a prefix for one that lives in a subdirectory.
+const SITE_BASE = (process.env.SITE_BASE ?? "").replace(/\/$/, "");
 const DOC_ROUTES = {
   base: `${SITE_BASE}/docs`,
   repo: "https://github.com/RavaniRoshan/backstop",

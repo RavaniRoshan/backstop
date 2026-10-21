@@ -1,0 +1,71 @@
+name: Deploy the site
+
+# The marketing page and the documentation site, published to Cloudflare Pages
+# by GitHub Actions. The same shape as the other sites in this account: build
+# the static output, then hand it to wrangler.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: cloudflare-pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: build and deploy
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: site
+    steps:
+      # Before anything expensive, and before checkout, because a missing secret
+      # is the one failure guaranteed to make the last step fail. Wrangler
+      # reports it as "set a CLOUDFLARE_API_TOKEN" long after two builds and an
+      # npm ci have already run. This turns it into a named failure in seconds.
+      #
+      # Secrets cannot be read in a step-level `if:`, so they are passed as env
+      # and checked in the shell. Never echoed.
+      - name: Check deployment secrets
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          missing=""
+          for name in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID; do
+            if [ -z "${!name}" ]; then
+              missing="$missing $name"
+            fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error title=Deployment secrets missing::$missing is not set on this repository."
+            echo "::error::Add it under Settings -> Secrets and variables -> Actions -> New repository secret."
+            exit 1
+          fi
+          echo "Deployment secrets are present."
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Build
+        run: npm run build
+        env:
+          SITE_URL: https://backstop-b5g.pages.dev
+      - name: Check the internal links
+        run: npm run check:links
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@9acf94ace14e7dc412b076f2c5c20b8ce93c79cd # v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy dist --project-name=backstop --branch=main

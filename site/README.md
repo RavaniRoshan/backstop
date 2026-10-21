@@ -12,6 +12,9 @@ by hand in that script, and the body is copied through with its links
 rewritten for the site. The documents themselves stay as they are, because
 they are also read on GitHub.
 
+The site is published at <https://backstop-b5g.pages.dev>, and
+`backstop-b5g.pages.dev/docs` is the documentation.
+
 ## Running it
 
 ```bash
@@ -23,6 +26,18 @@ npm run verify   # build, then check every internal link resolves
 
 Node 22.19 or newer. The site is static: `dist/` is a folder of files that any
 host can serve.
+
+## Deploying it
+
+`.github/workflows/deploy.yml` builds the site and hands it to Cloudflare
+Pages. It needs two repository secrets, `CLOUDFLARE_API_TOKEN` and
+`CLOUDFLARE_ACCOUNT_ID`; the workflow checks for them before it builds, so a
+missing one fails in seconds with a named error instead of after two builds.
+
+The site is built for the root of whatever host serves it. A deployment that
+lives in a subdirectory sets `SITE_BASE` to that prefix, and every link in the
+site follows it — the framework's own, the marketing page's, and the ones
+`prepare-content.mjs` rewrites into the documents.
 
 ## What is in here
 

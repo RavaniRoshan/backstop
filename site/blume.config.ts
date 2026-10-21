@@ -25,12 +25,12 @@ export default defineConfig({
   // The docs are mounted under /docs, so the marketing pages own the root.
   basePath: "/docs",
 
-  // GitHub Pages serves a project site from a subdirectory, so the whole
-  // site is built with that prefix. Set SITE_BASE="" when the site is
-  // published at a domain's root instead.
+  // The site is built for the root of whatever host serves it. A deployment
+  // that lives in a subdirectory — a GitHub Pages project site, say — sets
+  // SITE_BASE to that prefix, and every link in the site follows it.
   deployment: {
-    site: process.env.SITE_URL ?? "https://ravanishoshan.github.io",
-    base: process.env.SITE_BASE ?? "/backstop",
+    site: process.env.SITE_URL ?? "https://backstop.pages.dev",
+    base: process.env.SITE_BASE ?? "",
   },
 
   content: {
