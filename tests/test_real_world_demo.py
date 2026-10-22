@@ -131,7 +131,9 @@ def _line_for(text: str, label: str) -> str | None:
 )
 def test_every_scenario_names_the_endpoint_it_reproduces(name: str, expected: str):
     """Each scenario is one of the four kinds of server, and says which."""
-    from demos.real_world.catalogue import SCENARIOS_BY_KEY
+    # Imported here rather than at the top: the demo is a script, not a
+    # package, and it is found by the path this module sets up.
+    from catalogue import SCENARIOS_BY_KEY
 
     scenario = SCENARIOS_BY_KEY[name]
     assert scenario.endpoint.label == expected
