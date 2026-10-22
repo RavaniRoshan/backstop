@@ -67,3 +67,6 @@ videos/backstop-reel/renders/
 # pointed at a plan file which was deleted.
 fix_wrapper.py
 /TODO.md
+
+# The real-world demo's output — a ledger and an audit log per run.
+demos/real_world/out/

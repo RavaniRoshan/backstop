@@ -222,6 +222,26 @@ sinks are live.
 
 ![The built-in dashboard, showing the demo workload with synthetic traffic](docs/assets/dashboard-dark.png)
 
+### Seeing it in a real situation
+
+`backstop dashboard --demo` is synthetic traffic against a synthetic
+endpoint. To watch the same dashboard in front of a situation that actually
+happened — a multi-tenant SaaS with one customer in a loop, an agent pipeline
+that ping-ponged for eleven days and cost $47,000, a RAG bot that retrieved
+eight chunks it did not need — there is a demo that reproduces five of them:
+
+```bash
+python demos/real_world/run.py --list       # the scenarios and the endpoint matrix
+python demos/real_world/run.py              # the headline scenario
+python demos/real_world/run.py --all        # all five, in order
+```
+
+It covers all four kinds of server — the provider's own API, inference servers
+you run, managed inference, and cloud gateways — because the point of the
+product is that the controls do not change with the provider. The traffic is
+simulated; the rates, the token counts and the prices are the real ones.
+[demos/real_world/README.md](demos/real_world/README.md) has the rest.
+
 ### What it shows
 
 | Surface | What it answers |
@@ -572,6 +592,7 @@ See [docs/benchmarks.md](docs/benchmarks.md).
 | [docs/frameworks.md](docs/frameworks.md) | The framework adapters |
 | [docs/integrations.md](docs/integrations.md) | Pointing Backstop at any OpenAI-compatible server |
 | [docs/dashboard.md](docs/dashboard.md) | The built-in dashboard |
+| [demos/real_world/README.md](demos/real_world/README.md) | Five production failures reproduced against the live dashboard |
 | [docs/benchmarks.md](docs/benchmarks.md) | How the overhead numbers are measured |
 | [docs/benchmark-results-2026-10-20.md](docs/benchmark-results-2026-10-20.md) | The current committed overhead snapshot, with its conditions |
 | [docs/benchmark-results-2026-07-20.md](docs/benchmark-results-2026-07-20.md) | The superseded snapshot, kept for history |

@@ -11,6 +11,26 @@ All notable changes to Backstop should be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **A real-world demo** (`demos/real_world/`) that reproduces five documented
+  production failures against the live dashboard: a multi-tenant SaaS where one
+  customer's agent loop burns $10,000 overnight, an agent pipeline that
+  ping-ponged for eleven days and cost $47,000, a retry storm against a
+  self-hosted vLLM server, a RAG bot that retrieved eight chunks it did not
+  need, and a $50,000 a month gateway bill nobody could attribute to a team.
+  One command, no key, no network, no bill:
+
+  ```bash
+  python demos/real_world/run.py --all
+  ```
+
+  The traffic is simulated; the rates, the token counts and the prices are the
+  real ones — DeepInfra's own rate card, the numbers in the incident
+  write-ups — so the dollars on screen are the dollars the incident cost. All
+  four kinds of server are covered, because the point of the product is that
+  the controls do not change with the provider.
+
 ### Dashboard
 
 - **Round axis ticks on every chart** (1/2/5 × 10ⁿ steps) and **one formatter
