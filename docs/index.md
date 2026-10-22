@@ -16,6 +16,7 @@ queue is better than a rejection, and how much a guardrail is allowed to cost.
 | Stop a runaway agent in the next ten minutes | [Quickstart](quickstart.md) |
 | Install it, including air-gapped | [Installing Backstop](install.md) |
 | See what it does before you install it | [The built-in dashboard](dashboard.md) |
+| Run the live demo (instructor guide) | [The real-world demo](../demos/real_world/demo.md) |
 | Understand how it fits together | [Architecture](architecture.md) |
 
 ## How it works

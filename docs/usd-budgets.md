@@ -207,6 +207,8 @@ backstop budget --ledger ledger.jsonl --usd 500.00
 # When does the budget run out, at the burn rate the ledger measured?
 backstop forecast --ledger ledger.jsonl --usd 500.00 --horizon 3600
 
+`forecast` reads a ledger's timestamps and works on every supported Python version (3.10, 3.11, 3.12) — timestamps ending in `Z` or an explicit offset are both accepted.
+
 # What did the runaway-spend detectors see?
 backstop detect --ledger ledger.jsonl
 ```
