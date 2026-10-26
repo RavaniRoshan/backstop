@@ -40,11 +40,48 @@ export default defineConfig({
     pages: "pages",
   },
 
+  // Analytics: hosted Plausible (privacy-first, cookieless, no banner). Swap
+  // the data-domain for the production host and replace with GA4 if funnels
+  // are needed. See research/backstop-ph-launch-readiness.md §2.7.
+  analytics: {
+    scripts: [
+      {
+        src: "https://plausible.io/js/script.js",
+        strategy: "defer",
+        attributes: { "data-domain": "ravaniroshan.github.io/backstop" },
+      },
+    ],
+  },
+
+  // SEO: X attribution, Organization + SoftwareApplication JSON-LD. The
+  // `x.handle` should be the project's real X account (without @).
+  seo: {
+    x: { handle: "RavaniRoshan", creator: "RavaniRoshan" },
+    organization: {
+      logo: "/mark.svg",
+      sameAs: [
+        "https://github.com/RavaniRoshan/backstop",
+        "https://x.com/RavaniRoshan",
+      ],
+    },
+    software: {
+      license: "MIT",
+      operatingSystem: "Python 3.10+",
+      price: 0,
+      applicationCategory: "DeveloperApplication",
+      sameAs: [
+        "https://github.com/RavaniRoshan/backstop",
+        "https://pypi.org/project/backstop-ai/",
+      ],
+    },
+    og: { enabled: true },
+  },
+
   theme: {
     // The site's one accent, lifted for the dark theme so it still carries.
     accent: { light: "#ff6600", dark: "#ff7d26" },
     radius: "md",
-    mode: "system",
+    mode: "dark",
     fonts: {
       display: "inter-tight",
       body: "inter",
@@ -75,6 +112,7 @@ export default defineConfig({
   // not a structure. These are the four questions a reader actually has.
   navigation: {
     actions: [
+      { label: "Docs", href: "/docs" },
       { label: "Guides", href: "/docs/quickstart" },
       { label: "Reference", href: "/docs/compatibility" },
     ],

@@ -174,6 +174,25 @@ const notDoing = [
   },
 ];
 
+// Build-time social proof: GitHub stars, so the count is always current
+// without shipping any client JavaScript. Falls back to a neutral label if
+// the fetch fails (e.g. offline build).
+let githubStars: number | null = null;
+try {
+  const res = await fetch(
+    "https://api.github.com/repos/RavaniRoshan/backstop",
+    { headers: { Accept: "application/vnd.github+json" } },
+  );
+  if (res.ok) {
+    const data = await res.json();
+    githubStars = typeof data.stargazers_count === "number"
+      ? data.stargazers_count
+      : null;
+  }
+} catch {
+  githubStars = null;
+}
+
 const faqs = [
   {
     q: "Does this slow my requests down?",
@@ -195,6 +214,22 @@ const faqs = [
     q: "Do I need Prometheus?",
     a: "No. The built-in dashboard reads the process's own state and needs nothing installed beyond the standard library. Prometheus and OpenTelemetry are there if you want them, and the dashboard tells you whether they are live.",
   },
+  {
+    q: "Where does my data go?",
+    a: "Nowhere, unless you ask. Backstop runs in your process: no hosted control plane, no collector, no upload. The optional spend ledger writes a local NDJSON file on the machine that made the requests, and you choose the path.",
+  },
+  {
+    q: "Can I self-host the dashboard?",
+    a: "It is already self-hosted — it is part of the package and binds to loopback. Expose it further with a bearer token (--host 0.0.0.0 --token …). There is nothing to deploy.",
+  },
+  {
+    q: "What about data residency and compliance?",
+    a: "Because nothing leaves your process, residency is whatever your own deployment already is. Backstop ships no SaaS and stores no telemetry; audits are hash-chained locally.",
+  },
+  {
+    q: "How is this different from LiteLLM, Portkey or Helicone?",
+    a: "Those are gateways: your traffic goes through their server, and the guardrail lives on the network path. Backstop is in-process — the limits run inside the process that calls the model, so there is no network hop, no second place to operate, and no signup. Use a gateway if you need to route between providers; use Backstop if you want a hard ceiling on a specific agent.",
+  },
 ];
 ---
 
@@ -207,6 +242,11 @@ const faqs = [
   fontCssVars={data.fontCssVars}
   themeMode={config.theme.mode}
   searchEnabled={config.search.enabled}
+  siteUrl={data.config.site}
+  ogEnabled={data.config.og.enabled}
+  analytics={data.config.analytics}
+  x={data.config.x}
+  structuredDataEnabled={data.config.structuredData}
   page={{
     title: "Backstop — hard limits for AI agents",
     description: config.description,
@@ -224,8 +264,9 @@ const faqs = [
   <TilesLoader />
 
   <!-- Hero ------------------------------------------------------------- -->
-  <section class="hero">
-    <div class="wrap hero-grid">
+  <section class="hero mesh grain" style="position: relative; overflow: hidden;">
+    <div class="grid-bg" style="position: absolute; inset: 0; pointer-events: none;"></div>
+    <div class="wrap hero-grid" style="position: relative; z-index: 1;">
       <div class="hero-copy">
         <p class="eyebrow" data-reveal="hero">In-process guardrails for AI agents</p>
         <h1 class="display" data-reveal="hero">
@@ -241,12 +282,70 @@ const faqs = [
           <a class="btn btn-quiet" href={doc("/docs/quickstart")}>Read the quickstart</a>
         </div>
         <p class="mono" data-reveal="hero">
+          <span style="color: var(--blume-muted-foreground);">
+            Free and open source · MIT licensed · up and running in ~30 seconds.
+          </span>{" "}
           Prefer to look first? <a class="link" href={doc("/docs/dashboard")}>The
           dashboard</a> runs on synthetic traffic, with no keys and no network.
         </p>
       </div>
       <div class="hero-visual" data-reveal="hero">
         <RequestPath />
+      </div>
+    </div>
+  </section>
+
+  <!-- 00 Up and running -------------------------------------------------- -->
+  <section class="section-tight" id="quickstart" style="padding-top: clamp(2rem, 5vw, 3rem);">
+    <div class="wrap">
+      <p class="eyebrow" data-reveal>00 — Up and running</p>
+      <h2 class="h2" data-reveal style="margin: 0.9rem 0 0; max-width: 24ch;">
+        Three steps. No key, no account, no network.
+      </h2>
+      <p class="lead" data-reveal style="margin-top: 1.1rem;">
+        Install the package, run the keyless proof, and watch a runaway loop get
+        stopped before a single request leaves your machine.
+      </p>
+      <div class="grid-2" style="margin-top: 2.5rem;">
+        <div data-reveal>
+          <p class="num">Step 01</p>
+          <h3 class="h3" style="margin: 0.5rem 0 0.5rem;">Install.</h3>
+          <p class="prose" style="margin: 0 0 1.25rem;">
+            One package, standard library plus httpx. Python 3.10 or newer.
+          </p>
+          <Install />
+        </div>
+        <div data-reveal>
+          <p class="num">Step 02</p>
+          <h3 class="h3" style="margin: 0.5rem 0 0.5rem;">Run the proof.</h3>
+          <p class="prose" style="margin: 0 0 1.25rem;">
+            <code class="mono">backstop verify</code> wraps a real client against a
+            local mock transport and blocks a runaway loop. No API key needed.
+          </p>
+          <div class="terminal">
+            <div class="terminal-head">$ backstop verify</div>
+            <pre style="margin: 0; padding: 1rem; font-size: 0.85rem; line-height: 1.5;">Allowed calls     2
+Blocked calls     8
+Tokens saved      2,000
+Wall-clock overhead 0.08 ms
+
+Status: VERIFIED (real wrap enforcement active)</pre>
+          </div>
+        </div>
+      </div>
+      <div data-reveal style="margin-top: 2.5rem;">
+        <p class="num">Step 03</p>
+        <h3 class="h3" style="margin: 0.5rem 0 0.5rem;">See it.</h3>
+        <p class="prose" style="margin: 0 0 1.25rem; max-width: 40rem;">
+          Eight of ten runaway calls blocked before dispatch, against a 500-token
+          budget. The two that were allowed completed inside it. Nothing was
+          billed, because nothing was sent.
+        </p>
+        <p class="prose">
+          <a class="link" href={doc("/docs/quickstart")}>Read the quickstart</a>
+          ·
+          <a class="link" href={doc("/docs")}>Browse the documentation</a>
+        </p>
       </div>
     </div>
   </section>
@@ -456,13 +555,17 @@ const faqs = [
           <span>backstop dashboard</span>
           <span style="margin-left: auto;">demo workload</span>
         </div>
-        <img
-          src={doc("/dashboard.png")}
-          alt="The Backstop dashboard, showing a demo workload: budget remaining, token spend, calls prevented, request rate, latency, concurrency and breaker state as tiles, with throughput and budget-burn charts, per-session rows, an outcome mix, enforcement events and runaway-spend signals below."
-          width="1440"
-          height="900"
-          loading="lazy"
-        />
+        <picture>
+          <source srcset={doc("/dashboard.avif")} type="image/avif" />
+          <source srcset={doc("/dashboard.webp")} type="image/webp" />
+          <img
+            src={doc("/dashboard.png")}
+            alt="The Backstop dashboard, showing a demo workload: budget remaining, token spend, calls prevented, request rate, latency, concurrency and breaker state as tiles, with throughput and budget-burn charts, per-session rows, an outcome mix, enforcement events and runaway-spend signals below."
+            width="1440"
+            height="900"
+            loading="lazy"
+          />
+        </picture>
       </div>
       <div class="stat-grid" style="margin-top: 2rem;">
         <div class="stat" data-reveal>
@@ -566,6 +669,42 @@ const faqs = [
     </div>
   </section>
 
+  <!-- Social proof -------------------------------------------------------- -->
+  <section class="section-tight" id="proof-stack">
+    <div class="wrap">
+      <p class="eyebrow" data-reveal>10 — Proof you can check</p>
+      <h2 class="h2" data-reveal style="margin: 0.9rem 0 0; max-width: 24ch;">
+        Numbers, not adjectives.
+      </h2>
+      <p class="lead" data-reveal style="margin-top: 1.1rem;">
+        Backstop ships no customer logos yet. It ships things you can verify
+        yourself in thirty seconds.
+      </p>
+      <div class="stat-grid" style="margin-top: 2.5rem;">
+        <div class="stat" data-reveal>
+          <b>{githubStars !== null ? `★ ${githubStars}` : "Open source"}</b>
+          <span>Stars on GitHub. MIT licensed, inspect everything.</span>
+        </div>
+        <div class="stat" data-reveal>
+          <b><span data-count="0.08" data-decimals="2">0.08</span> ms</b>
+          <span>Control-path overhead at p99, measured and published with conditions.</span>
+        </div>
+        <div class="stat" data-reveal>
+          <b>8 / 10</b>
+          <span>Runaway calls blocked before dispatch, against a 500-token budget.</span>
+        </div>
+      </div>
+      <p class="prose" style="margin-top: 2rem;">
+        <a class="link" href="https://github.com/RavaniRoshan/backstop">Star on
+        GitHub</a>
+        ·
+        <a class="link" href="https://pypi.org/project/backstop-ai/">PyPI</a>
+        ·
+        <a class="link" href={doc("/docs")}>Read the docs</a>
+      </p>
+    </div>
+  </section>
+
   <!-- Closing ------------------------------------------------------------ -->
   <section class="section-tight" style="padding-bottom: clamp(4rem, 9vw, 8rem);">
     <div class="wrap">
@@ -584,7 +723,9 @@ const faqs = [
   </section>
 
   <script>
-    import "../src/scripts/motion";
+    // Load the motion bundle on demand so it does not block first paint; the
+    // reveal setup runs as soon as the chunk arrives.
+    import("../src/scripts/motion").catch(() => {});
   </script>
 
   <SiteFooter slot="footer" />

@@ -136,14 +136,14 @@ function rewriteLinks(body) {
     if (/^(https?:|mailto:|#)/.test(target)) return match;
     const [path, hash] = target.split("#");
     const suffix = hash ? `#${hash}` : "";
-    if (/\.mdx?$/.test(path)) {
-      const slug = path.replace(/\.mdx?$/, "").replace(/\/index$/, "");
-      return `](${DOC_ROUTES.base}/${slug}${suffix}${title ?? ""})`;
-    }
     if (path.startsWith("../")) {
       const inRepo = path.replace(/^\.\.\//, "");
       const url = `${DOC_ROUTES.repo}/${inRepo.endsWith("/") ? "tree" : "blob"}/main/${inRepo}`;
       return `](${url}${suffix}${title ?? ""})`;
+    }
+    if (/\.mdx?$/.test(path)) {
+      const slug = path.replace(/\.mdx?$/, "").replace(/\/index$/, "");
+      return `](${DOC_ROUTES.base}/${slug}${suffix}${title ?? ""})`;
     }
     return match;
   });

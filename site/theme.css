@@ -1,36 +1,37 @@
-/* The site's palette.
-   -----------------------------------------------------------------------
-   A paper white, a near-black that reads as ink, and one warm orange that
-   carries every accent: the links, the hover states, the live wires in the
-   diagram, the numbers on the loader.
-
-   The values are `oklch`, because that is where the palette was written and
-   because a hue is easier to nudge in oklch than in hex. The dark theme is
-   the same system on a black ground, with the accent lifted so it still
-   carries on a dark page.
-
-   The marketing pages and the documentation read the same tokens, so the
-   site is one thing rather than two that happen to share a header. */
-
+/* Dark-first agency palette. The dark theme is the primary, premium surface;
+   light is a simpler secondary variant. */
 :root {
-  --blume-background: oklch(1 0 0);
-  --blume-foreground: oklch(0.2316 0.0038 286.0989);
-  --blume-muted: oklch(0.9707 0.0027 286.3504);
-  --blume-muted-foreground: oklch(0.6217 0.0074 286.1818);
-  --blume-border: oklch(0.8652 0.0068 286.2561);
-  --blume-code-background: oklch(0.9886 0.0026 286.3515);
-  --blume-accent: oklch(0.6958 0.2043 43.491);
-  --blume-accent-foreground: oklch(1 0 0);
-  --blume-content-width: 44rem;
+  --blume-background: oklch(0.1 0.005 286);
+  --blume-foreground: oklch(0.96 0.005 286);
+  --blume-muted: oklch(0.16 0.005 286);
+  --blume-muted-foreground: oklch(0.62 0.01 286);
+  --blume-border: oklch(0.22 0.005 286);
+  --blume-code-background: oklch(0.13 0.005 286);
+  --blume-accent: oklch(0.72 0.19 48);
+  --blume-accent-foreground: oklch(0.1 0 0);
+  --blume-content-width: 46rem;
 }
 
 :root[data-theme="dark"] {
-  --blume-background: oklch(0 0 0);
-  --blume-foreground: oklch(0.9707 0.0027 286.3504);
-  --blume-muted: oklch(0.2316 0.0038 286.0989);
-  --blume-muted-foreground: oklch(0.6217 0.0074 286.1818);
-  --blume-border: oklch(0.3171 0 0);
-  --blume-code-background: oklch(0.2006 0.002 286.2209);
-  --blume-accent: oklch(0.7286 0.1823 48.7057);
-  --blume-accent-foreground: oklch(0 0 0);
+  --blume-background: oklch(0.1 0.005 286);
+  --blume-foreground: oklch(0.96 0.005 286);
+  --blume-muted: oklch(0.16 0.005 286);
+  --blume-muted-foreground: oklch(0.62 0.01 286);
+  --blume-border: oklch(0.22 0.005 286);
+  --blume-code-background: oklch(0.13 0.005 286);
+  --blume-accent: oklch(0.72 0.19 48);
+  --blume-accent-foreground: oklch(0.1 0 0);
+  --blume-content-width: 46rem;
+}
+
+:root[data-theme="light"] {
+  --blume-background: oklch(1 0 0);
+  --blume-foreground: oklch(0.18 0.005 286);
+  --blume-muted: oklch(0.96 0.003 286);
+  --blume-muted-foreground: oklch(0.48 0.007 286);
+  --blume-border: oklch(0.9 0.005 286);
+  --blume-code-background: oklch(0.97 0.003 286);
+  --blume-accent: oklch(0.6 0.2 48);
+  --blume-accent-foreground: oklch(1 0 0);
+  --blume-content-width: 46rem;
 }
